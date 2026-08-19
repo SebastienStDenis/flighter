@@ -228,3 +228,105 @@ are reused across carriers, so `DL1234` can resolve to the wrong operator. If yo
 IATA ident, pass `ident_type=designator` at minimum, and prefer resolving it to ICAO first.
 Default behaviour with no `ident_type` is to try to read the string as a registration, which is
 the wrong guess for a commercial flight number.
+
+---
+
+## 2. AeroAPI pricing and Personal-tier limits
+
+Sources:
+<https://www.flightaware.com/commercial/aeroapi/> (tier comparison + full per-query fee table),
+<https://www.flightaware.com/commercial/aeroapi/v4/> (result-set definition),
+<https://discussions.flightaware.com/t/what-is-considered-a-result-set-using-flights/85117>
+(FlightAware staff clarification on `/flights`).
+The portal page <https://www.flightaware.com/aeroapi/portal/usage#pricing> sits behind a login and
+renders the same figures; the public commercial pages above are the citable versions.
+
+### 2.1 Tiers
+
+| | Personal | Standard | Premium |
+| --- | --- | --- | --- |
+| Free monthly allowance | Up to **$5/month** in usage fees (**$10/month** for ADS-B feeders) | $5/month ($10 for feeders) | $5/month ($10 for feeders) |
+| Monthly minimum fee | **No minimum** | **$100/month** | $1,000/month |
+| Result set rate limit | **10 result sets/minute** | 5 result sets/second | 100 result sets/second |
+| Historical flight data | Not included | Included | Included |
+| Alerts API | **Not included** | Included | Included |
+| Volume discounting | Not included | Included | Included |
+| Licence | Personal or academic use only | Business / B2C | Business / B2C / B2B |
+
+Confirmed: Personal free allowance is **$5/month**, rate limit is **10 result sets per minute**,
+no monthly minimum, and the **next tier up (Standard) has a $100/month minimum**. Note the tiers
+are named Personal / Standard / Premium - there is no "Professional" tier.
+
+Two Personal-tier gotchas for a self-hosted tracker:
+
+- Personal is licensed for "storage and distribution of derivative works for **personal or
+  academic purposes only**". A private self-hosted tracker for yourself is fine; publishing it is
+  not.
+- **Alerts are not available on Personal.** Push-style flight events (`POST /alerts`) require
+  Standard or above, so a Personal-tier tracker must poll.
+
+### 2.2 Price for the `/flights/{ident}` class
+
+| Endpoint | Price |
+| --- | --- |
+| `GET /flights/{ident}` | **$0.005 / result set** |
+| `GET /flights/{ident}/canonical` | $0.001 / result set |
+| `GET /flights/search` | $0.050 / result set |
+| `GET /flights/search/advanced` | $0.050 / result set |
+| `GET /flights/search/count` | $0.020 / result set |
+| `GET /flights/{id}/position` | $0.010 / result set |
+| `GET /flights/{id}/track` | $0.012 / result set |
+| `GET /flights/{id}/route` | $0.010 / result set |
+| `GET /flights/{id}/map` | $0.030 / result set |
+| `GET /airports/{id}` class | $0.005 / result set (`/airports`), $0.004 (`/airports/nearby`) |
+
+At $0.005/result set, the **$5 Personal allowance is 1,000 result sets per month** of
+`/flights/{ident}` - and only if every call stays at one page.
+
+### 2.3 What exactly counts as a result set
+
+Quoting <https://www.flightaware.com/commercial/aeroapi/>: "A single query can return multiple
+results, depending on the call type and input. Pricing is based on result sets, with one set
+equaling 15 records."
+
+And <https://www.flightaware.com/commercial/aeroapi/v4/>: "For pricing purposes, a 'result set' is
+defined as 15 results (records). Pricing is per result set... Note: The `max_pages` input
+parameter can be used to limit/control how many result sets will be returned, with one page being
+equivalent to one result set."
+
+FlightAware staff on the forum thread, answering specifically for `/flights`:
+
+- "up to 15 responses (15 responses = 1 page) for it to count as 1 call"
+- "the result is the flight. All of the data points within the flight are not a response/result"
+- "All of the data encompassed within that call is a single result set... it would be charged as 1 page."
+
+So, precisely: **billing is per page returned, where a page holds up to 15 records, and a record
+is one flight object - not one call and not one field.** The consequences:
+
+- A call returning 1 flight costs the same as a call returning 15 flights: 1 result set.
+- A call returning 16 flights costs 2 result sets; 31 flights costs 3.
+- `max_pages` is the cost lever. `max_pages=1` caps any single call at 1 result set.
+- Polling by bare `ident` with no `start`/`end` defaults to ~14 days of flights, which for a daily
+  route is comfortably more than 15 records and therefore **more than one result set per poll**
+  unless you pin `max_pages=1`.
+- The rate limit is also counted in result sets, not requests: on Personal, 10 result sets/minute
+  means a `max_pages=1` call can be made roughly every 6 seconds, but a 3-page call consumes 3 of
+  the 10.
+
+### 2.4 Hard spending cap
+
+**There is no documented self-serve spending cap for AeroAPI v4.** The $5/month free allowance is
+the only automatic control on Personal, and usage past it is billed rather than blocked - nothing
+on the public pricing pages describes a user-settable dollar limit or an auto-disable at $0.
+FlightAware's support material frames AeroAPI subscriptions as user-monitored: it is on you to
+watch the usage graph in the portal.
+
+The "billable query cap" language that turns up in forum threads
+(<https://discussions.flightaware.com/t/price-capping/58088>: "By default once the billable query
+cap is reached the API will decline further requests and no additional queries can be made until
+the next billing cycle") is **FlightXML 3**, the previous generation with fixed subscription
+tiers. Do not carry that assumption into AeroAPI v4.
+
+Practical consequence: enforce the budget in your own code. Count result sets locally, persist the
+month-to-date count, and refuse to call once you cross your chosen ceiling. Treat AeroAPI as
+having no backstop.
