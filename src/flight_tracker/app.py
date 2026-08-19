@@ -31,12 +31,22 @@ async def _dispatch_loop(settings: Settings, stopping: asyncio.Event) -> None:
     Kept apart from the poller so a Google outage delays notifications instead of
     stalling the polling that produces them.
     """
+    from sqlalchemy import select
+
     from .events import dispatch_pending
     from .gcal import CalendarClient
+    from .models import Airport
     from .notify import Notifier
 
+    # Loaded once: the calendar needs an airport's name and zone to write a geocodable
+    # location and a correctly zoned time, and the table is seeded at startup and static
+    # thereafter.
+    async with session_scope() as session:
+        rows = (await session.scalars(select(Airport))).all()
+    airports = {airport.iata: airport for airport in rows}
+
     notifier = Notifier(settings)
-    calendar = CalendarClient(settings)
+    calendar = CalendarClient(settings, airports)
 
     while not stopping.is_set():
         try:
