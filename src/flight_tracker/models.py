@@ -2,7 +2,7 @@
 
 Two ideas shape it. Bookings are what the user (or an email) asserts about a trip and
 are edited freely. Snapshots are what AeroAPI observed, are append-only, and are never
-corrected — change detection is a diff of the newest two rows, so rewriting history
+corrected - change detection is a diff of the newest two rows, so rewriting history
 would silently erase events.
 """
 
@@ -71,9 +71,7 @@ class Airport(Base):
 class Booking(Base):
     __tablename__ = "bookings"
     __table_args__ = (
-        CheckConstraint(
-            "source IN ('email', 'manual')", name="bookings_source_check"
-        ),
+        CheckConstraint("source IN ('email', 'manual')", name="bookings_source_check"),
         CheckConstraint(
             "status IN ('pending_review', 'active', 'completed', 'cancelled', 'archived')",
             name="bookings_status_check",
@@ -149,9 +147,7 @@ class FlightSnapshot(Base):
     """One AeroAPI observation. Append-only: never UPDATE a row in this table."""
 
     __tablename__ = "flight_snapshots"
-    __table_args__ = (
-        Index("flight_snapshots_latest", "booking_id", text("observed_at DESC")),
-    )
+    __table_args__ = (Index("flight_snapshots_latest", "booking_id", text("observed_at DESC")),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     booking_id: Mapped[int] = mapped_column(

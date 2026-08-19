@@ -330,3 +330,118 @@ tiers. Do not carry that assumption into AeroAPI v4.
 Practical consequence: enforce the budget in your own code. Count result sets locally, persist the
 month-to-date count, and refuse to call once you cross your chosen ceiling. Treat AeroAPI as
 having no backstop.
+
+---
+
+## 3. ntfy
+
+Sources: <https://docs.ntfy.sh/publish/>, <https://docs.ntfy.sh/install/>, <https://docs.ntfy.sh/config/>
+
+### 3.1 Publish headers
+
+Publish is a `POST` (or `PUT`) to `<server>/<topic>` with the message body as the raw request body.
+Everything else is a header.
+
+| Purpose | Canonical header | Aliases | Value |
+| --- | --- | --- | --- |
+| Title | `X-Title` | `Title`, `t` | Free text |
+| Priority | `X-Priority` | `Priority`, `prio`, `p` | See table below |
+| Click-through URL | `X-Click` | `Click` | A URL to open when the notification is tapped |
+| Tags / emoji | `X-Tags` | `Tags`, `Tag`, `ta` | Comma-separated list, e.g. `airplane,warning` |
+| Message body (header form) | `X-Message` | `Message`, `m` | Alternative to the request body |
+| Icon | `X-Icon` | `Icon` | URL of the notification icon |
+| Markdown | `X-Markdown` | `Markdown`, `md` | Or send `Content-Type: text/markdown` |
+| Delayed delivery | `X-Delay` | `Delay`, `X-At`, `At`, `X-In`, `In` | Timestamp or duration |
+| Action buttons | `X-Actions` | `Actions`, `Action` | JSON array or short format |
+| Update/clear an existing notification | `X-Sequence-ID` | `Sequence-ID`, `SID` | Sequence id |
+| Attachment by URL | `X-Attach` | `Attach`, `a` | URL |
+| Auth | `Authorization` | - | Only for protected topics |
+
+Priority values - the number and the name are interchangeable:
+
+| ID | Name(s) | Behaviour |
+| --- | --- | --- |
+| 5 | `max`, `urgent` | Long vibration bursts, default sound, pop-over notification |
+| 4 | `high` | Long vibration burst, default sound, pop-over notification |
+| 3 | `default` | Short default vibration and sound - this is the default |
+| 2 | `low` | No vibration or sound; hidden until the drawer is pulled down |
+| 1 | `min` | No vibration or sound; filed under "Other notifications" |
+
+So `X-Priority: 5`, `Priority: urgent`, and `p: 5` are all the same thing.
+
+**Case sensitivity - confirmed insensitive for headers.** Quoting the docs directly: "Parameter
+names are case-insensitive when used in HTTP headers, and must be lowercase when used as query
+parameters in the URL." The docs list them in canonical form (`X-Title`), but `x-title` and
+`TITLE` work identically as headers. The lowercase rule only bites if you switch to the
+query-parameter style (`?title=...&priority=5`).
+
+One encoding note worth knowing before you put a route like `LHR -> JFK` in a title: "ntfy supports
+UTF-8 in HTTP headers, but not every library or programming language does." If non-ASCII shows up
+as `?`, RFC 2047-encode the header, e.g. `=?UTF-8?B?8J+HqfCfh6o=?=` (base64) or
+`=?UTF-8?Q?=C3=84pfel?=` (quoted-printable).
+
+Example call:
+
+```bash
+curl \
+  -H "Title: AA100 gate change" \
+  -H "Priority: high" \
+  -H "Tags: airplane,warning" \
+  -H "Click: https://tracker.lan/flights/AAL100-1234567890-airline-0123" \
+  -d "Now departing gate B22 (was B14). Boarding 18:35." \
+  http://ntfy.lan/flights-a7f3k9q2
+```
+
+### 3.2 Self-hosted docker image
+
+Official image: **`binwiederhier/ntfy`** (amd64, armv6, armv7, arm64).
+
+Config file lives at `/etc/ntfy/server.yml`. The docs are explicit that "the Docker image does not
+contain" that file - you create it on the host and bind-mount it.
+
+```yaml
+services:
+  ntfy:
+    image: binwiederhier/ntfy
+    container_name: ntfy
+    command: ["serve"]
+    environment:
+      - TZ=UTC
+    volumes:
+      - /var/cache/ntfy:/var/cache/ntfy
+      - /etc/ntfy:/etc/ntfy
+    ports:
+      - "80:80"
+    restart: unless-stopped
+```
+
+### 3.3 Minimal `server.yml` for an auth-less private topic on a LAN
+
+The auth-less privacy model is the docs' own: "Because there is no sign-up, the topic is
+essentially a password, so pick something that's not easily guessable." You leave
+`auth-default-access` at its `read-write` default, run no `auth-file`, and rely on (a) the server
+only being reachable on the LAN and (b) a high-entropy topic name.
+
+```yaml
+# /etc/ntfy/server.yml
+base-url: "http://ntfy.lan"          # must match how clients reach it, no trailing slash
+listen-http: ":80"
+
+cache-file: "/var/cache/ntfy/cache.db"
+cache-duration: "12h"
+
+attachment-cache-dir: ""             # attachments off - the tracker only sends text
+behind-proxy: false
+```
+
+That is the whole file. Notes:
+
+- `base-url` is required for the web app and for iOS clients to work; it must exactly match the
+  URL clients use, scheme included.
+- No `auth-file` and no `auth-default-access` line means anonymous read-write on every topic. On a
+  LAN-only bind that is fine; anyone who can reach the port and guess the topic can publish.
+- Pick the topic like a password, e.g. `flights-a7f3k9q2xr`. Do not use `flights`.
+- If you later expose it beyond the LAN, this config is **not** adequate. Switch to
+  `auth-default-access: "deny-all"` plus an `auth-file`, which is what the docs recommend for
+  private instances. `auth-default-access` accepts `read-write` (default), `read-only`,
+  `write-only`, and `deny-all`.

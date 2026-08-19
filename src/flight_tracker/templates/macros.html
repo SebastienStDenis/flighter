@@ -1,0 +1,49 @@
+{# The route rule: origin, destination, and how far along the aircraft is. One hairline
+   carries all three, so the list and the flight page say the same thing at two sizes. #}
+{% macro route(v, names=false) %}
+{% set progress = v.progress_percent %}
+<div class="route{% if progress %} route--live{% endif %}"
+     style="--progress: {{ progress or 0 }}%">
+  <div class="port">
+    <div class="iata">{{ v.booking.origin_iata }}</div>
+    <div class="port-time">{{ at(v.departure, v.origin_tz) }}</div>
+    {% if names %}<div class="port-name">{{ dash(v.origin.name if v.origin) }}</div>{% endif %}
+  </div>
+  <div class="line" aria-hidden="true">
+    <span class="line-mark">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M22 12 13 7.5V2.8a1.3 1.3 0 0 0-2.6 0v4.7L1.4 12v1.7l9-2.6v4.2L7 17.7V19l4.7-1.1L16.4 19v-1.3l-3.4-2.4v-4.2l9 2.6z"
+              transform="rotate(90 12 12)"/>
+      </svg>
+    </span>
+  </div>
+  <div class="port port--in">
+    <div class="iata">{{ v.booking.dest_iata }}</div>
+    <div class="port-time">{{ at(v.arrival, v.dest_tz) }}</div>
+    {% if names %}<div class="port-name">{{ dash(v.dest.name if v.dest) }}</div>{% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+{% macro chip(status) %}
+<span class="chip chip--{{ status.tone }}">{{ status.label }}</span>
+{% endmacro %}
+
+{% macro card(v) %}
+{% set status = v.status %}
+<a class="flight flight--{{ status.tone }}" href="/f/{{ v.booking.id }}">
+  <div class="flight-top">
+    <span class="ident">{{ v.flight_number }}
+      <span class="when">{{ at(v.scheduled_departure, v.origin_tz, with_date=true) }}</span>
+    </span>
+    {{ chip(status) }}
+  </div>
+  {{ route(v) }}
+</a>
+{% endmacro %}
+
+{# A row of the fact list. `tone` colours the value; the label always says what it is. #}
+{% macro fact(name, value, tone="") %}
+<dt>{{ name }}</dt>
+<dd class="{{ tone }}{% if value == missing %} empty{% endif %}">{{ value }}</dd>
+{% endmacro %}
