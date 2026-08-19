@@ -59,9 +59,7 @@ class SnapshotLike(Protocol):
     actual_in: datetime | None
 
 
-def compute_phase(
-    booking: BookingLike, snapshot: SnapshotLike | None, now: datetime
-) -> Phase:
+def compute_phase(booking: BookingLike, snapshot: SnapshotLike | None, now: datetime) -> Phase:
     """The flight's phase at `now`, from the newest snapshot and the booking's schedule.
 
     Order matters. Cancelled outranks everything: a cancelled flight that never left is

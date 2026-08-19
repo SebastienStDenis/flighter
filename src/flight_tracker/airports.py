@@ -61,21 +61,21 @@ async def seed_airports(session: AsyncSession) -> int:
     written = 0
     for start in range(0, len(rows), _SEED_CHUNK_ROWS):
         chunk = rows[start : start + _SEED_CHUNK_ROWS]
-        stmt = insert(Airport).values(chunk)
-        stmt = stmt.on_conflict_do_update(
+        insert_stmt = insert(Airport).values(chunk)
+        upsert = insert_stmt.on_conflict_do_update(
             index_elements=[Airport.iata],
             set_={
-                "icao": stmt.excluded.icao,
-                "name": stmt.excluded.name,
-                "city": stmt.excluded.city,
-                "country": stmt.excluded.country,
-                "latitude": stmt.excluded.latitude,
-                "longitude": stmt.excluded.longitude,
-                "tz": stmt.excluded.tz,
+                "icao": insert_stmt.excluded.icao,
+                "name": insert_stmt.excluded.name,
+                "city": insert_stmt.excluded.city,
+                "country": insert_stmt.excluded.country,
+                "latitude": insert_stmt.excluded.latitude,
+                "longitude": insert_stmt.excluded.longitude,
+                "tz": insert_stmt.excluded.tz,
             },
-        )
-        result = await session.execute(stmt)
-        written += result.rowcount or 0
+        ).returning(Airport.iata)
+        result = await session.execute(upsert)
+        written += len(result.scalars().all())
 
     _tz_cache.clear()
     log.info("seeded %d airports", written)

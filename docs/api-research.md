@@ -445,3 +445,238 @@ That is the whole file. Notes:
   `auth-default-access: "deny-all"` plus an `auth-file`, which is what the docs recommend for
   private instances. `auth-default-access` accepts `read-write` (default), `read-only`,
   `write-only`, and `deny-all`.
+
+---
+
+## 4. Scriptable widget API
+
+Sources: <https://docs.scriptable.app/listwidget/>, <https://docs.scriptable.app/widgetdate/>,
+<https://docs.scriptable.app/widgetstack/>, <https://docs.scriptable.app/keychain/>,
+<https://docs.scriptable.app/filemanager/>, <https://docs.scriptable.app/script/>,
+<https://docs.scriptable.app/config/>
+
+### 4.1 Confirmed signatures
+
+Every member the plan relies on exists. Exact declarations:
+
+| Member | Declaration | Notes |
+| --- | --- | --- |
+| `new ListWidget()` | `new ListWidget()` | |
+| `ListWidget.addDate()` | `addDate(date: Date): WidgetDate` | Returns a `WidgetDate` you then style |
+| `ListWidget.addText()` | `addText(text: string): WidgetText` | |
+| `ListWidget.addStack()` | `addStack(): WidgetStack` | Horizontal by default |
+| `ListWidget.addSpacer()` | `addSpacer(length: number): WidgetSpacer` | Pass `null` for flexible |
+| `ListWidget.addImage()` | `addImage(image: Image): WidgetImage` | |
+| `ListWidget.url` | `url: string` | "The URL will be opened when the widget is tapped." |
+| `ListWidget.refreshAfterDate` | `refreshAfterDate: Date` | "Indicates when the widget can be refreshed again." |
+| `ListWidget.setPadding()` | `setPadding(top: number, leading: number, bottom: number, trailing: number)` | |
+| `ListWidget.spacing` | `spacing: number` | |
+| `ListWidget.backgroundColor` / `backgroundImage` / `backgroundGradient` | | |
+| `ListWidget.addAccessoryWidgetBackground` | `addAccessoryWidgetBackground: bool` | iOS 16+, adaptive background for accessory widgets |
+| `ListWidget.presentSmall/Medium/Large/ExtraLarge()` | returns `Promise` | For in-app preview |
+| `ListWidget.presentAccessoryInline/Circular/Rectangular()` | returns `Promise` | iOS 16+ preview |
+| `WidgetStack.url` | `url: string` | Exists. See the caveat below. |
+| `Keychain.contains()` | `static contains(key: string): bool` | |
+| `Keychain.set()` | `static set(key: string, value: string)` | Encrypted store |
+| `Keychain.get()` | `static get(key: string): string` | **Throws if the key is absent** - guard with `contains()` |
+| `Keychain.remove()` | `static remove(key: string)` | |
+| `FileManager.local()` | `static local(): FileManager` | |
+| `FileManager.iCloud()` | `static iCloud(): FileManager` | Requires iCloud enabled |
+| `fm.cacheDirectory()` | `cacheDirectory(): string` | Instance method on the FileManager, so `FileManager.local().cacheDirectory()` is correct |
+| `fm.documentsDirectory()` | `documentsDirectory(): string` | |
+| `fm.temporaryDirectory()` | `temporaryDirectory(): string` | |
+| `fm.joinPath()` | `joinPath(lhsPath: string, rhsPath: string): string` | |
+| `fm.readString()` / `fm.writeString()` | `readString(filePath: string): string` / `writeString(filePath: string, content: string)` | |
+| `fm.fileExists()` | `fileExists(filePath: string): bool` | |
+| `Script.setWidget()` | `static setWidget(widget: any)` | |
+| `Script.complete()` | `static complete()` | |
+| `Script.name()` | `static name(): string` | |
+| `Script.setShortcutOutput()` | `static setShortcutOutput(value: any)` | |
+
+`WidgetDate` styling methods - all take no arguments and return nothing:
+
+| Method | Docs description | Example output |
+| --- | --- | --- |
+| `applyDateStyle()` | "Display entire date." **This is the default styling.** | `June 3, 2019` |
+| `applyTimeStyle()` | "Display time component of the date." | `11:23PM` |
+| `applyRelativeStyle()` | "Display date as relative to now." | `2 hours, 23 minutes`; `1 year, 1 month` |
+| `applyOffsetStyle()` | "Display date as offset from now." | `+2 hours`; `-3 months` |
+| `applyTimerStyle()` | "Display date as timer counting from now." | `2:32`; `36:59:01` |
+
+`WidgetDate` also carries `date`, `textColor`, `font`, `textOpacity`, `lineLimit`,
+`minimumScaleFactor`, `shadowColor`, `shadowRadius`, `shadowOffset`, and `url`.
+
+### 4.2 `config.widgetFamily`
+
+Quoting <https://docs.scriptable.app/config/>: "Possible values are: `small`, `medium`, `large`,
+`extraLarge`, `accessoryRectangular`, `accessoryInline`, `accessoryCircular`, and `null`."
+
+**`accessoryRectangular` is confirmed present.** `null` is the value when the script is not running
+in a widget at all, so branch on it rather than assuming a family. `extraLarge` requires iPadOS 15;
+the three `accessory*` families require iOS 16+. `config` also exposes `runsInApp`,
+`runsInActionExtension`, `runsWithSiri`, `runsInWidget`, `runsInAccessoryWidget`,
+`runsInNotification`, and `runsFromHomeScreen`, all read-only booleans.
+
+### 4.3 Tap targets - the `url` caveat
+
+`ListWidget.url` and `WidgetStack.url` both exist, but they are not interchangeable across sizes.
+The `WidgetStack.url` doc says: "The URL will be opened when the text is tapped. **This is only
+supported in medium and large widgets. Small widgets can only have a single tap target, which is
+specified by the `url` on the widget.**" The same restriction is documented on `WidgetDate.url` and
+`WidgetText.url`.
+
+So per-row deep links only work on `medium` / `large`. On `small` and on the Lock Screen accessory
+families, set `ListWidget.url` and accept one tap target for the whole widget.
+
+### 4.4 `applyTimerStyle()` with past dates
+
+**It counts up, and it does so silently.** The underlying SwiftUI style (`Text(date, style:
+.timer)`) counts down while the date is in the future and, once the date passes, counts up from it.
+The rendered string carries no sign and no other marker, so `2:32` is ambiguous between "departs in
+2m32s" and "departed 2m32s ago". Scriptable's own example outputs (`2:32`, `36:59:01`) show the
+bare magnitude format.
+
+Consequences for a flight widget:
+
+- Never render a bare `applyTimerStyle()` for a time that may already have passed. Compare against
+  `Date()` in script and switch to a static `addText("Departed")`, or to `applyOffsetStyle()`
+  (which does emit `+2 hours` / `-3 months` with a sign), once the date is behind you.
+- The timer is rendered by the system and ticks without a widget reload, which is exactly why it is
+  worth using - it is the only way to get a live-updating countdown between refreshes. That same
+  property is what makes an unnoticed roll-past-zero persist on screen indefinitely.
+- Set `refreshAfterDate` to the moment the display should change meaning (e.g. the scheduled
+  departure) so the widget reloads and re-decides which style to draw. Note the doc wording:
+  "Indicates when the widget **can** be refreshed again" - WidgetKit treats it as a hint, not a
+  guarantee, and budgets reloads. Do not build logic that assumes a refresh lands on time.
+- Known platform flakiness: `Text(Date(), style: .timer)` in widgets has regressed in past iOS
+  releases (e.g. iOS 16.0 beta 7,
+  <https://developer.apple.com/forums/thread/713008>). Have a static fallback string.
+
+---
+
+## 5. Library versions
+
+Latest stable releases on PyPI, read from `https://pypi.org/pypi/<name>/json` (`info.version`) on
+2026-08-19.
+
+| Package | Version |
+| --- | --- |
+| fastapi | 0.141.1 |
+| uvicorn | 0.52.4 |
+| sqlalchemy | 2.0.52 |
+| alembic | 1.19.1 |
+| asyncpg | 0.31.0 |
+| jinja2 | 3.1.6 |
+| httpx | 0.28.1 |
+| pydantic | 2.13.4 |
+| pydantic-settings | 2.15.0 |
+| anthropic | 0.125.0 |
+| google-api-python-client | 2.198.0 |
+| google-auth-oauthlib | 1.4.0 |
+| airportsdata | 20260803 |
+| python-multipart | 0.0.32 |
+| pytest | 9.1.1 |
+| pytest-asyncio | 1.4.0 |
+| ruff | 0.16.3 |
+| mypy | 2.3.1 |
+
+Note: `airportsdata` uses a date-stamped version scheme (`YYYYMMDD`), not semver - pin it
+explicitly or it will move under you on every rebuild.
+
+---
+
+## Corrections to the plan
+
+Ordered by how much they change the design.
+
+### 1. `fa_flight_id` polling on `/flights/{ident}` - the plan is CORRECT
+
+Verified against the spec, not assumed. `GET /flights/{ident}` accepts an ident, a registration, or
+an `fa_flight_id` in the same path position, and `ident_type` has a literal `fa_flight_id` value.
+The plan's polling path stands. Two refinements rather than corrections:
+
+- Always send `ident_type=fa_flight_id` explicitly. The documented default is to interpret the
+  string as a registration if it can, so leaving it off is a silent-wrong-answer risk, not just an
+  efficiency one.
+- Handle the diversion case. The spec says a diverted flight returns "both the original flight and
+  any diversions... with a duplicate fa_flight_id", so `flights` can hold more than one element
+  even for an `fa_flight_id` lookup. Code that reads `flights[0]` unconditionally will show the
+  pre-diversion leg.
+
+### 2. The cost model is probably wrong in the plan's favour and against it at once
+
+Billing is **per page of up to 15 flight records**, not per call and not per flight. That cuts both
+ways:
+
+- If the plan budgeted per *flight returned*, it over-estimates. Fifteen flights in one page is one
+  result set, $0.005.
+- If the plan budgeted per *call* while polling by bare `ident` with no `max_pages`, it
+  under-estimates - possibly by several times. An ident lookup with no `start`/`end` returns
+  ~14 days of that flight number, which for a daily route is 14+ records and can spill to a second
+  page. **Every call in the tracker should carry `max_pages=1`.** That is the documented cost lever:
+  "one page being equivalent to one result set."
+
+### 3. There is no spending cap to fall back on
+
+If the plan assumes FlightAware will stop serving at the $5 line, that is wrong. Nothing on the
+public pricing pages offers a user-settable cap or an auto-disable for AeroAPI v4; the "billable
+query cap" behaviour that appears in forum answers is FlightXML 3, the previous product. Budget
+enforcement has to live in the tracker: a persisted month-to-date result-set counter and a hard
+refusal past your own ceiling.
+
+Sizing that ceiling: $5 / $0.005 = **1,000 result sets per month**, or ~33/day. One flight polled
+every 5 minutes for a 3-hour window is 36 calls - roughly one flight per day and nothing else.
+Polling every minute across several flights blows the allowance in days. Plan an adaptive interval
+(sparse until T-2h, tighter near departure, stop after `actual_in`).
+
+### 4. Tier naming, and two Personal-tier walls the plan may not account for
+
+The tiers are **Personal / Standard / Premium**. There is no "Professional" tier - if the plan
+names one, it is referring to Standard.
+
+- **Alerts are Standard-tier and above.** If the design mentions AeroAPI push alerts as a
+  cheaper alternative to polling, that path is closed on Personal - and the next tier up carries a
+  **$100/month minimum**, not a per-use fee. Polling is the only Personal-tier option.
+- Personal is licensed for "personal or academic purposes only". Fine for a self-hosted private
+  tracker; not fine if it is ever shared or published.
+
+### 5. Field-level assumptions worth double-checking in the plan
+
+- `departure_delay` / `arrival_delay` are **seconds**. Anything treating them as minutes is off by
+  60x.
+- `filed_altitude` is in **hundreds of feet**.
+- `route_distance` is **statute miles**, not nautical miles.
+- `origin` / `destination` are nested objects and are **nullable** as a whole. `origin.code` may be
+  a plain location string rather than an airport code for position-only flights.
+- `cancelled` does not mean the airline cancelled the flight. The spec: "Flag indicating that the
+  flight is no longer being tracked by FlightAware. There are a number of reasons this could happen
+  including cancellation by the airline, but that will not always be the case." Do not send a
+  "flight cancelled" notification off this flag alone.
+- `codeshares` is ICAO-only; IATA codeshares live in the separate `codeshares_iata`.
+- `operator_icao`, `ident_icao`, `ident_iata` are not in the schema's `required` list - use
+  `.get()`, do not index.
+- `links` is nullable as a whole object, not just `links.next`.
+
+### 6. Ident form
+
+If the plan stores or queries IATA idents (`DL1234`), switch to ICAO (`DAL1234`). The spec: "it is
+highly recommended to specify ICAO flight ident rather than IATA flight ident to avoid ambiguity
+and unexpected results."
+
+### 7. Scriptable: `applyTimerStyle()` on a past date counts up with no sign
+
+If the widget design shows a bare timer for departure, it will keep ticking after departure and
+read identically to a countdown. Gate the style on `date > new Date()` and fall back to
+`applyOffsetStyle()` or static text.
+
+### 8. Scriptable: per-row tap targets do not work on small or Lock Screen widgets
+
+`WidgetStack.url` is "only supported in medium and large widgets". If the plan has tappable
+per-flight rows in a `small` or `accessoryRectangular` widget, that reduces to a single
+`ListWidget.url` for the whole widget.
+
+### 9. ntfy: the topic name is the only secret
+
+Headers are case-insensitive, so no correction needed there. The one thing to get right is that an
+auth-less "private" topic is private only by topic-name entropy and network reach - the docs are
+blunt that "the topic is essentially a password". Generate it, do not name it `flights`.

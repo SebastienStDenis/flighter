@@ -115,7 +115,9 @@ async def read_widget(
     authorize(settings, authorization, token)
     now = datetime.now(UTC)
     rows = await load_flight_rows(session, now)
-    return build_payload(rows, settings=settings, now=now, degraded_reason=await read_degraded(session, now))
+    return build_payload(
+        rows, settings=settings, now=now, degraded_reason=await read_degraded(session, now)
+    )
 
 
 def authorize(settings: Settings, authorization: str | None, token: str | None) -> None:
@@ -197,9 +199,12 @@ def build_payload(
     now: datetime,
     degraded_reason: str | None = None,
 ) -> WidgetPayload:
-    flights = [_flight(booking, snapshot, settings=settings, now=now) for booking, snapshot in rows]
-    flights.sort(key=_relevance)
-    flights = flights[:MAX_FLIGHTS]
+    ranked: list[tuple[int, datetime, WidgetFlight]] = []
+    for booking, snapshot in rows:
+        flight = _flight(booking, snapshot, settings=settings, now=now)
+        ranked.append((_rank(flight.phase), departure_estimate(booking, snapshot), flight))
+    ranked.sort(key=lambda row: (row[0], row[1]))
+    flights = [flight for _, _, flight in ranked[:MAX_FLIGHTS]]
     return WidgetPayload(
         generated_at=now,
         flights=flights,
@@ -294,15 +299,17 @@ def _delayed(snapshot: FlightSnapshot | None) -> bool:
     )
 
 
-def _relevance(flight: WidgetFlight) -> tuple[int, datetime]:
-    """In progress first, then soonest. Landed flights sink below what is still coming."""
-    if flight.phase in PHASES_IN_PROGRESS:
-        rank = 0
-    elif flight.phase == LANDED:
-        rank = 2
-    else:
-        rank = 1
-    return rank, flight.countdown_to or datetime.max.replace(tzinfo=UTC)
+def _rank(phase: Phase) -> int:
+    """In progress first, then what is still coming, then what has already landed.
+
+    Departure time breaks the tie in every band, including for a cancelled flight, which
+    still belongs on the day it was supposed to leave.
+    """
+    if phase in PHASES_IN_PROGRESS:
+        return 0
+    if phase == LANDED:
+        return 2
+    return 1
 
 
 def _refresh_seconds(flights: Sequence[WidgetFlight]) -> int:

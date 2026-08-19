@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block content %}
+
+{% if pending %}
+<a class="banner banner--signal" href="/review">
+  <span>
+    <strong>{{ pending }} booking{{ 's' if pending != 1 }} to check</strong>
+    <p>An email was read but not trusted enough to track on its own.</p>
+  </span>
+</a>
+{% endif %}
+
+{% if budget.tripped %}
+<div class="banner banner--stop">
+  <span>
+    <strong>Status updates are paused</strong>
+    <p>AeroAPI spend has reached the ${{ '%.2f'|format(budget.cap_usd) }} cap for
+      {{ budget.month }}. Times below are the last ones seen.</p>
+  </span>
+</div>
+{% endif %}
+
+{% if not trips and not past %}
+<div class="empty">
+  <strong>Nothing on the board</strong>
+  Forward a booking confirmation, or add a flight by hand.
+  <div class="actions" style="justify-content: center">
+    <a class="btn btn--primary" href="/f/new">Add a flight</a>
+  </div>
+</div>
+{% else %}
+
+{% for trip in trips %}
+<div class="trip-head">
+  <span class="label">
+    {{ day(trip[0].scheduled_departure, trip[0].origin_tz) }}
+    {%- if trip|length > 1 and not same_day(trip[0], trip[-1]) %}
+      to {{ day(trip[-1].scheduled_departure, trip[-1].origin_tz) }}
+    {%- endif %}
+  </span>
+  <span class="trip-who">{{ trip|map(attribute='passenger_name')|unique|join(', ') }}</span>
+</div>
+{% for v in trip %}{{ m.card(v) }}{% endfor %}
+{% endfor %}
+
+<div class="actions">
+  <a class="btn btn--primary" href="/f/new">Add a flight</a>
+</div>
+
+{% if past %}
+<details class="past">
+  <summary>Flown &middot; {{ past|length }}</summary>
+  {% for v in past %}{{ m.card(v) }}{% endfor %}
+</details>
+{% endif %}
+
+{% endif %}
+{% endblock %}

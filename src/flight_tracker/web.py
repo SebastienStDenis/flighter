@@ -78,10 +78,22 @@ class FlightView:
     snapshot: FlightSnapshot | None
     origin: Airport | None
     dest: Airport | None
+    passenger: Passenger | None
 
     @property
     def flight_number(self) -> str:
         return f"{self.booking.marketing_carrier}{self.booking.marketing_number}"
+
+    @property
+    def passenger_name(self) -> str:
+        return self.passenger.display_name if self.passenger else MISSING
+
+    @property
+    def operating_flight(self) -> str | None:
+        booking = self.booking
+        if not booking.operating_carrier:
+            return None
+        return f"{booking.operating_carrier}{booking.operating_number or ''}"
 
     @property
     def origin_tz(self) -> str:
@@ -181,6 +193,19 @@ def duration(delta: timedelta) -> str:
     return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
 
 
+def day(instant: datetime, tz: str) -> str:
+    """`Sat 12 Sep`, the heading a trip is filed under."""
+    return to_local(instant, tz).strftime("%a %-d %b")
+
+
+def same_day(a: FlightView, b: FlightView) -> bool:
+    """Whether two flights depart on the same calendar day, each read at its own airport."""
+    return (
+        to_local(a.scheduled_departure, a.origin_tz).date()
+        == to_local(b.scheduled_departure, b.origin_tz).date()
+    )
+
+
 def at(instant: datetime | None, tz: str, *, with_date: bool = False) -> str:
     """A time at an airport, or the missing marker. Every time on every page uses it."""
     if instant is None:
@@ -199,6 +224,13 @@ def altitude(value: Any) -> str:
     if not isinstance(value, int):
         return MISSING
     return f"FL{value:03d}" if value < 600 else f"{value:,} ft"
+
+
+def distance(value: Any) -> str:
+    """AeroAPI reports route distance in statute miles."""
+    if not isinstance(value, int | float):
+        return MISSING
+    return f"{int(value):,} mi"
 
 
 def group_into_trips(views: Sequence[FlightView]) -> list[list[FlightView]]:
@@ -240,12 +272,19 @@ async def build_views(session: AsyncSession, rows: Iterable[Booking]) -> list[Fl
         for iata in (row.origin_iata, row.dest_iata):
             if iata not in airports:
                 airports[iata] = await get_airport(session, iata)
+    # Loaded up front rather than through booking.passenger: a lazy relationship on an
+    # async session raises rather than emitting the query the template expects.
+    people = await session.execute(
+        select(Passenger).where(Passenger.id.in_({row.passenger_id for row in rows}))
+    )
+    by_id = {person.id: person for person in people.scalars()}
     views = [
         FlightView(
             booking=row,
             snapshot=snapshots.get(row.id),
             origin=airports.get(row.origin_iata),
             dest=airports.get(row.dest_iata),
+            passenger=by_id.get(row.passenger_id),
         )
         for row in rows
     ]
@@ -301,10 +340,14 @@ def create_app(settings: Settings) -> FastAPI:
     templates.env.globals.update(
         at=at,
         dash=dash,
+        day=day,
+        same_day=same_day,
         altitude=altitude,
+        distance=distance,
         duration=duration,
         local_input=local_input,
         missing=MISSING,
+        delay_threshold=DELAY_THRESHOLD,
     )
 
     def page(request: Request, name: str, context: dict[str, Any], **kwargs: Any) -> Response:
@@ -577,8 +620,10 @@ def create_app(settings: Settings) -> FastAPI:
                 "budget": await budget_status(session),
                 # The poller and the Gmail sync each own their own KV keys; this page
                 # reports whatever is in the table rather than asserting a shape.
-                "state": [(row.key, json.dumps(row.value, indent=2, default=str))
-                          for row in state.scalars()],
+                "state": [
+                    (row.key, json.dumps(row.value, indent=2, default=str))
+                    for row in state.scalars()
+                ],
                 "settings": settings,
             },
         )

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Health{% endblock %}
+{% block content %}
+
+<h1>Health</h1>
+
+<div class="tiles">
+  <div class="tile">
+    <span class="label">AeroAPI, {{ budget.month }}</span>
+    <span class="value{{ ' stop' if budget.tripped else '' }}">
+      ${{ '%.2f'|format(budget.spend_usd) }}</span>
+    <span class="hint">of ${{ '%.2f'|format(budget.cap_usd) }}
+      {{ '- polling paused' if budget.tripped else 'cap' }}</span>
+  </div>
+  <div class="tile">
+    <span class="label">Last status check</span>
+    <span class="value">{{ at(last_snapshot, 'UTC') }}</span>
+    <span class="hint">{{ at(last_snapshot, 'UTC', with_date=true) }}</span>
+  </div>
+</div>
+
+<section class="panel">
+  <span class="label">Flights by status</span>
+  <dl class="facts">
+    {% for status in ('active', 'pending_review', 'completed', 'cancelled', 'archived') %}
+    <dt>{{ status.replace('_', ' ')|capitalize }}</dt>
+    <dd{% if not counts.get(status) %} class="empty"{% endif %}>{{ counts.get(status, 0) }}</dd>
+    {% endfor %}
+  </dl>
+</section>
+
+<section class="panel">
+  <span class="label">Worker state</span>
+  <p class="panel-note">The poller and the Gmail sync each keep their own cursor here.</p>
+  {% if state %}
+    {% for key, value in state %}
+    <div class="label">{{ key }}</div>
+    <pre class="state">{{ value }}</pre>
+    {% endfor %}
+  {% else %}
+  <p class="panel-note" style="margin: 0">Nothing has run yet.</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <span class="label">Connected services</span>
+  <dl class="facts">
+    <dt>Gmail</dt><dd class="text">{{ 'configured' if settings.gmail_configured else 'not configured' }}</dd>
+    <dt>Google Calendar</dt><dd class="text">{{ 'configured' if settings.gcal_configured else 'not configured' }}</dd>
+    <dt>AeroAPI</dt><dd class="text">{{ 'configured' if settings.aeroapi_configured else 'not configured' }}</dd>
+    <dt>ntfy</dt><dd class="text">{{ 'configured' if settings.ntfy_configured else 'not configured' }}</dd>
+  </dl>
+</section>
+
+{% endblock %}

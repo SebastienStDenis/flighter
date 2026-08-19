@@ -25,7 +25,6 @@ def test_same_day_domestic() -> None:
 
     assert departure == datetime(2026, 6, 10, 15, 0, tzinfo=UTC)
     assert arrival == datetime(2026, 6, 10, 20, 30, tzinfo=UTC)
-    assert arrival - departure == (arrival - departure)
     assert (arrival - departure).total_seconds() == 5.5 * 3600
     assert same_local_date(departure, arrival, JFK)
 

@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% set s = v.snapshot %}
+{% block title %}{{ v.flight_number }} {{ v.booking.origin_iata }} to {{ v.booking.dest_iata }}{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <div class="flight-top">
+    <span class="ident">{{ v.flight_number }}
+      <span class="when">{{ at(v.scheduled_departure, v.origin_tz, with_date=true) }}</span>
+    </span>
+    {{ m.chip(v.status) }}
+  </div>
+  {{ m.route(v, names=true) }}
+  <div class="route-meta">
+    {%- if v.progress_percent is not none -%}
+      {{ v.progress_percent }}% flown
+    {%- elif v.delay.total_seconds() > 0 -%}
+      {{ duration(v.delay) }} behind schedule
+    {%- else -%}
+      {{ dash(v.passenger_name) }}
+    {%- endif -%}
+  </div>
+</div>
+
+<section class="panel">
+  <span class="label">Departure &middot; {{ v.booking.origin_iata }}</span>
+  <dl class="facts">
+    {{ m.fact("Airport", dash(v.origin.name if v.origin else none), "text") }}
+    {{ m.fact("Timezone", v.origin_tz, "text") }}
+    {{ m.fact("Terminal", dash(s.terminal_origin if s else none), "strong") }}
+    {{ m.fact("Gate", dash(s.gate_origin if s else none), "strong") }}
+    {{ m.fact("Scheduled", at(v.scheduled_departure, v.origin_tz)) }}
+    {{ m.fact("Estimated", at(s.estimated_out if s else none, v.origin_tz),
+              "signal" if v.delay >= delay_threshold else "") }}
+    {{ m.fact("Actual", at(s.actual_out if s else none, v.origin_tz)) }}
+    {{ m.fact("Took off", at(s.actual_off if s else none, v.origin_tz)) }}
+  </dl>
+</section>
+
+<section class="panel">
+  <span class="label">Arrival &middot; {{ v.booking.dest_iata }}</span>
+  <dl class="facts">
+    {{ m.fact("Airport", dash(v.dest.name if v.dest else none), "text") }}
+    {{ m.fact("Timezone", v.dest_tz, "text") }}
+    {{ m.fact("Terminal", dash(s.terminal_destination if s else none), "strong") }}
+    {{ m.fact("Gate", dash(s.gate_destination if s else none), "strong") }}
+    {{ m.fact("Baggage", dash(s.baggage_claim if s else none), "strong") }}
+    {{ m.fact("Scheduled", at(v.scheduled_arrival, v.dest_tz)) }}
+    {{ m.fact("Estimated", at(s.estimated_in if s else none, v.dest_tz)) }}
+    {{ m.fact("Landed", at(s.actual_on if s else none, v.dest_tz)) }}
+    {{ m.fact("At the gate", at(s.actual_in if s else none, v.dest_tz)) }}
+  </dl>
+</section>
+
+<section class="panel">
+  <span class="label">Aircraft</span>
+  <dl class="facts">
+    {{ m.fact("Type", dash(s.aircraft_type if s else none)) }}
+    {{ m.fact("Registration", dash(s.registration if s else none)) }}
+    {{ m.fact("Filed route", dash(v.raw('route')), "text") }}
+    {{ m.fact("Filed altitude", altitude(v.raw('filed_altitude'))) }}
+    {{ m.fact("Distance", distance(v.raw('route_distance'))) }}
+    {{ m.fact("Seats, first", dash(v.raw('seats_cabin_first'))) }}
+    {{ m.fact("Seats, business", dash(v.raw('seats_cabin_business'))) }}
+    {{ m.fact("Seats, economy", dash(v.raw('seats_cabin_coach'))) }}
+  </dl>
+</section>
+
+<section class="panel">
+  <span class="label">Booking</span>
+  <dl class="facts">
+    {{ m.fact("Passenger", v.passenger_name, "text") }}
+    {{ m.fact("Confirmation", dash(v.booking.confirmation_code), "strong") }}
+    {{ m.fact("Seat", dash(v.booking.seat), "strong") }}
+    {{ m.fact("Operated as", dash(v.operating_flight)) }}
+    {{ m.fact("Tracked as", dash(v.booking.aeroapi_ident)) }}
+    {{ m.fact("Added", "from email" if v.booking.source == 'email' else "by hand", "text") }}
+    {{ m.fact("Last checked", at(s.observed_at if s else none, v.origin_tz, with_date=true)) }}
+    {% if v.booking.notes %}{{ m.fact("Notes", v.booking.notes, "text") }}{% endif %}
+  </dl>
+</section>
+
+<section class="panel">
+  <span class="label">What has changed</span>
+  {% if events %}
+  <ul class="timeline">
+    {% for e in events %}
+    <li>
+      <div class="event-kind">{{ e.kind.replace('_', ' ')|capitalize }}</div>
+      <div class="event-when">{{ at(e.occurred_at, v.origin_tz, with_date=true) }}</div>
+      <div class="event-change">
+        {{ dash(e.old_value) }} <b>&rarr;</b> <b>{{ dash(e.new_value) }}</b>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="panel-note" style="margin: 0">Nothing has moved since this flight was added.</p>
+  {% endif %}
+</section>
+
+<div class="actions actions--split">
+  <a class="btn" href="/f/{{ v.booking.id }}/edit">Edit</a>
+  <form method="post" action="/f/{{ v.booking.id }}/delete"
+        onsubmit="return confirm('Stop tracking {{ v.flight_number }}?')">
+    <button class="btn btn--danger" type="submit">Stop tracking</button>
+  </form>
+</div>
+
+{% endblock %}

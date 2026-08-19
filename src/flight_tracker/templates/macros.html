@@ -7,7 +7,7 @@
   <div class="port">
     <div class="iata">{{ v.booking.origin_iata }}</div>
     <div class="port-time">{{ at(v.departure, v.origin_tz) }}</div>
-    {% if names %}<div class="port-name">{{ dash(v.origin.name if v.origin) }}</div>{% endif %}
+    {% if names %}<div class="port-name">{{ dash(v.origin.name if v.origin else none) }}</div>{% endif %}
   </div>
   <div class="line" aria-hidden="true">
     <span class="line-mark">
@@ -20,7 +20,7 @@
   <div class="port port--in">
     <div class="iata">{{ v.booking.dest_iata }}</div>
     <div class="port-time">{{ at(v.arrival, v.dest_tz) }}</div>
-    {% if names %}<div class="port-name">{{ dash(v.dest.name if v.dest) }}</div>{% endif %}
+    {% if names %}<div class="port-name">{{ dash(v.dest.name if v.dest else none) }}</div>{% endif %}
   </div>
 </div>
 {% endmacro %}

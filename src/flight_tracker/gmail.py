@@ -168,9 +168,19 @@ async def fetch_message(message_id: str, *, settings: Settings | None = None) ->
     return parse_message(raw, message_id)
 
 
-async def poll_history(
-    session: AsyncSession, *, settings: Settings | None = None
-) -> list[Message]:
+async def profile(*, settings: Settings | None = None) -> str:
+    """The address of the mailbox we are watching, for the `check` command.
+
+    The only call here that raises rather than logging and carrying on: proving the
+    credentials work is the whole point, so the failure text has to reach the caller.
+    """
+    settings = settings or get_settings()
+    api = service(settings)
+    payload = await asyncio.to_thread(lambda: api.users().getProfile(userId="me").execute())
+    return str(payload["emailAddress"])
+
+
+async def poll_history(session: AsyncSession, *, settings: Settings | None = None) -> list[Message]:
     """Everything that has arrived since the stored cursor, already de-duplicated.
 
     The new cursor is held back until commit_history_id is called, so a crash part way

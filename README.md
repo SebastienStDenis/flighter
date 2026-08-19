@@ -37,9 +37,13 @@ screen is labelled with the zone it is local to. `18:40 EDT (JFK)` is unambiguou
 `18:40` is a missed flight.
 
 **The API budget is a circuit breaker, not a dashboard.** AeroAPI's Personal tier is free
-up to $5/month and the next tier up carries a **$100/month minimum**. Polling stops dead
-at a configurable month-to-date estimate, alerts you, and shows a banner. There is no
-configuration in which this quietly drifts into a hundred-dollar bill.
+up to $5/month and the next tier up carries a **$100/month minimum**. FlightAware itself
+offers no spending cap on v4, so the only thing standing between a polling bug and a
+hundred-dollar bill is this service: polling stops dead at a configurable month-to-date
+estimate, pushes an alert, and shows a banner until the next month starts.
+
+Billing is per *page of up to 15 flight records*, not per call, so every request is sent
+with `max_pages=1`. At $0.005 per page the free allowance is exactly 1,000 polls a month.
 
 **The widget countdown is a real timer.** It is drawn with Scriptable's `applyTimerStyle`,
 so it ticks continuously, offline, without the widget refreshing. A countdown rendered as
@@ -58,8 +62,9 @@ It is free up to $5/month of usage, rate-limited to 10 result sets per minute, a
 licensed for personal use only.
 
 > Read the pricing page before you enable anything beyond this service. The tier above
-> Personal has a $100/month minimum with no free allowance. `AEROAPI_MONTHLY_CAP_USD`
-> defaults to `4.00` and stops all polling when month-to-date estimated spend passes it.
+> Personal has a $100/month minimum with no free allowance, and FlightAware provides no
+> cap of its own. `AEROAPI_MONTHLY_CAP_USD` defaults to `4.00` and stops all polling when
+> month-to-date estimated spend passes it. `/health` shows the running total.
 
 ### Google OAuth client (Gmail + Calendar)
 

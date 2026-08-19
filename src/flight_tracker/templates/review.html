@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}Review{% endblock %}
+{% block content %}
+
+<h1>Bookings to check</h1>
+
+{% if not views %}
+<div class="empty">
+  <strong>Queue is clear</strong>
+  Emails the extractor was sure about are already on the list.
+</div>
+{% endif %}
+
+{% for v in views %}
+<div class="panel" id="review-{{ v.booking.id }}">
+  <div class="flight-top">
+    <span class="ident">{{ v.flight_number }}
+      <span class="when">{{ at(v.scheduled_departure, v.origin_tz, with_date=true) }}</span>
+    </span>
+    <span class="chip chip--signal">
+      {% if v.booking.extraction_confidence is not none %}
+        {{ (v.booking.extraction_confidence * 100)|round|int }}% sure
+      {% else %}Unscored{% endif %}
+    </span>
+  </div>
+  {{ m.route(v, names=true) }}
+  <dl class="facts" style="margin-top: .8rem">
+    {{ m.fact("Passenger", v.passenger_name, "text") }}
+    {{ m.fact("Confirmation", dash(v.booking.confirmation_code), "strong") }}
+    {{ m.fact("Seat", dash(v.booking.seat)) }}
+  </dl>
+  <div class="actions actions--split">
+    <button class="btn btn--primary" hx-post="/review/{{ v.booking.id }}/accept"
+            hx-target="#review-{{ v.booking.id }}" hx-swap="outerHTML">Track it</button>
+    <a class="btn" href="/f/{{ v.booking.id }}/edit">Fix details</a>
+    <button class="btn btn--danger" hx-post="/review/{{ v.booking.id }}/reject"
+            hx-target="#review-{{ v.booking.id }}" hx-swap="outerHTML"
+            hx-confirm="Discard this booking?">Discard</button>
+  </div>
+</div>
+{% endfor %}
+
+{% endblock %}
