@@ -1,0 +1,65 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://flights:${POSTGRES_PASSWORD}@db:5432/flights
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - app-data:/app/data
+    # Published on loopback only. Everything from outside arrives through the tunnel,
+    # so the home network never has an inbound port open.
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: flights
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: flights
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./scripts/backup.sh:/usr/local/bin/backup.sh:ro
+      - backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flights -d flights"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ntfy:
+    image: binwiederhier/ntfy
+    restart: unless-stopped
+    command: serve
+    environment:
+      NTFY_BASE_URL: http://ntfy
+      NTFY_CACHE_FILE: /var/cache/ntfy/cache.db
+      # The topic name is the secret; the service is not reachable from outside the
+      # compose network except through whatever the phone subscribes to.
+      NTFY_AUTH_DEFAULT_ACCESS: write-only
+    volumes:
+      - ntfy-cache:/var/cache/ntfy
+      - ntfy-config:/etc/ntfy
+    ports:
+      - "127.0.0.1:8080:80"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    depends_on:
+      - app
+
+volumes:
+  app-data:
+  db-data:
+  backups:
+  ntfy-cache:
+  ntfy-config:
