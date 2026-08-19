@@ -18,8 +18,9 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .airlines import to_icao
 from .config import Settings, get_settings
-from .models import ApiUsage, Booking, FlightSnapshot, KV
+from .models import KV, ApiUsage, Booking, FlightSnapshot
 
 log = logging.getLogger(__name__)
 
@@ -197,7 +198,8 @@ async def ensure_budget(session: AsyncSession, settings: Settings | None = None)
     if not await _latched(session, status.month):
         await _trip(session, status)
     raise BudgetExceeded(
-        f"AeroAPI spend ${status.spend_usd} has reached the ${status.cap_usd} cap for {status.month}"
+        f"AeroAPI spend ${status.spend_usd} has reached the "
+        f"${status.cap_usd} cap for {status.month}"
     )
 
 
@@ -292,7 +294,7 @@ def flight_ident(booking: Booking) -> str:
     """
     if booking.aeroapi_ident:
         return booking.aeroapi_ident
-    carrier = (booking.operating_carrier or booking.marketing_carrier).strip().upper()
+    carrier = to_icao(booking.operating_carrier or booking.marketing_carrier)
     number = (booking.operating_number or booking.marketing_number).strip()
     return f"{carrier}{number.lstrip('0') or number}"
 
@@ -475,6 +477,9 @@ def to_snapshot_fields(flight: dict[str, Any]) -> dict[str, Any]:
     """
     fields: dict[str, Any] = {
         "status_text": _as_text(flight.get("status")),
+        # AeroAPI's `cancelled` means "no longer tracked by FlightAware", which is often
+        # but not always an airline cancellation. It keeps its own name all the way down
+        # so nothing downstream reads it as more certain than it is.
         "cancelled": _as_bool(flight.get("cancelled")),
         "diverted": _as_bool(flight.get("diverted")),
         "progress_percent": _as_int(flight.get("progress_percent")),

@@ -1,0 +1,40 @@
+Subject: Your trip is confirmed: New York to Los Angeles
+From: Delta Air Lines <confirmation@delta.example>
+To: Sebastien St-Denis <sebastien@example.com>
+Date: Fri, 21 Aug 2026 14:22:10 -0400
+Message-ID: <k7qx2m@delta.example>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============2219847380622909467=="
+
+--===============2219847380622909467==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Your trip is confirmed.
+
+Confirmation number: K7QX2M
+DL 1234  New York (JFK) 6:40 PM  ->  Los Angeles (LAX) 10:05 PM
+Saturday, September 12, 2026
+Passenger: SEBASTIEN ST-DENIS   Seat 14C
+
+--===============2219847380622909467==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><head><script type=3D"application/ld+json">{"@context": "http://schema.=
+org", "@type": "FlightReservation", "reservationNumber": "K7QX2M", "reservati=
+onStatus": "http://schema.org/ReservationConfirmed", "underName": {"@type": "=
+Person", "name": "SEBASTIEN ST-DENIS"}, "reservedTicket": {"@type": "Ticket",=
+ "ticketedSeat": {"@type": "Seat", "seatNumber": "14C"}}, "reservationFor": {=
+"@type": "Flight", "flightNumber": "DL1234", "airline": {"@type": "Airline", =
+"name": "Delta Air Lines", "iataCode": "DL"}, "departureAirport": {"@type": "=
+Airport", "name": "John F Kennedy", "iataCode": "JFK"}, "departureTime": "202=
+6-09-12T18:40:00-04:00", "arrivalAirport": {"@type": "Airport", "name": "Los =
+Angeles Intl", "iataCode": "LAX"}, "arrivalTime": "2026-09-12T22:05:00-07:00"=
+}}</script></head><body><h1>Your trip is confirmed</h1><p>Confirmation number=
+ <b>K7QX2M</b></p><table><tr><td>DL 1234</td><td>JFK 6:40 PM</td><td>LAX 10:0=
+5 PM</td></tr></table></body></html>
+
+--===============2219847380622909467==--

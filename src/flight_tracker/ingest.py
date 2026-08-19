@@ -36,6 +36,9 @@ NAME_MATCH_THRESHOLD = 0.87
 # a success because it is the one that still needs a person.
 _OUTCOME_PRECEDENCE = ("review", "created", "duplicate")
 
+# Printed on tickets, never in the passenger list.
+_TITLES = frozenset({"mr", "mrs", "ms", "miss", "mstr", "dr", "prof", "sir", "madam"})
+
 
 async def process_message(
     session: AsyncSession, message: Message, *, settings: Settings | None = None
@@ -158,12 +161,18 @@ def normalise_name(name: str) -> str:
 
 
 def name_key(name: str) -> str:
-    """First and last name only.
+    """First and last name only, in that order.
 
     Middle names, initials, and titles appear on a ticket about half the time and never
-    in the passenger list, so comparing them only ever produces false misses.
+    in the passenger list, so comparing them only ever produces false misses. Airlines
+    also print the surname first, separated by a slash: "ST-DENIS/SEBASTIEN MR".
     """
-    parts = normalise_name(name).split()
+    surname, _, given = name.partition("/")
+    parts = [
+        p
+        for p in normalise_name(f"{given} {surname}" if given else name).split()
+        if p not in _TITLES
+    ]
     if len(parts) <= 1:
         return " ".join(parts)
     return f"{parts[0]} {parts[-1]}"
@@ -172,8 +181,8 @@ def name_key(name: str) -> str:
 def names_match(a: str, b: str) -> bool:
     """Whether two names plausibly belong to the same person.
 
-    Airlines also print the name reversed ("ST DENIS SEBASTIEN"), so a swap of the two
-    ends counts as a match too.
+    Some senders print the name reversed ("TREMBLAY MARIE") with no separator to
+    give the order away, so a swap of the two ends counts as a match too.
     """
     left, right = name_key(a), name_key(b)
     if not left or not right:

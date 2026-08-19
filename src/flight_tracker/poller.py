@@ -129,7 +129,7 @@ async def run_poller(stopping: asyncio.Event) -> None:
     log.info("poller started, ticking every %ss", TICK_SECONDS)
     while not stopping.is_set():
         try:
-            await _tick()
+            await poll_once()
         except Exception:
             log.exception("poll tick failed")
         with contextlib.suppress(TimeoutError):
@@ -137,12 +137,13 @@ async def run_poller(stopping: asyncio.Event) -> None:
     log.info("poller stopped")
 
 
-async def _tick() -> None:
+async def poll_once() -> int:
+    """One tick, and the number of bookings it polled. Also the CLI's manual pass."""
     async with session_scope() as session:
         status = await budget_status(session)
         if status.tripped:
             log.debug("budget breaker tripped for %s; skipping tick", status.month)
-            return
+            return 0
 
         now = datetime.now(UTC)
         bookings = await _claim_due(session, now)
@@ -157,6 +158,7 @@ async def _tick() -> None:
             except Exception:
                 log.exception("polling booking %s failed", booking.id)
                 booking.next_poll_at = now + RETRY_INTERVAL
+        return len(bookings)
 
 
 async def _claim_due(session: AsyncSession, now: datetime) -> list[Booking]:
@@ -195,9 +197,10 @@ async def _poll_booking(session: AsyncSession, booking: Booking, now: datetime) 
 
 
 async def _latest_snapshot(session: AsyncSession, booking: Booking) -> FlightSnapshot | None:
-    return await session.scalar(
+    snapshot: FlightSnapshot | None = await session.scalar(
         select(FlightSnapshot)
         .where(FlightSnapshot.booking_id == booking.id)
         .order_by(FlightSnapshot.observed_at.desc(), FlightSnapshot.id.desc())
         .limit(1)
     )
+    return snapshot

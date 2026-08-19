@@ -1,0 +1,45 @@
+Subject: Your itinerary - Montreal to London via Toronto
+From: Air Canada <noreply@aircanada.example>
+To: Sebastien St-Denis <sebastien@example.com>
+Date: Fri, 21 Aug 2026 14:22:10 -0400
+Message-ID: <rq88tl@aircanada.example>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============0207153614265442606=="
+
+--===============0207153614265442606==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Booking reference RQ88TL
+
+AC 8830  Montreal (YUL) 07:15  ->  Toronto (YYZ) 08:45   3 Oct 2026
+AC 856   Toronto (YYZ) 21:20  ->  London (LHR) 09:05     3 Oct 2026
+Passenger: Sebastien St-Denis
+
+--===============0207153614265442606==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><head><script type=3D"application/ld+json">{"@context": "http://schema.=
+org", "@type": "ReservationPackage", "reservationId": "RQ88TL", "subReservati=
+on": [{"@type": "FlightReservation", "reservationNumber": "RQ88TL", "underNam=
+e": {"@type": "Person", "name": "Sebastien St-Denis"}, "reservedTicket": {"@t=
+ype": "Ticket", "ticketedSeat": {"@type": "Seat", "seatNumber": "21A"}}, "res=
+ervationFor": {"@type": "Flight", "flightNumber": "AC8830", "airline": {"@typ=
+e": "Airline", "name": "Air Canada", "iataCode": "AC"}, "departureAirport": {=
+"@type": "Airport", "iataCode": "YUL"}, "departureTime": "2026-10-03T07:15:00=
+-04:00", "arrivalAirport": {"@type": "Airport", "iataCode": "YYZ"}, "arrivalT=
+ime": "2026-10-03T08:45:00-04:00"}}, {"@type": "FlightReservation", "reservat=
+ionNumber": "RQ88TL", "underName": {"@type": "Person", "name": "Sebastien St-=
+Denis"}, "reservedTicket": {"@type": "Ticket", "ticketedSeat": {"@type": "Sea=
+t", "seatNumber": "34K"}}, "reservationFor": {"@type": "Flight", "flightNumbe=
+r": "AC856", "airline": {"@type": "Airline", "name": "Air Canada", "iataCode"=
+: "AC"}, "departureAirport": {"@type": "Airport", "iataCode": "YYZ"}, "depart=
+ureTime": "2026-10-03T21:20:00-04:00", "arrivalAirport": {"@type": "Airport",=
+ "iataCode": "LHR"}, "arrivalTime": "2026-10-04T09:05:00+01:00"}}]}</script><=
+/head><body><h1>Your itinerary</h1><p>Booking reference <b>RQ88TL</b></p></bo=
+dy></html>
+
+--===============0207153614265442606==--

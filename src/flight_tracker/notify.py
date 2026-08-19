@@ -121,7 +121,11 @@ def event_message(event: FlightEvent, *, origin_tz: str, dest_tz: str) -> str:
         )
     if kind == ARRIVAL_TIME_CHANGED:
         return _moved(
-            event, dest_tz, verb="Arrival moved", fallback="Arrival time changed", now="now arriving"
+            event,
+            dest_tz,
+            verb="Arrival moved",
+            fallback="Arrival time changed",
+            now="now arriving",
         )
     if kind == DEPARTED:
         return _at("Departed", new, origin_tz)

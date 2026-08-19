@@ -17,6 +17,7 @@ from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from sqlalchemy import inspect as sa_inspect
 
 from .config import Settings
 from .models import Airport, Booking, FlightSnapshot
@@ -84,8 +85,6 @@ def _location(airports: Mapping[str, Airport], iata: str) -> str:
 def _passenger_name(booking: Booking) -> str | None:
     """Never triggers a lazy load, which would explode under asyncio; the caller is
     expected to have eager-loaded the relationship."""
-    from sqlalchemy import inspect as sa_inspect
-
     if "passenger" in sa_inspect(booking).unloaded:
         return None
     passenger = booking.passenger
@@ -243,9 +242,9 @@ class CalendarClient:
     def _delete_blocking(self, event_id: str) -> None:
         try:
             self._execute(
-                self._client().events().delete(
-                    calendarId=self._settings.gcal_calendar_id, eventId=event_id
-                )
+                self._client()
+                .events()
+                .delete(calendarId=self._settings.gcal_calendar_id, eventId=event_id)
             )
         except HttpError as exc:
             if exc.resp.status not in _GONE:
