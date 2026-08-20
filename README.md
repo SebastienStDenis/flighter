@@ -115,12 +115,16 @@ docker compose exec app flighter seed-airports
 docker compose exec app flighter check
 ```
 
-Pushing to `main` publishes a multi-arch image to
-`ghcr.io/sebastienstdenis/flighter:latest`, so updating the home stack is
-`docker compose pull && docker compose up -d`. The package GitHub creates on the first
-publish is **private**: either flip it to public in the package settings, or run
-`docker login ghcr.io` once on the desktop with a token carrying `read:packages`, or the
-pull fails with an unhelpful "denied".
+Pushing to `main` publishes a `linux/amd64` + `linux/arm64` image to
+`ghcr.io/sebastienstdenis/flighter:latest`, so updating the home stack is:
+
+```sh
+docker compose pull && docker compose up -d
+```
+
+The package inherits this repository's visibility, so it pulls anonymously with no
+`docker login` on the desktop. Publishing is gated behind a job that re-runs lint, types
+and tests, so a commit that fails CI never ships as `:latest`.
 
 To build locally instead of pulling, `docker compose build` still works from a checkout.
 
