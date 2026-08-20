@@ -241,6 +241,21 @@ here is a pure function over data: timezone normalisation, poll cadence, snapsho
 diffing, calendar event bodies, widget payloads. Migrations are verified separately in CI
 against a real Postgres, forwards and backwards.
 
+### The stylesheet
+
+The screens are built from [Basecoat](https://basecoatui.com), which is shadcn/ui as
+plain HTML classes, so a card or a badge is the library's rather than something invented
+here. `styles/app.css` is the source; `src/flighter/static/flighter.css` is the compiled
+result and is committed, so a checkout and the image both run without Node. After editing
+a template or the source stylesheet:
+
+```sh
+npm install
+npm run build
+```
+
+The image is still pure Python: it copies the compiled file and never runs a build.
+
 ## Backups
 
 `scripts/backup.sh` runs `pg_dump` into a named volume and keeps two weeks. Wire it to the

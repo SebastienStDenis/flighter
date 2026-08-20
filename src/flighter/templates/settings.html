@@ -1,160 +1,203 @@
 {% extends "base.html" %}
+{% import "basecoat/tabs.html.jinja" as bc %}
 {% block title %}Settings{% endblock %}
 {% block content %}
 
-<h1>Settings</h1>
+<h1 class="mb-4 text-xl font-semibold tracking-tight">Settings</h1>
 
-{% if saved %}<p class="banner banner--signal">Saved.</p>{% endif %}
-{% if connected %}<p class="banner banner--signal">Google is connected.</p>{% endif %}
-{% if error %}<p class="banner banner--stop">{{ error }}</p>{% endif %}
+{% if saved %}
+<div class="alert mb-3" role="status"><strong>Saved.</strong></div>
+{% endif %}
+{% if connected %}
+<div class="alert mb-3" role="status"><strong>Google is connected.</strong></div>
+{% endif %}
+{% if error %}
+<div class="alert mb-3" data-variant="destructive" role="alert">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="10"/>
+  </svg>
+  <strong>{{ error }}</strong>
+</div>
+{% endif %}
 
-<section class="panel">
-  <span class="label">Connections</span>
-  <p class="panel-note">
-    Keys are read from <code>.env</code> on the server and are never shown back here.
-    Everything below the fold is stored in the database and edited on this page.
-  </p>
-  <dl class="facts">
-    <dt>FlightAware</dt>
-    <dd class="text">{{ 'key set' if settings.aeroapi_configured else 'AEROAPI_KEY is not set' }}</dd>
-    <dt>Anthropic</dt>
-    <dd class="text">{{ 'key set' if settings.anthropic_api_key else 'JSON-LD emails only' }}</dd>
-    <dt>iCloud mail</dt>
-    <dd class="text">
-      {{- settings.icloud_email if settings.mail_configured
-          else 'ICLOUD_EMAIL and ICLOUD_APP_PASSWORD are not set' -}}
-    </dd>
-    <dt>Google</dt>
-    <dd class="text">
-      {%- if settings.google_connected %}connected
-      {%- elif settings.google_configured %}client set, not yet authorised
-      {%- else %}GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are not set{% endif -%}
-    </dd>
-    <dt>Calendar</dt>
-    <dd class="text">{{ prefs.gcal_calendar_id or 'created when you connect' }}</dd>
-    <dt>Pushover</dt>
-    <dd class="text">
-      {{- 'token and user key set' if settings.pushover_configured
-          else 'PUSHOVER_TOKEN and PUSHOVER_USER_KEY are not set' -}}
-    </dd>
-  </dl>
+{% set connections %}
+<div class="card" data-size="sm">
+  <header><h3>Connections</h3></header>
+  <section>
+    <div class="item-group -mx-2.5">
+      {% for name, ready, detail in [
+           ('FlightAware', settings.aeroapi_configured,
+            'Ready' if settings.aeroapi_configured else 'Add AEROAPI_KEY to .env'),
+           ('Anthropic', settings.anthropic_api_key,
+            'Ready' if settings.anthropic_api_key else 'Optional'),
+           ('iCloud mail', settings.mail_configured,
+            settings.icloud_email if settings.mail_configured
+            else 'Add ICLOUD_EMAIL and ICLOUD_APP_PASSWORD to .env'),
+           ('Google', settings.google_connected,
+            'Connected' if settings.google_connected
+            else ('Sign in below to finish' if settings.google_configured
+                  else 'Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to .env')),
+           ('Calendar', prefs.gcal_calendar_id,
+            prefs.gcal_calendar_id or 'Created when you connect Google'),
+           ('Pushover', settings.pushover_configured,
+            'Ready' if settings.pushover_configured
+            else 'Add PUSHOVER_TOKEN and PUSHOVER_USER_KEY to .env')] %}
+      <div class="item" data-size="xs">
+        <section>
+          <h4>{{ name }}</h4>
+          <p class="font-mono break-all">{{ detail }}</p>
+        </section>
+        <aside>
+          <span class="badge" data-variant="{{ 'ok' if ready else 'quiet' }}">
+            {{- 'Ready' if ready else 'Not set up' -}}</span>
+        </aside>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
   {% if settings.google_configured %}
-  <div class="actions">
-    <a class="btn btn--primary" href="/settings/google/connect">
+  <footer class="flex-col items-stretch gap-2 border-t">
+    <a class="btn" href="/settings/google/connect">
       {{ 'Reconnect Google' if settings.google_connected else 'Connect Google' }}</a>
-  </div>
+    <p class="text-xs break-all text-muted-foreground">
+      Google needs <code class="font-mono">{{ callback_url }}</code> in its list of redirect URIs.</p>
+  </footer>
   {% endif %}
-  <p class="hint">
-    The OAuth client must list <code>{{ callback_url }}</code> as an authorised redirect URI.
-  </p>
-</section>
+</div>
 
-<section class="panel">
-  <span class="label">Checks</span>
-  <p class="panel-note">Exercises Postgres, AeroAPI, iCloud, Calendar and Pushover in turn, and
-    names the broken one. The AeroAPI check spends one result set, and Pushover sends a real
-    push.</p>
-  <div class="actions">
-    <button class="btn" hx-post="/settings/checks" hx-target="#checks" hx-swap="innerHTML"
-            hx-indicator="#checks">Run checks</button>
+<div class="card mt-3" data-size="sm">
+  <header>
+    <h3>Checks</h3>
+    <p>Tries every connection in turn and names the one that is broken.</p>
+  </header>
+  <section>
+    <button class="btn w-full" data-variant="outline" type="button" hx-post="/settings/checks"
+            hx-target="#checks" hx-swap="innerHTML" hx-indicator="#checks">Run checks</button>
+    <div id="checks"></div>
+  </section>
+</div>
+{% endset %}
+
+{% set preferences %}
+<form id="settings-form" method="post" action="/settings">
+  <div class="card" data-size="sm">
+    <header><h3>This deployment</h3></header>
+    <section>
+      <fieldset class="fieldset gap-4">
+        <div role="group" class="field">
+          <label for="public_base_url">Public base URL</label>
+          <input type="url" id="public_base_url" name="public_base_url" required
+                 class="font-mono" aria-describedby="url-help"
+                 value="{{ posted['public_base_url'] }}">
+          <p id="url-help">The address links in your calendar and on your phone open.
+            You are on <code class="font-mono">{{ this_origin }}</code>.
+            <button class="btn" data-variant="link" data-size="xs" type="button"
+                    onclick="document.getElementById('public_base_url').value = '{{ this_origin }}'">
+              Use that</button>
+          </p>
+        </div>
+        <div role="group" class="field">
+          <label for="log_level">Log level</label>
+          <select id="log_level" name="log_level">
+            {% for level in log_levels %}
+            <option value="{{ level }}"{{ ' selected' if level == posted['log_level'] }}>{{ level }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </fieldset>
+    </section>
   </div>
-  <div id="checks"></div>
-</section>
 
-<form method="post" action="/settings">
-  <section class="panel">
-    <span class="label">This deployment</span>
-    <div class="field">
-      <label for="public_base_url">Public base URL</label>
-      <input type="url" id="public_base_url" name="public_base_url" required
-             value="{{ posted['public_base_url'] }}">
-      <p class="hint">Goes into calendar entries, pushes and the widget, all of which open on a
-        phone. You reached this page at <code>{{ this_origin }}</code>.
-        <button class="btn btn--small btn--ghost" type="button"
-                onclick="document.getElementById('public_base_url').value = '{{ this_origin }}'">
-          Use that</button>
-      </p>
-    </div>
-    <div class="field">
-      <label for="log_level">Log level</label>
-      <select id="log_level" name="log_level">
-        {% for level in log_levels %}
-        <option value="{{ level }}"{{ ' selected' if level == posted['log_level'] }}>{{ level }}</option>
-        {% endfor %}
-      </select>
-    </div>
-  </section>
+  <div class="card mt-3" data-size="sm">
+    <header>
+      <h3>Spend</h3>
+      <p>Updates stop for the rest of the month once FlightAware costs reach the limit.</p>
+    </header>
+    <section>
+      <div class="grid grid-cols-2 gap-3">
+        <div role="group" class="field">
+          <label for="aeroapi_monthly_cap_usd">Monthly limit (USD)</label>
+          <input type="text" inputmode="decimal" class="font-mono" required
+                 id="aeroapi_monthly_cap_usd" name="aeroapi_monthly_cap_usd"
+                 value="{{ posted['aeroapi_monthly_cap_usd'] }}">
+        </div>
+        <div role="group" class="field">
+          <label for="aeroapi_rate_limit_per_minute">Checks per minute</label>
+          <input type="number" min="1" max="10" class="font-mono" required
+                 id="aeroapi_rate_limit_per_minute" name="aeroapi_rate_limit_per_minute"
+                 value="{{ posted['aeroapi_rate_limit_per_minute'] }}">
+        </div>
+      </div>
+    </section>
+  </div>
 
-  <section class="panel">
-    <span class="label">Spend</span>
-    <div class="row">
-      <div class="field">
-        <label for="aeroapi_monthly_cap_usd">Monthly cap (USD)</label>
-        <input type="text" inputmode="decimal" id="aeroapi_monthly_cap_usd"
-               name="aeroapi_monthly_cap_usd" required
-               value="{{ posted['aeroapi_monthly_cap_usd'] }}">
-      </div>
-      <div class="field">
-        <label for="aeroapi_rate_limit_per_minute">Calls per minute</label>
-        <input type="number" min="1" max="10" id="aeroapi_rate_limit_per_minute"
-               name="aeroapi_rate_limit_per_minute" required
-               value="{{ posted['aeroapi_rate_limit_per_minute'] }}">
-      </div>
-    </div>
-    <p class="hint">Polling stops dead once month-to-date estimated spend reaches the cap.
-      FlightAware's Personal tier is free to $5/month and the tier above it starts at
-      $100/month, so this is the only thing standing between a polling bug and a bill.</p>
-  </section>
-
-  <section class="panel">
-    <span class="label">Mail</span>
-    <div class="row">
-      <div class="field">
-        <label for="imap_folder">Watched folder</label>
-        <input type="text" id="imap_folder" name="imap_folder" required
-               value="{{ posted['imap_folder'] }}">
-      </div>
-      <div class="field">
-        <label for="imap_idle_seconds">Re-idle every (seconds)</label>
-        <input type="number" min="60" max="1740" id="imap_idle_seconds" name="imap_idle_seconds"
-               required value="{{ posted['imap_idle_seconds'] }}">
-      </div>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label for="extraction_confidence_threshold">Review below confidence</label>
-        <input type="number" min="0" max="1" step="0.01" id="extraction_confidence_threshold"
-               name="extraction_confidence_threshold" required
-               value="{{ posted['extraction_confidence_threshold'] }}">
-      </div>
-      <div class="field">
-        <label for="anthropic_model">Extraction model</label>
-        <input type="text" id="anthropic_model" name="anthropic_model" required
-               value="{{ posted['anthropic_model'] }}">
-      </div>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label for="gcal_calendar_id">Calendar id</label>
-        <input type="text" id="gcal_calendar_id" name="gcal_calendar_id"
-               value="{{ posted['gcal_calendar_id'] }}">
-      </div>
-    </div>
-    <p class="hint">The mailbox is only ever read: everything is fetched with
-      <code>BODY.PEEK</code>, so nothing is marked read or moved. Any email carrying schema.org
-      flight data is parsed exactly and for free; the model only sees the ones that do not.</p>
-  </section>
-
-  <div class="actions">
-    <button class="btn btn--primary" type="submit">Save</button>
+  <div class="card mt-3" data-size="sm">
+    <header>
+      <h3>Mail</h3>
+      <p>Your mailbox is only ever read, never changed.</p>
+    </header>
+    <section>
+      <fieldset class="fieldset gap-4">
+        <div class="grid grid-cols-2 gap-3">
+          <div role="group" class="field">
+            <label for="imap_folder">Watched folder</label>
+            <input type="text" id="imap_folder" name="imap_folder" required class="font-mono"
+                   value="{{ posted['imap_folder'] }}">
+          </div>
+          <div role="group" class="field">
+            <label for="imap_idle_seconds">Check every (seconds)</label>
+            <input type="number" min="60" max="1740" id="imap_idle_seconds" class="font-mono"
+                   name="imap_idle_seconds" required value="{{ posted['imap_idle_seconds'] }}">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div role="group" class="field">
+            <label for="extraction_confidence_threshold">Review below</label>
+            <input type="number" min="0" max="1" step="0.01" class="font-mono" required
+                   id="extraction_confidence_threshold" name="extraction_confidence_threshold"
+                   value="{{ posted['extraction_confidence_threshold'] }}">
+          </div>
+          <div role="group" class="field">
+            <label for="anthropic_model">Model</label>
+            <input type="text" id="anthropic_model" name="anthropic_model" required class="font-mono"
+                   value="{{ posted['anthropic_model'] }}">
+          </div>
+        </div>
+        <div role="group" class="field">
+          <label for="gcal_calendar_id">Calendar id</label>
+          <input type="text" id="gcal_calendar_id" name="gcal_calendar_id" class="font-mono"
+                 value="{{ posted['gcal_calendar_id'] }}">
+        </div>
+      </fieldset>
+    </section>
   </div>
 </form>
+{% endset %}
 
-<section class="panel">
-  <span class="label">Widget token</span>
-  <p class="panel-note">Generated on first boot and stored on the server. Scriptable asks for it
-    the first time the script runs, and keeps it in the iOS Keychain.</p>
-  <pre class="state">{{ settings.widget_token }}</pre>
-</section>
+{% set widget %}
+<div class="card" data-size="sm">
+  <header>
+    <h3>Widget</h3>
+    <p>Enter this the first time you run the widget on your phone.</p>
+  </header>
+  <section>
+    <pre class="overflow-x-auto rounded-md bg-muted p-3 font-mono text-sm">{{ settings.widget_token }}</pre>
+  </section>
+</div>
+{% endset %}
+
+{{ bc.tabs(
+     id='settings-tabs',
+     tablist_attrs={'class': 'w-full'},
+     tabsets=[
+       {'tab': 'Connections', 'panel': connections},
+       {'tab': 'Preferences', 'panel': preferences},
+       {'tab': 'Widget', 'panel': widget},
+     ]) }}
+
+<div class="action-bar">
+  <button class="btn w-full" data-size="lg" type="submit" form="settings-form">Save</button>
+</div>
 
 {% endblock %}

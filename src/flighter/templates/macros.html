@@ -1,70 +1,115 @@
+{# A status is a word first. The badge only colours the word it is already carrying. #}
+{% macro badge(status) %}
+<span class="badge" data-variant="{{ status.tone }}">{{ status.label }}</span>
+{% endmacro %}
+
 {# The route rule: origin, destination, and how far along the aircraft is. One hairline
    carries all three, so the list and the flight page say the same thing at two sizes. #}
 {% macro route(v, names=false) %}
 {% set progress = v.progress_percent %}
-<div class="route{% if progress %} route--live{% endif %}"
-     style="--progress: {{ progress or 0 }}%">
-  <div class="port">
-    <div class="iata">{{ v.booking.origin_iata }}</div>
-    <div class="port-time">{{ at(v.departure, v.origin_tz) }}</div>
-    {% if names and v.origin %}<div class="port-name">{{ v.origin.name }}</div>{% endif %}
+<div class="route" style="--progress: {{ progress or 0 }}%">
+  <div>
+    <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.origin_iata }}</div>
+    <div class="font-mono text-xs text-muted-foreground">{{ at(v.departure, v.origin_tz) }}</div>
+    {% if names and v.origin %}
+    <div class="mt-0.5 max-w-28 text-xs leading-tight text-muted-foreground">{{ v.origin.name }}</div>
+    {% endif %}
   </div>
-  <div class="route-line" aria-hidden="true">
-    <span class="line-mark">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+  <div class="route-line {{ 'text-live' if progress else 'text-muted-foreground/50' }}">
+    <span class="route-mark rounded-full bg-card p-0.5" aria-hidden="true">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
         <path d="M22 12 13 7.5V2.8a1.3 1.3 0 0 0-2.6 0v4.7L1.4 12v1.7l9-2.6v4.2L7 17.7V19l4.7-1.1L16.4 19v-1.3l-3.4-2.4v-4.2l9 2.6z"
               transform="rotate(90 12 12)"/>
       </svg>
     </span>
   </div>
-  <div class="port port--in">
-    <div class="iata">{{ v.booking.dest_iata }}</div>
-    <div class="port-time">{{ at(v.arrival, v.dest_tz) }}</div>
-    {% if names and v.dest %}<div class="port-name">{{ v.dest.name }}</div>{% endif %}
+  <div class="text-right">
+    <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.dest_iata }}</div>
+    <div class="font-mono text-xs text-muted-foreground">{{ at(v.arrival, v.dest_tz) }}</div>
+    {% if names and v.dest %}
+    <div class="mt-0.5 ml-auto max-w-28 text-xs leading-tight text-muted-foreground">{{ v.dest.name }}</div>
+    {% endif %}
   </div>
 </div>
 {% endmacro %}
 
-{% macro chip(status) %}
-<span class="chip chip--{{ status.tone }}">{{ status.label }}</span>
+{# One number, large, above the word for what it is. #}
+{% macro stat(name, value, tone="") %}
+<div>
+  <div class="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">{{ name }}</div>
+  <div class="font-mono text-xl leading-tight font-bold {{ tone or ('text-muted-foreground' if value == missing) }}">
+    {{- value -}}
+  </div>
+</div>
 {% endmacro %}
 
-{% macro card(v) %}
-{% set status = v.status %}
-<a class="flight flight--{{ status.tone }}" href="/f/{{ v.booking.id }}">
-  <div class="flight-top">
-    <span class="ident">{{ v.flight_number }}
-      <span class="when">{{ day(v.scheduled_departure, v.origin_tz) }}</span>
-    </span>
-    {{ chip(status) }}
-  </div>
-  {{ route(v) }}
+{# The flight the list leads with: the gate large enough to read while walking. #}
+{% macro hero(v) %}
+<a class="card transition-shadow hover:ring-primary/40" href="/f/{{ v.booking.id }}">
+  <header>
+    <h2 class="font-mono tracking-tight">{{ v.flight_number }}</h2>
+    <div class="card-action">{{ badge(v.status) }}</div>
+  </header>
+  <section>{{ route(v) }}</section>
+  <section class="grid grid-cols-3 gap-3 border-t pt-4">
+    {{ stat("Gate", dash(v.gate), "text-plan" if v.gate else "") }}
+    {{ stat("Terminal", dash(v.terminal)) }}
+    {{ stat("Seat", dash(v.booking.seat)) }}
+  </section>
+  {% if v.countdown %}
+  <footer class="border-t">
+    <span class="text-sm text-muted-foreground">{{ v.countdown.label }}</span>
+    <time class="countdown ml-auto font-mono text-lg font-bold"
+          data-to="{{ v.countdown.target.isoformat() }}">{{ until(v.countdown.target) }}</time>
+  </footer>
+  {% endif %}
 </a>
 {% endmacro %}
 
-{# A row of the fact list. `tone` colours the value; the label always says what it is. #}
-{% macro fact(name, value, tone="") %}
-<dt>{{ name }}</dt>
-<dd class="{{ tone }}{{ ' blank' if value == missing }}">{{ value }}</dd>
+{# Everything that is not next. Same facts, one line each. #}
+{% macro row(v) %}
+<a class="item" data-variant="outline" data-size="sm" href="/f/{{ v.booking.id }}">
+  <section>
+    <h3>
+      <span class="font-mono">{{ v.flight_number }}</span>
+      <span class="font-mono font-normal text-muted-foreground">
+        {{ v.booking.origin_iata }} &rarr; {{ v.booking.dest_iata }}</span>
+    </h3>
+    <p class="font-mono">
+      {{- at(v.departure, v.origin_tz) }}
+      {%- if v.gate %} &middot; <span class="font-semibold text-plan">Gate {{ v.gate }}</span>{% endif -%}
+    </p>
+  </section>
+  <aside>{{ badge(v.status) }}</aside>
+</a>
+{% endmacro %}
+
+{# A row of the fact list. The label always says what it is; a missing value is a dash. #}
+{% macro fact(name, value, mono=false) %}
+<div class="item" data-size="xs">
+  <section><p>{{ name }}</p></section>
+  <aside class="{{ 'font-mono ' if mono }}{{ 'text-muted-foreground' if value == missing else 'font-medium' }}">
+    {{- value -}}
+  </aside>
+</div>
 {% endmacro %}
 
 {# A time that has resolved through scheduled -> estimated -> actual. The original is
    struck through only when it moved, so an on-time flight reads as one clean time. #}
 {% macro when(name, line, tz) %}
-<dt>{{ name }}</dt>
-<dd class="{{ 'blank' if line.best is none }}">
-  {%- if line.best is none -%}
-    -
-  {%- else -%}
-    {%- if line.moved -%}
-      <s>{{ at(line.scheduled, tz) }}</s>
-    {% endif %}
-    <span class="{{ 'signal' if line.moved and line.moved.total_seconds() > 0 }}">{{ at(line.best, tz) }}</span>
-    {%- if line.moved %}
-      <small>{{ 'delayed' if line.moved.total_seconds() > 0 else 'earlier' }} {{ duration(line.moved) }}</small>
-    {%- elif not line.confirmed %}
-      <small>scheduled</small>
+<div class="item" data-size="xs">
+  <section><p>{{ name }}</p></section>
+  <aside class="font-mono {{ 'text-muted-foreground' if line.best is none else 'font-medium' }}">
+    {%- if line.best is none -%}
+      {{ missing }}
+    {%- else -%}
+      {%- if line.moved %}<s class="font-normal text-muted-foreground">{{ at(line.scheduled, tz) }}</s>{% endif -%}
+      <span class="{{ 'text-warn' if line.moved and line.moved.total_seconds() > 0 }}">{{ at(line.best, tz) }}</span>
+      {%- if line.moved %}
+      <span class="font-sans text-xs font-normal text-muted-foreground">
+        {{- 'late' if line.moved.total_seconds() > 0 else 'early' }} {{ duration(line.moved) }}</span>
+      {%- endif -%}
     {%- endif -%}
-  {%- endif -%}
-</dd>
+  </aside>
+</div>
 {% endmacro %}

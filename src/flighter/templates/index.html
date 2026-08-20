@@ -2,57 +2,79 @@
 {% import "macros.html" as m %}
 {% block content %}
 
+{% if budget.tripped %}
+<div class="alert mb-3" data-variant="destructive" role="status">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/>
+  </svg>
+  <strong>Updates paused</strong>
+  <section><p>Times below are the last ones we saw. Raise the monthly limit in Settings to
+    start them again.</p></section>
+</div>
+{% endif %}
+
 {% if pending %}
-<a class="banner banner--signal" href="/review">
-  <span>
-    <strong>{{ pending }} booking{{ 's' if pending != 1 }} to check</strong>
-    <p>An email was read but not trusted enough to track on its own.</p>
-  </span>
+<a class="alert mb-3 transition-colors hover:bg-muted" href="/review">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="10"/>
+  </svg>
+  <strong>{{ pending }} booking{{ 's' if pending != 1 }} to check</strong>
+  <section><p>Tap to look them over.</p></section>
 </a>
 {% endif %}
 
-{% if budget.tripped %}
-<div class="banner banner--stop">
-  <span>
-    <strong>Status updates are paused</strong>
-    <p>AeroAPI spend has reached the ${{ '%.2f'|format(budget.cap_usd) }} cap for
-      {{ budget.month }}. Times below are the last ones seen.</p>
-  </span>
-</div>
-{% endif %}
-
 {% if not trips and not past %}
-<div class="empty">
-  <strong>Nothing on the board</strong>
-  Forward a booking confirmation, or add a flight by hand.
-  <div class="actions" style="justify-content: center">
-    <a class="btn btn--primary" href="/f/new">Add a flight</a>
-  </div>
-</div>
+<section class="empty mt-8">
+  <header>
+    <figure>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M2 22h20M6.36 17.4 4 17l-2-4 1.1-.55a2 2 0 0 1 1.8 0l.17.1a2 2 0 0 0 1.8 0L8 12 5 6l.9-.45a2 2 0 0 1 2.09.2l4.02 3a2 2 0 0 0 2.1.2l4.19-2.06a2.41 2.41 0 0 1 1.73-.17L21 7a1.4 1.4 0 0 1 .87 1.99l-.38.76c-.23.46-.6.84-1.07 1.08L7.58 17.2a2 2 0 0 1-1.22.18Z"/>
+      </svg>
+    </figure>
+    <h2>Nothing on the board</h2>
+    <p>Add a flight, or forward a booking confirmation.</p>
+  </header>
+</section>
 {% else %}
 
 {% for trip in trips %}
-<div class="trip-head">
-  <span class="label">
-    {{ day(trip[0].scheduled_departure, trip[0].origin_tz) }}
-    {%- if trip|length > 1 and not same_day(trip[0], trip[-1]) %}
-      to {{ day(trip[-1].scheduled_departure, trip[-1].origin_tz) }}
-    {%- endif %}
-  </span>
+<h2 class="mt-5 mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase first:mt-0">
+  {{ day(trip[0].scheduled_departure, trip[0].origin_tz) }}
+  {%- if trip|length > 1 and not same_day(trip[0], trip[-1]) %}
+    to {{ day(trip[-1].scheduled_departure, trip[-1].origin_tz) }}
+  {%- endif %}
+</h2>
+<div class="item-group">
+  {% for v in trip %}
+  {%- if v.booking.id == urgent_id|default(none) -%}{{ m.hero(v) }}{%- else -%}{{ m.row(v) }}{%- endif -%}
+  {% endfor %}
 </div>
-{% for v in trip %}{{ m.card(v) }}{% endfor %}
 {% endfor %}
 
-<div class="actions">
-  <a class="btn btn--primary" href="/f/new">Add a flight</a>
-</div>
-
 {% if past %}
-<details class="past">
-  <summary>Flown &middot; {{ past|length }}</summary>
-  {% for v in past %}{{ m.card(v) }}{% endfor %}
-</details>
+<div class="accordion mt-6 rounded-lg border px-3">
+  <details>
+    <summary>
+      <span class="flex items-center gap-2">Flown
+        <span class="badge" data-variant="outline">{{ past|length }}</span></span>
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="m6 9 6 6 6-6"/>
+      </svg>
+    </summary>
+    <div class="item-group">
+      {% for v in past %}{{ m.row(v) }}{% endfor %}
+    </div>
+  </details>
+</div>
 {% endif %}
 
 {% endif %}
+
+<div class="action-bar">
+  <a class="btn w-full" data-size="lg" href="/f/new">Add a flight</a>
+</div>
 {% endblock %}

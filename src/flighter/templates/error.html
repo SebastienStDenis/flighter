@@ -1,11 +1,18 @@
 {% extends "base.html" %}
 {% block title %}{{ code }}{% endblock %}
 {% block content %}
-<div class="empty">
-  <strong>{{ detail }}</strong>
-  {% if code == 404 %}Whatever was here has been removed, or the link is wrong.{% endif %}
-  <div class="actions" style="justify-content: center">
-    <a class="btn btn--primary" href="/">Back to the list</a>
-  </div>
-</div>
+<section class="empty mt-8">
+  <header>
+    <figure>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="10"/>
+      </svg>
+    </figure>
+    <h2>{{ detail }}</h2>
+    <p>{% if code == 404 %}This page has moved or the link is wrong.
+       {%- else %}Something went wrong on our end.{% endif %}</p>
+  </header>
+  <footer><a class="btn" href="/">Back to flights</a></footer>
+</section>
 {% endblock %}

@@ -34,8 +34,20 @@ from .config import Settings
 from .db import get_session
 from .gcal import CalendarClient
 from .models import KV, Airport, Booking, FlightEvent, FlightSnapshot
-from .phase import arrival_estimate, landing_estimate
+from .phase import (
+    AIRBORNE,
+    DAY_OF,
+    DIVERTED,
+    LANDED,
+    TAXIING,
+    Phase,
+    arrival_estimate,
+    compute_phase,
+    departure_estimate,
+    landing_estimate,
+)
 from .timezones import format_local, to_local
+from .widget import countdown, phase_rank
 from .widget import router as widget_router
 
 log = logging.getLogger(__name__)
@@ -68,6 +80,16 @@ LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
+async def review_count(request: Request, session: SessionDep) -> int:
+    """How many bookings are waiting to be checked. The nav shows it on every screen."""
+    pending = await booking_repo.list_bookings(session, statuses=("pending_review",))
+    request.state.review_count = len(pending)
+    return len(pending)
+
+
+ReviewDep = Annotated[int, Depends(review_count)]
+
+
 def _first_validation_message(exc: ValidationError) -> str:
     """One field, one sentence. A wall of pydantic is not an error message."""
     error = exc.errors()[0]
@@ -76,10 +98,21 @@ def _first_validation_message(exc: ValidationError) -> str:
 
 
 class Status(NamedTuple):
-    """A status is always a word plus a colour, never a colour on its own."""
+    """A status is always a word plus a colour, never a colour on its own.
+
+    `tone` is the badge variant the templates hand to Basecoat: quiet, plan, live, ok,
+    warn or stop.
+    """
 
     label: str
     tone: str
+
+
+class Countdown(NamedTuple):
+    """A moment to count towards, and the words that go in front of it."""
+
+    label: str
+    target: datetime
 
 
 @dataclass(frozen=True)
@@ -187,6 +220,37 @@ class FlightView:
         return self.snapshot.progress_percent if self.snapshot else None
 
     @property
+    def phase(self) -> Phase:
+        return compute_phase(self.booking, self.snapshot, datetime.now(UTC))
+
+    @property
+    def countdown(self) -> Countdown | None:
+        """The one number worth looking at, decided the same way the widget decides it."""
+        label, target = countdown(self.phase, self.booking, self.snapshot)
+        if label is None or target is None:
+            return None
+        return Countdown(label, target)
+
+    @property
+    def gate(self) -> str | None:
+        """The gate to walk to now: the one it leaves from, then the one it arrives at."""
+        snap = self.snapshot
+        if snap is None:
+            return None
+        if self.phase in (AIRBORNE, DIVERTED, LANDED):
+            return snap.gate_destination
+        return snap.gate_origin
+
+    @property
+    def terminal(self) -> str | None:
+        snap = self.snapshot
+        if snap is None:
+            return None
+        if self.phase in (AIRBORNE, DIVERTED, LANDED):
+            return snap.terminal_destination
+        return snap.terminal_origin
+
+    @property
     def status(self) -> Status:
         snap = self.snapshot
         if self.cancelled:
@@ -194,17 +258,24 @@ class FlightView:
         if snap is not None and snap.diverted:
             return Status("Diverted", "stop")
         if self.booking.status == "pending_review":
-            return Status("Needs review", "signal")
+            return Status("Needs review", "warn")
         if self.delay >= DELAY_THRESHOLD:
-            return Status(f"Delayed {duration(self.delay)}", "signal")
-        if snap is not None and snap.actual_in is not None:
-            return Status("Landed", "clear")
-        if snap is not None and snap.actual_out is not None:
-            return Status("In the air", "clear")
+            return Status(f"Delayed {duration(self.delay)}", "warn")
+        phase = self.phase
+        if phase == LANDED:
+            return Status("Landed", "ok")
+        if phase == AIRBORNE:
+            return Status("In the air", "live")
         if self.booking.status == "completed":
             return Status("Flown", "quiet")
-        if snap is not None and snap.status_text:
-            return Status(snap.status_text, "quiet")
+        if phase == TAXIING:
+            return Status("Taxiing", "live")
+        # Only a feed that has actually restated the departure can say it is on time;
+        # a booking on its own is just a plan.
+        if snap is not None and (snap.estimated_out or snap.scheduled_out):
+            return Status("On time", "ok")
+        if phase == DAY_OF:
+            return Status("Today", "plan")
         return Status("Scheduled", "quiet")
 
     @property
@@ -268,6 +339,11 @@ def duration(delta: timedelta) -> str:
     return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
 
 
+def until(instant: datetime) -> str:
+    """A countdown as the server can render it, before the page's own clock takes over."""
+    return duration(instant - datetime.now(UTC))
+
+
 def day(instant: datetime, tz: str) -> str:
     """`Sat 12 Sep`, the heading a trip is filed under."""
     return to_local(instant, tz).strftime("%a %-d %b")
@@ -306,6 +382,18 @@ def distance(value: Any) -> str:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return MISSING
     return f"{int(value):,} mi"
+
+
+def most_urgent(views: Sequence[FlightView]) -> int | None:
+    """The booking id the list leads with, ranked exactly as the lock screen ranks it."""
+    ranked = sorted(
+        views,
+        key=lambda view: (
+            phase_rank(view.phase),
+            departure_estimate(view.booking, view.snapshot),
+        ),
+    )
+    return ranked[0].booking.id if ranked else None
 
 
 def group_into_trips(views: Sequence[FlightView]) -> list[list[FlightView]]:
@@ -432,11 +520,15 @@ def create_app(settings: Settings) -> FastAPI:
         distance=distance,
         duration=duration,
         local_input=local_input,
+        until=until,
         missing=MISSING,
         delay_threshold=DELAY_THRESHOLD,
     )
 
     def page(request: Request, name: str, context: dict[str, Any], **kwargs: Any) -> Response:
+        # The nav's Review item is on every screen, so it is filled in here rather than
+        # by each route. A page reached without the dependency simply does not show it.
+        context.setdefault("review_count", getattr(request.state, "review_count", 0))
         return templates.TemplateResponse(request, name, context, **kwargs)
 
     def from_htmx(request: Request) -> bool:
@@ -481,7 +573,7 @@ def create_app(settings: Settings) -> FastAPI:
         return prefs.current().public_base_url
 
     @app.get("/")
-    async def index(request: Request, session: SessionDep) -> Response:
+    async def index(request: Request, session: SessionDep, pending: ReviewDep) -> Response:
         views = await build_views(
             session, await booking_repo.list_bookings(session, statuses=LISTED_STATUSES)
         )
@@ -489,25 +581,27 @@ def create_app(settings: Settings) -> FastAPI:
         upcoming = [view for view in views if view.ended >= now]
         past = [view for view in views if view.ended < now]
         past.reverse()
-        pending = await booking_repo.list_bookings(session, statuses=("pending_review",))
         return page(
             request,
             "index.html",
             {
                 "trips": group_into_trips(upcoming),
                 "past": past,
-                "pending": len(pending),
+                "pending": pending,
+                "urgent_id": most_urgent(upcoming),
                 "budget": await budget_status(session),
             },
         )
 
     # Declared before /f/{booking_id} so that "new" is never read as an id.
     @app.get("/f/new")
-    async def new_flight(request: Request) -> Response:
+    async def new_flight(request: Request, pending: ReviewDep) -> Response:
         return flight_form_page(request, view=None)
 
     @app.post("/f")
-    async def create_flight(request: Request, session: SessionDep, form: FormDep) -> Response:
+    async def create_flight(
+        request: Request, session: SessionDep, form: FormDep, pending: ReviewDep
+    ) -> Response:
         if form.departure is None:
             return flight_form_page(
                 request, None, "Departure needs a date and a time.", form.as_posted()
@@ -536,7 +630,9 @@ def create_app(settings: Settings) -> FastAPI:
         return RedirectResponse(f"/f/{booking.id}", status_code=303)
 
     @app.get("/f/{booking_id}")
-    async def detail(request: Request, session: SessionDep, booking_id: int) -> Response:
+    async def detail(
+        request: Request, session: SessionDep, booking_id: int, pending: ReviewDep
+    ) -> Response:
         view = await load(session, booking_id)
         events = await session.execute(
             select(FlightEvent)
@@ -546,12 +642,14 @@ def create_app(settings: Settings) -> FastAPI:
         return page(request, "detail.html", {"v": view, "events": list(events.scalars())})
 
     @app.get("/f/{booking_id}/edit")
-    async def edit_flight(request: Request, session: SessionDep, booking_id: int) -> Response:
+    async def edit_flight(
+        request: Request, session: SessionDep, booking_id: int, pending: ReviewDep
+    ) -> Response:
         return flight_form_page(request, await load(session, booking_id))
 
     @app.post("/f/{booking_id}")
     async def update_flight(
-        request: Request, session: SessionDep, booking_id: int, form: FormDep
+        request: Request, session: SessionDep, booking_id: int, form: FormDep, pending: ReviewDep
     ) -> Response:
         view = await load(session, booking_id)
         if form.departure is None:
@@ -611,7 +709,7 @@ def create_app(settings: Settings) -> FastAPI:
         return RedirectResponse("/", status_code=303)
 
     @app.get("/review")
-    async def review(request: Request, session: SessionDep) -> Response:
+    async def review(request: Request, session: SessionDep, pending: ReviewDep) -> Response:
         rows = await booking_repo.list_bookings(session, statuses=("pending_review",))
         return page(request, "review.html", {"views": await build_views(session, rows)})
 
@@ -650,7 +748,7 @@ def create_app(settings: Settings) -> FastAPI:
         }
 
     @app.get("/settings")
-    async def settings_page(request: Request) -> Response:
+    async def settings_page(request: Request, pending: ReviewDep) -> Response:
         return page(request, "settings.html", await settings_context(request))
 
     @app.post("/settings")
@@ -720,7 +818,7 @@ def create_app(settings: Settings) -> FastAPI:
         return page(request, "checks.html", {"results": await run_checks(settings)})
 
     @app.get("/health")
-    async def health(request: Request, session: SessionDep) -> Response:
+    async def health(request: Request, session: SessionDep, pending: ReviewDep) -> Response:
         counts = await session.execute(
             select(Booking.status, func.count()).group_by(Booking.status)
         )

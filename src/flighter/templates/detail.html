@@ -1,105 +1,138 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
+{% import "basecoat/dialog.html.jinja" as bc %}
 {% set s = v.snapshot %}
 {% block title %}{{ v.flight_number }} {{ v.booking.origin_iata }} to {{ v.booking.dest_iata }}{% endblock %}
 {% block content %}
 
-<div class="panel">
-  <div class="flight-top">
-    <span class="ident">{{ v.flight_number }}
-      <span class="when">{{ day(v.scheduled_departure, v.origin_tz) }}</span>
-    </span>
-    {{ m.chip(v.status) }}
-  </div>
-  {{ m.route(v, names=true) }}
-  {% if v.progress_percent is not none or v.arrival %}
-  <div class="route-meta">
-    {%- if v.progress_percent is not none -%}
-      {{ v.progress_percent }}% flown
-    {%- else -%}
-      {{ duration(v.arrival - v.departure) }} in the air
-    {%- endif -%}
-  </div>
+<div class="card">
+  <header>
+    <h2 class="font-mono tracking-tight">{{ v.flight_number }}</h2>
+    <p>{{ day(v.scheduled_departure, v.origin_tz) }}</p>
+    <div class="card-action">{{ m.badge(v.status) }}</div>
+  </header>
+  <section>
+    {{ m.route(v, names=true) }}
+    {% if v.progress_percent is not none %}
+    <p class="mt-3 text-center text-xs text-muted-foreground">{{ v.progress_percent }}% flown</p>
+    {% endif %}
+  </section>
+  <section class="grid grid-cols-3 gap-3 border-t pt-4">
+    {{ m.stat("Gate", dash(v.gate), "text-plan") }}
+    {{ m.stat("Terminal", dash(v.terminal)) }}
+    {{ m.stat("Seat", dash(v.booking.seat)) }}
+  </section>
+  {% if v.countdown %}
+  <footer class="border-t">
+    <span class="text-sm text-muted-foreground">{{ v.countdown.label }}</span>
+    <time class="countdown ml-auto font-mono text-lg font-bold"
+          data-to="{{ v.countdown.target.isoformat() }}">{{ until(v.countdown.target) }}</time>
+  </footer>
   {% endif %}
 </div>
 
-<section class="panel">
-  <span class="label">Departure &middot; {{ v.booking.origin_iata }}</span>
-  <dl class="facts">
-    {{ m.fact("Airport", dash(v.origin.name if v.origin else none), "text") }}
-    {{ m.fact("Timezone", v.origin_tz, "text") }}
-    {{ m.fact("Terminal", dash(s.terminal_origin if s else none), "strong") }}
-    {{ m.fact("Gate", dash(s.gate_origin if s else none), "strong") }}
-    {{ m.when("Departs", v.departs, v.origin_tz) }}
-    {{ m.fact("Wheels up", at(s.actual_off if s else none, v.origin_tz)) }}
-  </dl>
-</section>
+<div class="card mt-3" data-size="sm">
+  <header><h3>Departure &middot; {{ v.booking.origin_iata }}</h3></header>
+  <section>
+    <div class="item-group -mx-2.5">
+      {{ m.fact("Airport", dash(v.origin.name if v.origin else none)) }}
+      {{ m.fact("Timezone", v.origin_tz) }}
+      {{ m.fact("Terminal", dash(s.terminal_origin if s else none), mono=true) }}
+      {{ m.fact("Gate", dash(s.gate_origin if s else none), mono=true) }}
+      {{ m.when("Departs", v.departs, v.origin_tz) }}
+      {{ m.fact("Wheels up", at(s.actual_off if s else none, v.origin_tz), mono=true) }}
+    </div>
+  </section>
+</div>
 
-<section class="panel">
-  <span class="label">Arrival &middot; {{ v.booking.dest_iata }}</span>
-  <dl class="facts">
-    {{ m.fact("Airport", dash(v.dest.name if v.dest else none), "text") }}
-    {{ m.fact("Timezone", v.dest_tz, "text") }}
-    {{ m.fact("Terminal", dash(s.terminal_destination if s else none), "strong") }}
-    {{ m.fact("Gate", dash(s.gate_destination if s else none), "strong") }}
-    {{ m.fact("Baggage", dash(s.baggage_claim if s else none), "strong") }}
-    {{ m.when("Lands", v.lands, v.dest_tz) }}
-    {{ m.when("At the gate", v.arrives, v.dest_tz) }}
-  </dl>
-</section>
+<div class="card mt-3" data-size="sm">
+  <header><h3>Arrival &middot; {{ v.booking.dest_iata }}</h3></header>
+  <section>
+    <div class="item-group -mx-2.5">
+      {{ m.fact("Airport", dash(v.dest.name if v.dest else none)) }}
+      {{ m.fact("Timezone", v.dest_tz) }}
+      {{ m.fact("Terminal", dash(s.terminal_destination if s else none), mono=true) }}
+      {{ m.fact("Gate", dash(s.gate_destination if s else none), mono=true) }}
+      {{ m.fact("Baggage", dash(s.baggage_claim if s else none), mono=true) }}
+      {{ m.when("Lands", v.lands, v.dest_tz) }}
+      {{ m.when("At the gate", v.arrives, v.dest_tz) }}
+    </div>
+  </section>
+</div>
 
-<section class="panel">
-  <span class="label">Aircraft</span>
-  <dl class="facts">
-    {{ m.fact("Type", dash(s.aircraft_type if s else none)) }}
-    {{ m.fact("Registration", dash(s.registration if s else none)) }}
-    {{ m.fact("Filed route", dash(v.raw('route')), "text") }}
-    {{ m.fact("Filed altitude", altitude(v.raw('filed_altitude'))) }}
-    {{ m.fact("Distance", distance(v.raw('route_distance'))) }}
-    {{ m.fact("Seats, first", dash(v.raw('seats_cabin_first'))) }}
-    {{ m.fact("Seats, business", dash(v.raw('seats_cabin_business'))) }}
-    {{ m.fact("Seats, economy", dash(v.raw('seats_cabin_coach'))) }}
-  </dl>
-</section>
+<div class="card mt-3" data-size="sm">
+  <header><h3>Aircraft</h3></header>
+  <section>
+    <div class="item-group -mx-2.5">
+      {{ m.fact("Type", dash(s.aircraft_type if s else none), mono=true) }}
+      {{ m.fact("Registration", dash(s.registration if s else none), mono=true) }}
+      {{ m.fact("Filed route", dash(v.raw('route')), mono=true) }}
+      {{ m.fact("Filed altitude", altitude(v.raw('filed_altitude')), mono=true) }}
+      {{ m.fact("Distance", distance(v.raw('route_distance')), mono=true) }}
+      {{ m.fact("Seats, first", dash(v.raw('seats_cabin_first')), mono=true) }}
+      {{ m.fact("Seats, business", dash(v.raw('seats_cabin_business')), mono=true) }}
+      {{ m.fact("Seats, economy", dash(v.raw('seats_cabin_coach')), mono=true) }}
+    </div>
+  </section>
+</div>
 
-<section class="panel">
-  <span class="label">Booking</span>
-  <dl class="facts">
-    {{ m.fact("Confirmation", dash(v.booking.confirmation_code), "strong") }}
-    {{ m.fact("Seat", dash(v.booking.seat), "strong") }}
-    {{ m.fact("Operated as", dash(v.operating_flight)) }}
-    {{ m.fact("Tracked as", dash(v.booking.aeroapi_ident)) }}
-    {{ m.fact("Added", "from email" if v.booking.source == 'email' else "by hand", "text") }}
-    {{ m.fact("Last checked", at(s.observed_at if s else none, v.origin_tz, with_date=true)) }}
-    {% if v.booking.notes %}{{ m.fact("Notes", v.booking.notes, "text") }}{% endif %}
-  </dl>
-</section>
+<div class="card mt-3" data-size="sm">
+  <header><h3>Booking</h3></header>
+  <section>
+    <div class="item-group -mx-2.5">
+      {{ m.fact("Confirmation", dash(v.booking.confirmation_code), mono=true) }}
+      {{ m.fact("Seat", dash(v.booking.seat), mono=true) }}
+      {{ m.fact("Operated as", dash(v.operating_flight), mono=true) }}
+      {{ m.fact("Tracked as", dash(v.booking.aeroapi_ident), mono=true) }}
+      {{ m.fact("Added", "from email" if v.booking.source == 'email' else "by hand") }}
+      {{ m.fact("Last checked", at(s.observed_at if s else none, v.origin_tz, with_date=true), mono=true) }}
+      {% if v.booking.notes %}{{ m.fact("Notes", v.booking.notes) }}{% endif %}
+    </div>
+  </section>
+</div>
 
-<section class="panel">
-  <span class="label">What has changed</span>
-  {% if events %}
-  <ul class="timeline">
-    {% for e in events %}
-    <li>
-      <div class="event-kind">{{ e.kind.replace('_', ' ')|capitalize }}</div>
-      <div class="event-when">{{ at(e.occurred_at, v.origin_tz, with_date=true) }}</div>
-      <div class="event-change">
-        {{ dash(e.old_value) }} <b>&rarr;</b> <b>{{ dash(e.new_value) }}</b>
+<div class="card mt-3" data-size="sm">
+  <header><h3>What has changed</h3></header>
+  <section>
+    {% if events %}
+    <div class="item-group -mx-2.5">
+      {% for e in events %}
+      <div class="item" data-size="xs">
+        <section>
+          <h4>{{ e.kind.replace('_', ' ')|capitalize }}</h4>
+          <p class="font-mono">{{ at(e.occurred_at, v.origin_tz, with_date=true) }}</p>
+        </section>
+        <aside class="font-mono">
+          <span class="text-muted-foreground line-through">{{ dash(e.old_value) }}</span>
+          <span class="font-semibold">{{ dash(e.new_value) }}</span>
+        </aside>
       </div>
-    </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p class="panel-note" style="margin: 0">Nothing has moved since this flight was added.</p>
-  {% endif %}
-</section>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-sm text-muted-foreground">Nothing has changed yet.</p>
+    {% endif %}
+  </section>
+</div>
 
-<div class="actions actions--split">
-  <a class="btn" href="/f/{{ v.booking.id }}/edit">Edit</a>
-  <form method="post" action="/f/{{ v.booking.id }}/delete"
-        onsubmit="return confirm('Stop tracking {{ v.flight_number }}?')">
-    <button class="btn btn--danger" type="submit">Stop tracking</button>
-  </form>
+{% set stop_footer %}
+<form method="post" action="/f/{{ v.booking.id }}/delete">
+  <button class="btn" data-variant="destructive" type="submit">Stop tracking</button>
+</form>
+<button class="btn" data-variant="outline" type="button"
+        onclick="this.closest('dialog').close()">Keep it</button>
+{% endset %}
+{{ bc.dialog(
+     id='stop-tracking',
+     title='Stop tracking ' ~ v.flight_number ~ '?',
+     description='It comes off the list and out of your calendar.',
+     footer=stop_footer,
+     close_button=false) }}
+
+<div class="action-bar flex gap-2">
+  <a class="btn flex-1" data-size="lg" href="/f/{{ v.booking.id }}/edit">Edit</a>
+  <button class="btn" data-variant="ghost" data-size="lg" type="button"
+          onclick="document.getElementById('stop-tracking').showModal()">Stop tracking</button>
 </div>
 
 {% endblock %}
