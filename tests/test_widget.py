@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from flight_tracker import widget
+from flight_tracker.aeroapi import BREAKER_KEY, month_key
 from flight_tracker.config import Settings, get_settings
 from flight_tracker.db import get_session
 from flight_tracker.models import KV, Booking, FlightSnapshot, Passenger
@@ -255,63 +256,69 @@ def test_no_flights(settings: Settings) -> None:
 # --- degraded -------------------------------------------------------------------------
 
 
-class FakeScalars:
-    def __init__(self, rows: Sequence[Any]) -> None:
-        self._rows = rows
+class FakeBudgetSession:
+    """Just enough of AsyncSession for aeroapi.budget_status; no database anywhere."""
 
-    def all(self) -> Sequence[Any]:
-        return self._rows
+    def __init__(self, *, spend: str = "0", latch: KV | None = None) -> None:
+        self._spend = spend
+        self._latch = latch
+
+    async def scalar(self, statement: Any) -> str:
+        return self._spend
+
+    async def get(self, model: Any, key: Any) -> KV | None:
+        return self._latch
 
 
-class FakeSession:
-    """Just enough of AsyncSession for the KV lookup; no database anywhere."""
-
-    def __init__(self, rows: Sequence[Any]) -> None:
-        self._rows = rows
-
-    async def scalars(self, statement: Any) -> FakeScalars:
-        return FakeScalars(self._rows)
+def latch(month: datetime) -> KV:
+    return KV(
+        key=BREAKER_KEY,
+        value={"month": month_key(month), "spend_usd": "4.01", "cap_usd": "4.00"},
+    )
 
 
 async def test_degraded_when_the_breaker_latch_is_present() -> None:
-    session = FakeSession([KV(key="aeroapi_breaker", value={"tripped": True, "reason": "Cap hit"})])
-    assert await read_degraded(session, NOW) == "Cap hit"  # type: ignore[arg-type]
+    session = FakeBudgetSession(latch=latch(datetime.now(UTC)))
+    reason = await read_degraded(session)  # type: ignore[arg-type]
+    assert reason is not None and "AeroAPI budget" in reason
 
 
-async def test_degraded_latch_without_a_reason_still_degrades() -> None:
-    session = FakeSession([KV(key="aeroapi_breaker", value={})])
-    reason = await read_degraded(session, NOW)  # type: ignore[arg-type]
-    assert reason is not None and "AeroAPI" in reason
+async def test_a_latch_from_last_month_is_not_degraded() -> None:
+    """The latch is month-scoped, so it unlatches on its own on the 1st."""
+    session = FakeBudgetSession(latch=latch(datetime.now(UTC) - timedelta(days=40)))
+    assert await read_degraded(session) is None  # type: ignore[arg-type]
 
 
-async def test_untripped_latch_is_not_degraded() -> None:
-    session = FakeSession([KV(key="aeroapi_breaker", value={"tripped": False})])
-    assert await read_degraded(session, NOW) is None  # type: ignore[arg-type]
+async def test_no_latch_is_not_degraded() -> None:
+    assert await read_degraded(FakeBudgetSession()) is None  # type: ignore[arg-type]
 
 
-async def test_missing_keys_are_not_degraded() -> None:
-    assert await read_degraded(FakeSession([]), NOW) is None  # type: ignore[arg-type]
+def test_a_stale_snapshot_on_a_close_flight_degrades(settings: Settings) -> None:
+    stale = snapshot(scheduled_out=DEPARTURE, observed_at=NOW - timedelta(minutes=95))
+    body = payload([(booking(), stale)], settings)
+    assert body["degraded"] is True
+    assert body["degraded_reason"] == "No status update in 95 min"
 
 
-async def test_stale_poll_is_degraded() -> None:
-    stale = (NOW - timedelta(minutes=95)).isoformat().replace("+00:00", "Z")
-    session = FakeSession([KV(key="poller_last_success", value={"at": stale})])
-    assert await read_degraded(session, NOW) == "No status update in 95 min"  # type: ignore[arg-type]
+def test_a_recent_snapshot_does_not_degrade(settings: Settings) -> None:
+    fresh = snapshot(scheduled_out=DEPARTURE, observed_at=NOW - timedelta(minutes=9))
+    assert payload([(booking(), fresh)], settings)["degraded"] is False
 
 
-async def test_recent_poll_is_not_degraded() -> None:
-    recent = (NOW - timedelta(minutes=4)).isoformat()
-    session = FakeSession([KV(key="poller_last_success", value={"at": recent})])
-    assert await read_degraded(session, NOW) is None  # type: ignore[arg-type]
+def test_a_stale_snapshot_on_a_distant_flight_does_not_degrade(settings: Settings) -> None:
+    """A flight days out is polled every few hours by design."""
+    far = booking(scheduled_departure_utc=NOW + timedelta(days=6))
+    old = snapshot(scheduled_out=NOW + timedelta(days=6), observed_at=NOW - timedelta(hours=5))
+    assert payload([(far, old)], settings)["degraded"] is False
 
 
-async def test_unparseable_poll_timestamp_is_tolerated() -> None:
-    session = FakeSession([KV(key="poller_last_success", value={"at": "soon"})])
-    assert await read_degraded(session, NOW) is None  # type: ignore[arg-type]
+def test_a_never_polled_flight_does_not_degrade(settings: Settings) -> None:
+    assert payload([(booking(), None)], settings)["degraded"] is False
 
 
-def test_degraded_reason_reaches_the_payload(settings: Settings) -> None:
-    body = payload([], settings, degraded_reason="Cap hit")
+def test_the_breaker_outranks_staleness(settings: Settings) -> None:
+    stale = snapshot(scheduled_out=DEPARTURE, observed_at=NOW - timedelta(minutes=95))
+    body = payload([(booking(), stale)], settings, degraded_reason="Cap hit")
     assert body["degraded"] is True
     assert body["degraded_reason"] == "Cap hit"
 
@@ -324,7 +331,7 @@ def client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     async def fake_rows(session: Any, now: datetime) -> list[FlightRow]:
         return [(booking(), snapshot(gate_origin="B22", terminal_origin="4"))]
 
-    async def fake_degraded(session: Any, now: datetime) -> str | None:
+    async def fake_degraded(session: Any) -> str | None:
         return None
 
     monkeypatch.setattr(widget, "load_flight_rows", fake_rows)

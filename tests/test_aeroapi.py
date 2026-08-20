@@ -270,9 +270,14 @@ def test_match_tolerates_junk_in_the_flights_array() -> None:
 
 def test_ident_prefers_the_operating_carrier() -> None:
     assert flight_ident(booking()) == "BAW112"
-    assert flight_ident(booking(operating_carrier=None, operating_number=None)) == "AA6141"
     assert flight_ident(booking(aeroapi_ident="BAW112")) == "BAW112"
     assert flight_ident(booking(operating_number="0112")) == "BAW112"
+
+
+def test_ident_is_converted_to_icao_form() -> None:
+    # FlightAware reads a two-letter IATA code ambiguously, so the marketing code on the
+    # ticket is translated before it is ever sent.
+    assert flight_ident(booking(operating_carrier=None, operating_number=None)) == "AAL6141"
 
 
 # --- Token bucket --------------------------------------------------------------------

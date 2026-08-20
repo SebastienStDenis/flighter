@@ -17,20 +17,22 @@ import logging
 import secrets
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, Final
+from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, PlainSerializer
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from .aeroapi import budget_status
 from .config import Settings, get_settings
 from .db import get_session
-from .models import KV, Booking, FlightSnapshot
+from .models import Booking, FlightSnapshot
 from .phase import (
     AIRBORNE,
     BOARDING,
+    BOARDING_LEAD,
     CANCELLED,
     DAY_OF,
     DIVERTED,
@@ -52,8 +54,11 @@ MAX_FLIGHTS: Final = 3
 # Wider than MAX_FLIGHTS because relevance order is not departure order: an airborne
 # flight sorts ahead of one that departs sooner.
 CANDIDATE_LIMIT: Final = 12
-# A flight stays on the widget through the day it lands, then falls off on its own.
-RECENT_WINDOW: Final = timedelta(hours=24)
+# A flight leaves the widget once it has landed, not once it has departed: the whole
+# point of the airborne row is the "Lands in" countdown. This mirrors the rule in
+# bookings.list_bookings(upcoming_only=True), plus a grace period so a flight that just
+# landed sticks around long enough to tell you which carousel to walk to.
+LANDED_GRACE: Final = timedelta(hours=2)
 
 REFRESH_IDLE_SECONDS: Final = 900
 REFRESH_ACTIVE_SECONDS: Final = 600
@@ -61,13 +66,9 @@ REFRESH_ACTIVE_SECONDS: Final = 600
 # Feeds restate scheduled times with a minute of jitter; below this a "delay" is noise.
 DELAY_THRESHOLD: Final = timedelta(minutes=5)
 
-# Written by the poller. Absent is the normal, healthy case.
-KV_BREAKER_KEY: Final = "aeroapi_breaker"
-KV_LAST_POLL_KEY: Final = "poller_last_success"
-POLL_STALE_AFTER: Final = timedelta(minutes=30)
-# The poller states its last success under one of these; tolerated so a rename there
-# degrades the staleness check rather than the endpoint.
-_TIMESTAMP_FIELDS: Final = ("at", "last_success_at", "observed_at")
+# The poller runs a close flight every 10 minutes and a same-day one every 30, so a
+# snapshot this old means polling has stopped rather than that nothing has changed.
+POLL_STALE_AFTER: Final = timedelta(minutes=45)
 
 PHASES_IN_PROGRESS: Final = frozenset({BOARDING, AIRBORNE, DIVERTED})
 PHASES_IMMINENT: Final = frozenset({DAY_OF, BOARDING, AIRBORNE, DIVERTED})
@@ -116,7 +117,7 @@ async def read_widget(
     now = datetime.now(UTC)
     rows = await load_flight_rows(session, now)
     return build_payload(
-        rows, settings=settings, now=now, degraded_reason=await read_degraded(session, now)
+        rows, settings=settings, now=now, degraded_reason=await read_degraded(session)
     )
 
 
@@ -152,7 +153,13 @@ async def load_flight_rows(session: AsyncSession, now: datetime) -> list[FlightR
             .options(selectinload(Booking.passenger))
             .where(
                 Booking.status == "active",
-                Booking.scheduled_departure_utc >= now - RECENT_WINDOW,
+                or_(
+                    Booking.scheduled_arrival_utc >= now - LANDED_GRACE,
+                    and_(
+                        Booking.scheduled_arrival_utc.is_(None),
+                        Booking.scheduled_departure_utc >= now - LANDED_GRACE,
+                    ),
+                ),
             )
             .order_by(Booking.scheduled_departure_utc)
             .limit(CANDIDATE_LIMIT)
@@ -173,22 +180,15 @@ async def load_flight_rows(session: AsyncSession, now: datetime) -> list[FlightR
     return [(booking, by_booking.get(booking.id)) for booking in bookings]
 
 
-async def read_degraded(session: AsyncSession, now: datetime) -> str | None:
-    """Why the numbers might be wrong, in words the widget can print verbatim."""
-    rows = (
-        await session.scalars(select(KV).where(KV.key.in_([KV_BREAKER_KEY, KV_LAST_POLL_KEY])))
-    ).all()
-    values = {row.key: row.value for row in rows}
+async def read_degraded(session: AsyncSession) -> str | None:
+    """Why the numbers might be wrong, in words the widget can print verbatim.
 
-    breaker = values.get(KV_BREAKER_KEY)
-    if isinstance(breaker, dict) and breaker.get("tripped", True):
-        reason = breaker.get("reason")
-        return str(reason) if reason else "AeroAPI budget reached, status is frozen"
-
-    last_poll = _timestamp(values.get(KV_LAST_POLL_KEY))
-    if last_poll is not None and now - last_poll > POLL_STALE_AFTER:
-        minutes = int((now - last_poll).total_seconds() // 60)
-        return f"No status update in {minutes} min"
+    The breaker latch lives in KV and `budget_status` owns reading it, including the
+    month scoping that unlatches it on the 1st. An absent latch is the healthy case.
+    """
+    budget = await budget_status(session)
+    if budget.tripped:
+        return f"AeroAPI budget reached (${budget.spend_usd} of ${budget.cap_usd})"
     return None
 
 
@@ -200,17 +200,22 @@ def build_payload(
     degraded_reason: str | None = None,
 ) -> WidgetPayload:
     ranked: list[tuple[int, datetime, WidgetFlight]] = []
+    observed: list[datetime] = []
     for booking, snapshot in rows:
         flight = _flight(booking, snapshot, settings=settings, now=now)
         ranked.append((_rank(flight.phase), departure_estimate(booking, snapshot), flight))
+        if flight.phase in PHASES_IMMINENT and snapshot is not None and snapshot.observed_at:
+            observed.append(snapshot.observed_at)
     ranked.sort(key=lambda row: (row[0], row[1]))
     flights = [flight for _, _, flight in ranked[:MAX_FLIGHTS]]
+
+    reason = degraded_reason or _stale_reason(min(observed, default=None), now)
     return WidgetPayload(
         generated_at=now,
         flights=flights,
         refresh_seconds=_refresh_seconds(flights),
-        degraded=degraded_reason is not None,
-        degraded_reason=degraded_reason,
+        degraded=reason is not None,
+        degraded_reason=reason,
     )
 
 
@@ -245,7 +250,7 @@ def _countdown(
     """The one instant the phone counts to, and what to call it."""
     if phase == BOARDING:
         return "Boards in", boarding_time(snapshot) or (
-            departure_estimate(booking, snapshot) - timedelta(minutes=30)
+            departure_estimate(booking, snapshot) - BOARDING_LEAD
         )
     if phase in (AIRBORNE, DIVERTED):
         arrival = arrival_estimate(booking, snapshot)
@@ -319,17 +324,17 @@ def _refresh_seconds(flights: Sequence[WidgetFlight]) -> int:
     return REFRESH_IDLE_SECONDS
 
 
-def _timestamp(value: Any) -> datetime | None:
-    if not isinstance(value, dict):
+def _stale_reason(observed: datetime | None, now: datetime) -> str | None:
+    """Only ever judged against a flight that is close enough to be polled often.
+
+    A flight that has never been polled is not evidence of anything: it may have been
+    added a minute ago.
+    """
+    if observed is None:
         return None
-    for field in _TIMESTAMP_FIELDS:
-        raw = value.get(field)
-        if not isinstance(raw, str):
-            continue
-        try:
-            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        except ValueError:
-            log.warning("unparseable timestamp in kv key: %r", raw)
-            continue
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-    return None
+    if observed.tzinfo is None:
+        observed = observed.replace(tzinfo=UTC)
+    age = now - observed
+    if age <= POLL_STALE_AFTER:
+        return None
+    return f"No status update in {int(age.total_seconds() // 60)} min"
