@@ -12,7 +12,7 @@ import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import Date, and_, cast, func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .airports import airport_tz
@@ -188,7 +188,7 @@ async def find_duplicate(
         Booking.marketing_carrier == _carrier(carrier),
         Booking.marketing_number == _number(number),
         Booking.status != ARCHIVED,
-        cast(func.timezone("UTC", Booking.scheduled_departure_utc), Date) == day,
+        func.date(Booking.scheduled_departure_utc) == day.isoformat(),
     )
     result = await session.execute(stmt)
     return result.scalars().first()

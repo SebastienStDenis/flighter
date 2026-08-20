@@ -19,11 +19,15 @@ RUN useradd --create-home --uid 10001 app
 COPY --from=builder --chown=app:app /app /app
 COPY --chown=app:app alembic.ini /app/alembic.ini
 COPY --chown=app:app alembic /app/alembic
+COPY --chown=app:app scripts /app/scripts
 RUN mkdir -p /app/data && chown app:app /app/data
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
 
 USER app
 WORKDIR /app
+# Mounted at /app/data rather than /data so the default relative paths resolve the same
+# way here as they do in a checkout, and one configuration serves both. It holds the
+# SQLite database and the credentials the app mints for itself.
 VOLUME ["/app/data"]
 
 EXPOSE 8000

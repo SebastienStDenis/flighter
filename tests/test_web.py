@@ -1,6 +1,6 @@
 """The pages, rendered against a faked data layer.
 
-Nothing here touches Postgres or the network. The interesting risk in a template is a
+Nothing here touches the database or the network. The interesting risk in a template is a
 null: gates, baggage belts and every estimate are absent for most of a flight's life,
 and a page that raises on one of them is a page that fails exactly when it is needed.
 """

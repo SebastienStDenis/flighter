@@ -78,25 +78,16 @@ The one file the app writes for itself is `data/secrets.env`, holding the creden
 mints rather than asks for: today just the widget token generated on first boot. That key
 never appears in `.env` either.
 
+**All of the state is one file in one directory.** `data/` holds the SQLite database and
+that secrets file, and nothing outside it survives the container. One volume to mount,
+one thing to back up, and one thing to delete to start over. SQLite rather than a
+database server because there is one writer, a few hundred rows a year, and no query here
+that a server would answer any faster - and a second container is a second thing to
+upgrade, watch and restore.
+
 ## Prerequisites
 
 Four accounts and an Apple ID you already have, and only three of them involve a form.
-
-### Tailscale
-
-The widget fetches from your phone, and you open flight pages from wherever you happen to
-be standing. Both need the service reachable from outside the house, and neither should
-mean opening a port on the router or publishing a hostname to the internet.
-
-Create an auth key at
-[login.tailscale.com/admin/settings/keys](https://login.tailscale.com/admin/settings/keys)
-and put it in `TS_AUTHKEY`. The stack joins your tailnet as `flighter`, and every device
-signed in reaches it at `https://flighter.<your-tailnet>.ts.net` over a real certificate.
-Nothing is exposed to anyone else, which is the reason there is no login page in front of
-this app.
-
-Your phone therefore needs the Tailscale app connected. It stays up in the background; if
-it drops, the widget shows the last data it had rather than failing loudly.
 
 ### iCloud app-specific password
 
@@ -218,17 +209,26 @@ docker compose pull          # fetch the published image instead of compiling it
 docker compose up -d
 ```
 
-That is the whole install. On first boot the app runs its own migrations, seeds the
-airport table with its timezones, generates the widget token, and starts serving.
+That is the whole install: one container, one volume, one port. On first boot the app
+runs its own migrations, seeds the airport table with its timezones, generates the widget
+token, and starts serving on port 8000 of the host.
 
-Open `https://flighter.<your-tailnet>.ts.net/settings` and finish there:
+The app has no login of its own. Anything that can reach the host on that port can read
+and edit your flights, so it relies on the machine it runs on not being reachable from
+the internet.
 
-1. Set the **public base URL** - the page offers the address you opened it on.
-2. Type the **calendar name** you made in the Calendar app, `Flights` or whatever you
-   called it. Leave it empty and nothing is written to any calendar.
+Open `http://<host>:8000/settings` and finish there:
+
+1. Set the **public base URL**. It is the address of the *host*, and it is read on your
+   phone rather than on the machine serving it - calendar links, pushes and the widget
+   all use it - so it has to be an address that works when you are not at home. If the
+   host is on your tailnet, its tailnet name is that address. The page offers whatever
+   you opened it on.
+2. Pick the **calendar** you made in the Calendar app from the list your account offers.
+   Leave it unset and nothing is written to any calendar.
 3. Pick the **import flag** colour, `grey` by default, and decide not to use that colour
    for anything else.
-4. **Run checks**. It exercises Postgres, AeroAPI, iCloud mail, iCloud Calendar and
+4. **Run checks**. It exercises the database, AeroAPI, iCloud mail, iCloud Calendar and
    Pushover in turn and names the broken one, which is the question you will actually
    have. The mail check says how many messages are carrying the flag and waiting.
 
@@ -247,6 +247,10 @@ and tests, so a commit that fails CI never ships as `:latest`.
 
 To build locally instead of pulling, `docker compose build` still works from a checkout.
 
+The named `data` volume needs no setup. If you would rather keep the state in the
+checkout, point it at `./data:/app/data` and give that directory to the user the
+container runs as: `chown 10001:10001 data`.
+
 A flag set on mail in the inbox is picked up within seconds; every mailbox is swept again
 every few minutes regardless, since IDLE only ever reports the one it is watching.
 To run a sweep on the spot instead of waiting:
@@ -263,7 +267,8 @@ uv run flighter serve
 ```
 
 `serve` migrates and seeds on the way up, so a fresh database needs nothing else. It
-writes its minted credentials to `./data/secrets.env` rather than the container volume.
+writes `./data/flighter.db` and `./data/secrets.env` into the checkout rather than into
+the container volume; `flighter serve --host 0.0.0.0` if you want it off the loopback.
 
 ## Commands
 
@@ -292,8 +297,8 @@ uv run pytest -q
 
 The test suite is deliberately database-free and network-free. Everything worth testing
 here is a pure function over data: timezone normalisation, poll cadence, snapshot
-diffing, calendar event bodies, widget payloads. Migrations are verified separately in CI
-against a real Postgres, forwards and backwards.
+diffing, calendar event bodies, widget payloads, and the column that keeps every stored
+instant in UTC. Migrations are verified separately in CI, forwards and backwards.
 
 ### The stylesheet
 
@@ -312,9 +317,15 @@ The image is still pure Python: it copies the compiled file and never runs a bui
 
 ## Backups
 
-`scripts/backup.sh` runs `pg_dump` into a named volume and keeps two weeks. Wire it to the
+`scripts/backup.sh` writes a consistent copy of the database to `data/backups/` and keeps
+two weeks of them. It uses SQLite's `VACUUM INTO` rather than copying the file, because
+the app is running and a copy of a file being written to is not a backup. Wire it to the
 host's crontab:
 
 ```
-0 4 * * * docker compose -f /path/to/docker-compose.yml exec -T db /usr/local/bin/backup.sh
+0 4 * * * docker compose -f /path/to/docker-compose.yml exec -T app /app/scripts/backup.sh
 ```
+
+Those copies live in the same volume as the database they came from, so they survive a
+bad migration but not a lost disk. Getting them off the machine is a job for whatever
+already backs the machine up.

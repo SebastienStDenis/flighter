@@ -5,10 +5,10 @@ set once by hand, is never handed back out by the UI, and is read from the envir
 Everything else is a *preference*: it has a working default, it is edited on the
 settings page, and the database is the only place it lives - see `prefs`.
 
-The app writes exactly one file: `data/secrets.env`, holding the credentials it mints
-itself rather than asking a person for - today just the widget token generated on first
-boot. That key never appears in `.env`, so there is still one home per value and never a
-precedence question.
+The app writes one file of its own into `data/` beside the database:
+`data/secrets.env`, holding the credentials it mints itself rather than asking a person
+for - today just the widget token generated on first boot. That key never appears in
+`.env`, so there is still one home per value and never a precedence question.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # /app/data, so the same default is the volume in Docker and ./data in a checkout.
 DATA_DIR = Path(os.environ.get("DATA_DIR", "data"))
 SECRETS_FILE = DATA_DIR / "secrets.env"
+DATABASE_FILE = DATA_DIR / "flighter.db"
 
 # The app-written file is listed last because pydantic-settings lets the last file win,
 # and a token the app minted is newer than anything a hand-edited file knows.
@@ -35,7 +36,9 @@ ENV_FILES = (".env", SECRETS_FILE)
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILES, env_file_encoding="utf-8", extra="ignore")
 
-    database_url: str = "postgresql+asyncpg://flights:flights@db:5432/flights"
+    # One file in the same directory as the minted secrets, so the whole of the
+    # deployment's state is the one thing to back up and the one thing to mount.
+    database_url: str = f"sqlite+aiosqlite:///{DATABASE_FILE}"
 
     # --- FlightAware -----------------------------------------------------------------
     aeroapi_key: str = Field(default="", repr=False)

@@ -86,8 +86,10 @@ def migrate() -> None:
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
-    await asyncio.to_thread(migrate)
+    # The engine first: it is what checks the data directory is writable, and a migration
+    # against a database it cannot create fails somewhere far less legible.
     init_engine(settings)
+    await asyncio.to_thread(migrate)
 
     from .airports import seed_airports
     from .ingest import run_ingest_loop

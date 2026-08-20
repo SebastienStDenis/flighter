@@ -5,64 +5,20 @@ services:
     # pull` fetches the built image rather than making the desktop compile it.
     image: ghcr.io/sebastienstdenis/flighter:latest
     build: .
+    container_name: flighter
     restart: unless-stopped
     env_file: .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://flights:${POSTGRES_PASSWORD}@db:5432/flights
-    depends_on:
-      db:
-        condition: service_healthy
-      tailscale:
-        condition: service_started
+    ports:
+      # Published on the host so the host can serve it. Everything reaches the app
+      # through the machine's own address.
+      - "8000:8000"
     volumes:
-      # Holds the credentials the app mints for itself: today just the widget token.
-      # Losing it means re-entering that token on the phone, so it is a volume rather
-      # than a temp directory.
-      - app-data:/app/data
-    # No ports. The app answers on the tailnet address the sidecar owns, which is the
-    # whole point: nothing is published to the internet and the home router keeps every
-    # inbound port shut.
-    network_mode: service:tailscale
-
-  tailscale:
-    image: tailscale/tailscale:latest
-    restart: unless-stopped
-    hostname: flighter
-    environment:
-      TS_AUTHKEY: ${TS_AUTHKEY}
-      TS_STATE_DIR: /var/lib/tailscale
-      # Serves the app over HTTPS on the tailnet with a real certificate, which iOS
-      # prefers and the widget needs to fetch without complaint.
-      TS_SERVE_CONFIG: /config/serve.json
-      TS_EXTRA_ARGS: --accept-dns=false
-    volumes:
-      - tailscale-state:/var/lib/tailscale
-      - ./scripts/serve.json:/config/serve.json:ro
-    devices:
-      - /dev/net/tun
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-
-  db:
-    image: postgres:16
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: flights
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: flights
-    volumes:
-      - db-data:/var/lib/postgresql/data
-      - ./scripts/backup.sh:/usr/local/bin/backup.sh:ro
-      - backups:/backups
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U flights -d flights"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      # The whole of the deployment's state: the SQLite database and the credentials the
+      # app mints for itself. Back this up; nothing else here is worth keeping.
+      #
+      # Swap in `./data:/app/data` to keep it in the checkout instead. The container runs
+      # as uid 10001, so that directory has to be owned by it: chown 10001:10001 data.
+      - data:/app/data
 
 volumes:
-  app-data:
-  db-data:
-  backups:
-  tailscale-state:
+  data:

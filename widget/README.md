@@ -15,12 +15,13 @@ script only changes when the layout changes.
 3. Edit the first line of configuration:
 
    ```js
-   const API = "https://flighter.your-tailnet.ts.net"; // no trailing slash
+   const API = "http://your-host.your-tailnet.ts.net:8000"; // no trailing slash
    ```
 
    Use the same value as the public base URL on the server's settings page. The phone
-   reaches it over Tailscale, so the Tailscale app has to be connected for the widget to
-   refresh.
+   reaches the machine over your tailnet, so the Tailscale app has to be connected for
+   the widget to refresh. If it drops, the widget draws the last data it had rather than
+   failing loudly.
 4. Run the script once inside the Scriptable app. It prompts for the widget token, which
    is printed at the bottom of the server's settings page, and stores it in the iOS
    Keychain. The token is never
