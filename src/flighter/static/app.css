@@ -252,11 +252,6 @@
     border-bottom: 1px solid var(--line);
   }
   .trip-head:first-child { margin-top: 0; }
-  .trip-who {
-    font-size: var(--step--1);
-    color: var(--text-dim);
-    white-space: nowrap;
-  }
 
   /* ---- Flight card ---------------------------------------------------------------
      The tone on the card is the tone in the chip beside it, so a delayed flight is
@@ -458,14 +453,13 @@
   .facts dt:first-of-type, .facts dt:first-of-type + dd { border-top: none; }
   .facts dd.text { font-weight: 400; text-wrap: pretty; }
   .facts dd.strong { color: var(--text); font-weight: 700; font-stretch: 108%; }
-  .facts dd.quiet { color: var(--tone-quiet); }
-  .facts dd.wire { color: var(--tone-wire); }
-  .facts dd.live { color: var(--tone-live); }
-  .facts dd.clear { color: var(--tone-clear); }
-  .facts dd.signal { color: var(--tone-signal); }
-  .facts dd.stop { color: var(--tone-stop); }
+  .facts .quiet { color: var(--tone-quiet); }
+  .facts .wire { color: var(--tone-wire); }
+  .facts .live { color: var(--tone-live); }
+  .facts .clear { color: var(--tone-clear); }
+  .facts .signal { color: var(--tone-signal); }
+  .facts .stop { color: var(--tone-stop); }
   .facts dd.blank { color: var(--text-faint); font-weight: 400; }
-  .facts dd span.signal { color: var(--tone-signal); }
 
   /* A resolved time. The struck-through original sits quietly beside the live one so a
      delay reads as a change rather than as two competing facts. */
@@ -549,7 +543,6 @@
   .banner--stop { --tone: var(--tone-stop); }
   .banner strong { display: block; font-stretch: 96%; text-wrap: balance; }
   .banner p { margin-top: var(--space-1); color: var(--text-dim); font-size: var(--step--2); line-height: var(--leading--1); }
-  .banner .spacer { flex: 1; }
 
   /* ---- Buttons and forms ---------------------------------------------------------------- */
 
@@ -629,21 +622,6 @@
     color: var(--text-dim);
     text-transform: none;
   }
-  .check { display: flex; align-items: center; gap: var(--space-2); }
-  .check input { inline-size: 1.1rem; block-size: 1.1rem; accent-color: var(--tone-wire); }
-  .check label {
-    margin: 0;
-    font-size: var(--step-0);
-    font-stretch: 100%;
-    font-weight: 400;
-    letter-spacing: 0;
-    text-transform: none;
-    color: var(--text);
-  }
-
-  .inline-add { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
-  .inline-add input { flex: 1; }
-
   /* ---- Empties and disclosure ------------------------------------------------------------ */
 
   .empty {
@@ -765,9 +743,10 @@
 
 @layer overrides {
   /* The wordmark is the first thing to go: the nav and a brand do not both fit across a
-     small phone, and the mark alone still says where home is. */
+     small phone, and the mark alone still says where home is. The back link keeps its
+     label, because a bare chevron does not say what it goes back to. */
   @media (max-width: 24rem) {
-    .brand-name { display: none; }
+    .brand:not(.brand--back) .brand-name { display: none; }
   }
 
   @media (max-width: 22rem) {

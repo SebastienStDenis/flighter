@@ -333,118 +333,89 @@ having no backstop.
 
 ---
 
-## 3. ntfy
+## 3. Pushover
 
-Sources: <https://docs.ntfy.sh/publish/>, <https://docs.ntfy.sh/install/>, <https://docs.ntfy.sh/config/>
+Source: <https://pushover.net/api> (the whole reference is one page), plus
+<https://pushover.net/api/validate> for the credential check.
 
-### 3.1 Publish headers
+### 3.1 Sending a message
 
-Publish is a `POST` (or `PUT`) to `<server>/<topic>` with the message body as the raw request body.
-Everything else is a header.
+One endpoint, `POST https://api.pushover.net/1/messages.json`, HTTPS only, parameters sent as a
+form body. Two of the three required parameters are credentials, which is the whole of the auth
+scheme: there is no header, no bearer token and no signature.
 
-| Purpose | Canonical header | Aliases | Value |
+| Parameter | Required | Limit | Notes |
 | --- | --- | --- | --- |
-| Title | `X-Title` | `Title`, `t` | Free text |
-| Priority | `X-Priority` | `Priority`, `prio`, `p` | See table below |
-| Click-through URL | `X-Click` | `Click` | A URL to open when the notification is tapped |
-| Tags / emoji | `X-Tags` | `Tags`, `Tag`, `ta` | Comma-separated list, e.g. `airplane,warning` |
-| Message body (header form) | `X-Message` | `Message`, `m` | Alternative to the request body |
-| Icon | `X-Icon` | `Icon` | URL of the notification icon |
-| Markdown | `X-Markdown` | `Markdown`, `md` | Or send `Content-Type: text/markdown` |
-| Delayed delivery | `X-Delay` | `Delay`, `X-At`, `At`, `X-In`, `In` | Timestamp or duration |
-| Action buttons | `X-Actions` | `Actions`, `Action` | JSON array or short format |
-| Update/clear an existing notification | `X-Sequence-ID` | `Sequence-ID`, `SID` | Sequence id |
-| Attachment by URL | `X-Attach` | `Attach`, `a` | URL |
-| Auth | `Authorization` | - | Only for protected topics |
+| `token` | yes | 30 chars, `[A-Za-z0-9]`, case-sensitive | The *application's* API token, from pushover.net/apps/build |
+| `user` | yes | 30 chars, same alphabet | The user or group key from the dashboard. Accepts a comma-separated list, max 50 |
+| `message` | yes | 1024 UTF-8 characters | The body |
+| `title` | no | 250 characters | Defaults to the application's name |
+| `url` | no | 512 characters | Supplementary URL, rendered as a tappable link |
+| `url_title` | no | 100 characters | Link text for `url` |
+| `priority` | no | `-2` to `2` | See below |
+| `device` | no | 25 chars, `[A-Za-z0-9_-]` | Target one device instead of all |
+| `sound` | no | - | Built-in or custom sound id |
+| `timestamp` | no | - | Unix time the event happened, rather than when it was sent |
+| `ttl` | no | seconds | Auto-delete after this long. Ignored at priority 2 |
+| `html` / `monospace` | no | `1` | Mutually exclusive |
+| `retry` / `expire` / `callback` | priority 2 only | see below | |
 
-Priority values - the number and the name are interchangeable:
+### 3.2 Priority, and why this service only uses three of the five
 
-| ID | Name(s) | Behaviour |
+| Value | Name | Behaviour |
 | --- | --- | --- |
-| 5 | `max`, `urgent` | Long vibration bursts, default sound, pop-over notification |
-| 4 | `high` | Long vibration burst, default sound, pop-over notification |
-| 3 | `default` | Short default vibration and sound - this is the default |
-| 2 | `low` | No vibration or sound; hidden until the drawer is pulled down |
-| 1 | `min` | No vibration or sound; filed under "Other notifications" |
+| `-2` | lowest | No notification at all; increments the iOS badge only |
+| `-1` | low | No sound and no vibration; a popup or scrolling notification only |
+| `0` | normal | Sound, vibration and alert per the device's own settings. **Treated as `-1` during the user's quiet hours** |
+| `1` | high | **Bypasses quiet hours**, always plays a sound and vibrates, displayed in red |
+| `2` | emergency | Repeats until acknowledged on the device |
 
-So `X-Priority: 5`, `Priority: urgent`, and `p: 5` are all the same thing.
+The quiet-hours line is the one that decides the mapping. A gate change, a cancellation and a
+diversion are exactly the events that cost you the flight if you sleep through them, so they go at
+`1`; everything else is read when you next look at the phone and goes at `0`, respecting quiet
+hours. The connectivity check sends at `-1` so that proving the credentials work does not buzz a
+pocket.
 
-**Case sensitivity - confirmed insensitive for headers.** Quoting the docs directly: "Parameter
-names are case-insensitive when used in HTTP headers, and must be lowercase when used as query
-parameters in the URL." The docs list them in canonical form (`X-Title`), but `x-title` and
-`TITLE` work identically as headers. The lowercase rule only bites if you switch to the
-query-parameter style (`?title=...&priority=5`).
+`2` is deliberately unused. It requires `retry` (minimum 30 seconds) and `expire` (maximum 10800),
+re-alerts up to 50 times until someone acknowledges it on the device, and returns a `receipt` to
+poll. Even a cancellation is read once and then handled with the airline, so nothing here justifies
+a page-until-acknowledged loop.
 
-One encoding note worth knowing before you put a route like `LHR -> JFK` in a title: "ntfy supports
-UTF-8 in HTTP headers, but not every library or programming language does." If non-ASCII shows up
-as `?`, RFC 2047-encode the header, e.g. `=?UTF-8?B?8J+HqfCfh6o=?=` (base64) or
-`=?UTF-8?Q?=C3=84pfel?=` (quoted-printable).
+### 3.3 Reading the response
 
-Example call:
+HTTP 200 means the request was valid and the message is queued. The body still has to be checked:
 
-```bash
-curl \
-  -H "Title: AA100 gate change" \
-  -H "Priority: high" \
-  -H "Tags: airplane,warning" \
-  -H "Click: https://tracker.lan/flights/AAL100-1234567890-airline-0123" \
-  -d "Now departing gate B22 (was B14). Boarding 18:35." \
-  http://ntfy.lan/flights-a7f3k9q2
+```json
+{"status":1,"request":"647d2300-702c-4b38-8b2f-d56326ae460b"}
 ```
 
-### 3.2 Self-hosted docker image
+A 4xx carries the reason in an array, which is worth surfacing verbatim rather than reporting a
+bare status code:
 
-Official image: **`binwiederhier/ntfy`** (amd64, armv6, armv7, arm64).
-
-Config file lives at `/etc/ntfy/server.yml`. The docs are explicit that "the Docker image does not
-contain" that file - you create it on the host and bind-mount it.
-
-```yaml
-services:
-  ntfy:
-    image: binwiederhier/ntfy
-    container_name: ntfy
-    command: ["serve"]
-    environment:
-      - TZ=UTC
-    volumes:
-      - /var/cache/ntfy:/var/cache/ntfy
-      - /etc/ntfy:/etc/ntfy
-    ports:
-      - "80:80"
-    restart: unless-stopped
+```json
+{"status":0,"errors":["application token is invalid"],"request":"5042853c-402d-4a18-abcb-168734a801de"}
 ```
 
-### 3.3 Minimal `server.yml` for an auth-less private topic on a LAN
+The documented retry policy: 4xx means the input is wrong and must not be retried unchanged; 5xx
+and timeouts are temporary and may be retried after 5 seconds or more. No more than 2 concurrent
+connections.
 
-The auth-less privacy model is the docs' own: "Because there is no sign-up, the topic is
-essentially a password, so pick something that's not easily guessable." You leave
-`auth-default-access` at its `read-write` default, run no `auth-file`, and rely on (a) the server
-only being reachable on the LAN and (b) a high-entropy topic name.
+### 3.4 Limits and cost
 
-```yaml
-# /etc/ntfy/server.yml
-base-url: "http://ntfy.lan"          # must match how clients reach it, no trailing slash
-listen-http: ":80"
+Free accounts send 10,000 messages a month, resetting on the 1st at 00:00 Central. Exceeding it
+answers HTTP 429. A tracker polling a handful of flights sends single-digit messages a day, so the
+allowance is not a constraint worth designing around.
 
-cache-file: "/var/cache/ntfy/cache.db"
-cache-duration: "12h"
+The cost is on the receiving side: the client app is a one-time purchase per platform after a
+30-day trial, with no subscription.
 
-attachment-cache-dir: ""             # attachments off - the tracker only sends text
-behind-proxy: false
-```
+### 3.5 Checking credentials without sending anything
 
-That is the whole file. Notes:
+`POST https://api.pushover.net/1/users/validate.json` with `token` and `user` answers `status: 1`
+and lists the account's devices. Useful for a setup check that should not push. This service sends
+a real message at priority `-1` instead, on the grounds that a check which proves delivery end to
+end is worth more than one that proves only that a key parses.
 
-- `base-url` is required for the web app and for iOS clients to work; it must exactly match the
-  URL clients use, scheme included.
-- No `auth-file` and no `auth-default-access` line means anonymous read-write on every topic. On a
-  LAN-only bind that is fine; anyone who can reach the port and guess the topic can publish.
-- Pick the topic like a password, e.g. `flights-a7f3k9q2xr`. Do not use `flights`.
-- If you later expose it beyond the LAN, this config is **not** adequate. Switch to
-  `auth-default-access: "deny-all"` plus an `auth-file`, which is what the docs recommend for
-  private instances. `auth-default-access` accepts `read-write` (default), `read-only`,
-  `write-only`, and `deny-all`.
 
 ---
 
@@ -573,6 +544,7 @@ Latest stable releases on PyPI, read from `https://pypi.org/pypi/<name>/json` (`
 | anthropic | 0.125.0 |
 | google-api-python-client | 2.198.0 |
 | google-auth-oauthlib | 1.4.0 |
+| aioimaplib | 2.0.1 |
 | airportsdata | 20260803 |
 | python-multipart | 0.0.32 |
 | pytest | 9.1.1 |
@@ -582,6 +554,10 @@ Latest stable releases on PyPI, read from `https://pypi.org/pypi/<name>/json` (`
 
 Note: `airportsdata` uses a date-stamped version scheme (`YYYYMMDD`), not semver - pin it
 explicitly or it will move under you on every rebuild.
+
+Note: `aioimaplib` is **GPLv3**, and it is the only maintained async IMAP client with real RFC 2177
+IDLE support. Nothing conflicts today because this repository declares no licence, but the
+published image links it, so it constrains any future non-GPL licensing.
 
 ---
 
@@ -675,8 +651,12 @@ read identically to a countdown. Gate the style on `date > new Date()` and fall 
 per-flight rows in a `small` or `accessoryRectangular` widget, that reduces to a single
 `ListWidget.url` for the whole widget.
 
-### 9. ntfy: the topic name is the only secret
+### 9. Pushover: a 200 does not mean the message was accepted
 
-Headers are case-insensitive, so no correction needed there. The one thing to get right is that an
-auth-less "private" topic is private only by topic-name entropy and network reach - the docs are
-blunt that "the topic is essentially a password". Generate it, do not name it `flights`.
+The status code answers whether the request was well-formed, not whether Pushover took it. A
+malformed key still returns 4xx, but the reason lives in the JSON `errors` array, and reporting the
+status code alone throws away the one sentence that says which key is wrong. Parse the body.
+
+The other correction is the quiet-hours rule: priority `0` is silently demoted to `-1` while the
+user is in quiet hours, so a gate change sent at the default priority can arrive silently at 3am.
+Only `1` bypasses it.

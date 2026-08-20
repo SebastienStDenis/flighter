@@ -6,7 +6,7 @@
 
 {% if saved %}<p class="banner banner--signal">Saved.</p>{% endif %}
 {% if connected %}<p class="banner banner--signal">Google is connected.</p>{% endif %}
-{% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if error %}<p class="banner banner--stop">{{ error }}</p>{% endif %}
 
 <section class="panel">
   <span class="label">Connections</span>
@@ -70,7 +70,7 @@
              value="{{ posted['public_base_url'] }}">
       <p class="hint">Goes into calendar entries, pushes and the widget, all of which open on a
         phone. You reached this page at <code>{{ this_origin }}</code>.
-        <button class="btn btn--small btn--quiet" type="button"
+        <button class="btn btn--small btn--ghost" type="button"
                 onclick="document.getElementById('public_base_url').value = '{{ this_origin }}'">
           Use that</button>
       </p>
