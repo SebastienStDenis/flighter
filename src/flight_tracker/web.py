@@ -30,6 +30,7 @@ from .config import Settings
 from .db import get_session
 from .gcal import CalendarClient
 from .models import KV, Airport, Booking, FlightEvent, FlightSnapshot, Passenger
+from .phase import arrival_estimate, landing_estimate
 from .timezones import format_local, to_local
 from .widget import router as widget_router
 
@@ -135,6 +136,37 @@ class FlightView:
         return self.departure - self.scheduled_departure
 
     @property
+    def departs(self) -> Timeline:
+        """The gate departure, resolved: what it is now and what it was booked as."""
+        snap = self.snapshot
+        return Timeline(
+            scheduled=self.scheduled_departure,
+            best=self.departure,
+            actual=snap.actual_out if snap else None,
+        )
+
+    @property
+    def arrives(self) -> Timeline:
+        """Gate arrival: the end of the trip, and what the calendar entry runs to."""
+        snap = self.snapshot
+        best = arrival_estimate(self.booking, snap)
+        return Timeline(
+            scheduled=self.scheduled_arrival,
+            best=best,
+            actual=snap.actual_in if snap else None,
+        )
+
+    @property
+    def lands(self) -> Timeline:
+        """Wheels down, which is the question once the doors are shut."""
+        snap = self.snapshot
+        return Timeline(
+            scheduled=snap.scheduled_on if snap else None,
+            best=landing_estimate(self.booking, snap) if snap else None,
+            actual=snap.actual_on if snap else None,
+        )
+
+    @property
     def cancelled(self) -> bool:
         snap = self.snapshot
         return self.booking.status == "cancelled" or bool(snap is not None and snap.cancelled)
@@ -190,6 +222,32 @@ class FlightView:
                 return None
             value = value.get(key)
         return value
+
+
+@dataclass(frozen=True)
+class Timeline:
+    """One event's three-state answer, collapsed to what a reader needs to see.
+
+    Scheduled, estimated and actual describe the same moment at three levels of
+    certainty, so showing them as three rows makes a reader work out which is current.
+    This carries the best answer, and the original only when it is worth striking out.
+    """
+
+    scheduled: datetime | None
+    best: datetime | None
+    actual: datetime | None
+
+    @property
+    def confirmed(self) -> bool:
+        return self.actual is not None
+
+    @property
+    def moved(self) -> timedelta | None:
+        """How far the best answer has drifted from the schedule, when it matters."""
+        if self.scheduled is None or self.best is None:
+            return None
+        shift = self.best - self.scheduled
+        return shift if abs(shift) >= DELAY_THRESHOLD else None
 
 
 def duration(delta: timedelta) -> str:

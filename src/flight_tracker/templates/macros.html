@@ -47,3 +47,24 @@
 <dt>{{ name }}</dt>
 <dd class="{{ tone }}{{ ' blank' if value == missing }}">{{ value }}</dd>
 {% endmacro %}
+
+{# A time that has resolved through scheduled -> estimated -> actual. The original is
+   struck through only when it moved, so an on-time flight reads as one clean time. #}
+{% macro when(name, line, tz) %}
+<dt>{{ name }}</dt>
+<dd class="{{ 'blank' if line.best is none }}">
+  {%- if line.best is none -%}
+    -
+  {%- else -%}
+    {%- if line.moved -%}
+      <s>{{ at(line.scheduled, tz) }}</s>
+    {% endif %}
+    <span class="{{ 'signal' if line.moved and line.moved.total_seconds() > 0 }}">{{ at(line.best, tz) }}</span>
+    {%- if line.moved %}
+      <small>{{ 'delayed' if line.moved.total_seconds() > 0 else 'earlier' }} {{ duration(line.moved) }}</small>
+    {%- elif not line.confirmed %}
+      <small>scheduled</small>
+    {%- endif -%}
+  {%- endif -%}
+</dd>
+{% endmacro %}

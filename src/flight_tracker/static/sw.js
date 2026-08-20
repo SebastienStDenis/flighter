@@ -3,7 +3,7 @@
 // worse than a page that says it could not reach the server, so every navigation and
 // every API call goes to the network and is never stored.
 
-const SHELL = "shell-v1";
+const SHELL = "shell-v2";
 const ASSETS = [
   "/static/app.css",
   "/static/htmx.min.js",

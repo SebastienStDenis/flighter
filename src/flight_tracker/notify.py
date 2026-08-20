@@ -128,7 +128,7 @@ def event_message(event: FlightEvent, *, origin_tz: str, dest_tz: str) -> str:
             now="now arriving",
         )
     if kind == DEPARTED:
-        return _at("Departed", new, origin_tz)
+        return _at("Left the gate", new, origin_tz)
     if kind == LANDED:
         return _at("Landed", new, dest_tz)
     if kind == BAGGAGE_CLAIM_ASSIGNED:

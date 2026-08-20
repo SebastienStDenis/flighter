@@ -30,11 +30,8 @@
     {{ m.fact("Timezone", v.origin_tz, "text") }}
     {{ m.fact("Terminal", dash(s.terminal_origin if s else none), "strong") }}
     {{ m.fact("Gate", dash(s.gate_origin if s else none), "strong") }}
-    {{ m.fact("Scheduled", at(v.scheduled_departure, v.origin_tz)) }}
-    {{ m.fact("Estimated", at(s.estimated_out if s else none, v.origin_tz),
-              "signal" if v.delay >= delay_threshold else "") }}
-    {{ m.fact("Actual", at(s.actual_out if s else none, v.origin_tz)) }}
-    {{ m.fact("Took off", at(s.actual_off if s else none, v.origin_tz)) }}
+    {{ m.when("Departs", v.departs, v.origin_tz) }}
+    {{ m.fact("Wheels up", at(s.actual_off if s else none, v.origin_tz)) }}
   </dl>
 </section>
 
@@ -46,10 +43,8 @@
     {{ m.fact("Terminal", dash(s.terminal_destination if s else none), "strong") }}
     {{ m.fact("Gate", dash(s.gate_destination if s else none), "strong") }}
     {{ m.fact("Baggage", dash(s.baggage_claim if s else none), "strong") }}
-    {{ m.fact("Scheduled", at(v.scheduled_arrival, v.dest_tz)) }}
-    {{ m.fact("Estimated", at(s.estimated_in if s else none, v.dest_tz)) }}
-    {{ m.fact("Landed", at(s.actual_on if s else none, v.dest_tz)) }}
-    {{ m.fact("At the gate", at(s.actual_in if s else none, v.dest_tz)) }}
+    {{ m.when("Lands", v.lands, v.dest_tz) }}
+    {{ m.when("At the gate", v.arrives, v.dest_tz) }}
   </dl>
 </section>
 

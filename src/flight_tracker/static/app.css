@@ -522,3 +522,18 @@ pre.state {
 @media (prefers-reduced-motion: no-preference) {
   .btn, nav a, .flight { transition: background .12s ease, border-color .12s ease; }
 }
+
+/* A resolved time. The struck-through original sits quietly beside the live one so a
+   delay reads as a change rather than as two competing facts. */
+.facts dd s {
+  color: var(--haze);
+  text-decoration-thickness: 1px;
+  margin-right: 0.4rem;
+}
+
+.facts dd small {
+  display: block;
+  color: var(--haze);
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}

@@ -81,8 +81,13 @@ def test_arrival_change_fires_past_its_wider_band() -> None:
 
 
 def test_departed_landed_and_baggage_fire() -> None:
+    out = DEPARTS + timedelta(minutes=2)
+    assert kinds(diff_snapshots(snapshot(), snapshot(actual_out=out))) == [DEPARTED]
+
+    # Wheels up moves the phase to airborne but raises no event of its own, so it does
+    # not arrive as a second "departed" twenty minutes after the first.
     off = DEPARTS + timedelta(minutes=22)
-    assert kinds(diff_snapshots(snapshot(), snapshot(actual_off=off))) == [DEPARTED]
+    assert kinds(diff_snapshots(snapshot(), snapshot(actual_off=off))) == []
 
     on = ARRIVES - timedelta(minutes=10)
     assert kinds(diff_snapshots(snapshot(), snapshot(actual_on=on))) == [LANDED]

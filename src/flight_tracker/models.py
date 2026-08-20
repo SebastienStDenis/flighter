@@ -169,6 +169,10 @@ class FlightSnapshot(Base):
     estimated_out: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     actual_out: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     actual_off: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Runway arrival, kept alongside the gate times because "when do we land" is the
+    # question in the air, and it is not the same question as "when are we at the gate".
+    scheduled_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    estimated_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     scheduled_in: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     estimated_in: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     actual_in: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -385,3 +385,24 @@ def test_an_unset_token_refuses_everyone(settings: Settings) -> None:
 
     with pytest.raises(HTTPException):
         authorize(unset, None, "")
+
+
+def test_airborne_countdown_targets_touchdown_not_the_gate(settings: Settings) -> None:
+    """The number someone reads from seat 32A is time to wheels down.
+
+    Taxiing to a stand is ten minutes nobody counts, so a countdown aimed at the gate
+    is wrong for the whole stretch of the flight anyone is watching it.
+    """
+    touchdown = ARRIVAL - timedelta(minutes=11)
+    flying = snapshot(
+        actual_out=DEPARTURE - timedelta(hours=2),
+        actual_off=DEPARTURE - timedelta(hours=2),
+        scheduled_on=touchdown,
+        estimated_on=touchdown,
+        scheduled_in=ARRIVAL,
+        estimated_in=ARRIVAL,
+        progress_percent=70,
+    )
+    flight = payload([(booking(), flying)], settings)["flights"][0]
+    assert flight["countdown_label"] == "Lands in"
+    assert flight["countdown_to"] == "2026-09-12T22:04:00Z"

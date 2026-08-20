@@ -193,9 +193,14 @@ def diff_snapshots(
     if arrival:
         changes.append(arrival)
 
-    if current.actual_off and not previous.actual_off:
-        changes.append(DetectedChange(DEPARTED, None, _iso(current.actual_off)))
+    # Pushback, not wheels up. To anyone waiting on this flight "departed" means it left
+    # the gate, and the two are twenty minutes apart. Wheels up gets no event of its own:
+    # it moves the phase to airborne, which the widget already shows.
+    if current.actual_out and not previous.actual_out:
+        changes.append(DetectedChange(DEPARTED, None, _iso(current.actual_out)))
 
+    # Wheels down, and here the runway time is the one people mean by "landed"; being at
+    # the gate is a separate relief, and the bag claim event covers it.
     if current.actual_on and not previous.actual_on:
         changes.append(DetectedChange(LANDED, None, _iso(current.actual_on)))
 

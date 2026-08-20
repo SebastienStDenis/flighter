@@ -424,10 +424,12 @@ _TIMESTAMP_FIELDS = (
     "estimated_out",
     "actual_out",
     "actual_off",
+    "scheduled_on",
+    "estimated_on",
+    "actual_on",
     "scheduled_in",
     "estimated_in",
     "actual_in",
-    "actual_on",
 )
 _TEXT_FIELDS = (
     "gate_origin",

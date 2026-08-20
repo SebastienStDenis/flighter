@@ -182,10 +182,12 @@ def test_to_snapshot_fields_extracts_the_denormalised_columns() -> None:
         "estimated_out": datetime(2026, 9, 12, 18, 55, tzinfo=UTC),
         "actual_out": datetime(2026, 9, 12, 18, 57, tzinfo=UTC),
         "actual_off": datetime(2026, 9, 12, 19, 12, tzinfo=UTC),
+        "scheduled_on": datetime(2026, 9, 12, 21, 30, tzinfo=UTC),
+        "estimated_on": datetime(2026, 9, 12, 21, 25, tzinfo=UTC),
+        "actual_on": None,
         "scheduled_in": datetime(2026, 9, 12, 21, 40, tzinfo=UTC),
         "estimated_in": datetime(2026, 9, 12, 21, 35, tzinfo=UTC),
         "actual_in": None,
-        "actual_on": None,
     }
 
 

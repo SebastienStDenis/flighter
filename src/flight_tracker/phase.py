@@ -53,9 +53,11 @@ class SnapshotLike(Protocol):
     estimated_out: datetime | None
     actual_out: datetime | None
     actual_off: datetime | None
+    scheduled_on: datetime | None
+    estimated_on: datetime | None
+    actual_on: datetime | None
     scheduled_in: datetime | None
     estimated_in: datetime | None
-    actual_on: datetime | None
     actual_in: datetime | None
 
 
@@ -113,14 +115,34 @@ def departure_estimate(booking: BookingLike, snapshot: SnapshotLike | None) -> d
 
 
 def arrival_estimate(booking: BookingLike, snapshot: SnapshotLike | None) -> datetime | None:
-    """Best known arrival, or None when nobody has ever stated one."""
+    """Best known time at the gate, or None when nobody has ever stated one.
+
+    This is the planning answer: when the doors open and the trip is over. It is what
+    the calendar entry ends at and what a flight days away counts down to.
+    """
     if snapshot is not None:
-        for candidate in (snapshot.estimated_in, snapshot.actual_on, snapshot.scheduled_in):
+        for candidate in (snapshot.actual_in, snapshot.estimated_in, snapshot.scheduled_in):
             if candidate is not None:
                 return _utc(candidate)
     if booking.scheduled_arrival_utc is not None:
         return _utc(booking.scheduled_arrival_utc)
     return None
+
+
+def landing_estimate(booking: BookingLike, snapshot: SnapshotLike | None) -> datetime | None:
+    """Best known wheels-down, or None when nobody has ever stated one.
+
+    Distinct from `arrival_estimate` on purpose. Sitting on a plane, the question is
+    when it touches down, not when it finishes taxiing to a gate: those differ by five
+    to fifteen minutes, and a countdown aimed at the wrong one is wrong for the entire
+    part of the flight anyone is actually watching it. Falls back to the gate time,
+    which is late but never absurd, when the runway times are missing.
+    """
+    if snapshot is not None:
+        for candidate in (snapshot.actual_on, snapshot.estimated_on, snapshot.scheduled_on):
+            if candidate is not None:
+                return _utc(candidate)
+    return arrival_estimate(booking, snapshot)
 
 
 def _utc(value: datetime) -> datetime:

@@ -38,10 +38,10 @@ from .phase import (
     DIVERTED,
     LANDED,
     Phase,
-    arrival_estimate,
     boarding_time,
     compute_phase,
     departure_estimate,
+    landing_estimate,
 )
 
 log = logging.getLogger(__name__)
@@ -253,8 +253,10 @@ def _countdown(
             departure_estimate(booking, snapshot) - BOARDING_LEAD
         )
     if phase in (AIRBORNE, DIVERTED):
-        arrival = arrival_estimate(booking, snapshot)
-        return ("Lands in", arrival) if arrival is not None else (None, None)
+        # Wheels down, not the gate: this is the number someone stares at from a seat,
+        # and taxiing is not part of what they are counting.
+        landing = landing_estimate(booking, snapshot)
+        return ("Lands in", landing) if landing is not None else (None, None)
     if phase in (LANDED, CANCELLED):
         return None, None
     return "Departs in", departure_estimate(booking, snapshot)

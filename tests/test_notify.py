@@ -95,7 +95,7 @@ async def test_title_url_and_click_header(settings: Settings) -> None:
             "default",
             "Delayed 35 min, now departing 19:35 EDT",
         ),
-        (event(DEPARTED, new=DELAYED.isoformat()), "default", "Departed at 19:35 EDT"),
+        (event(DEPARTED, new=DELAYED.isoformat()), "default", "Left the gate at 19:35 EDT"),
         (event(LANDED, new=DELAYED.isoformat()), "default", "Landed at 16:35 PDT"),
         (event(BAGGAGE_CLAIM_ASSIGNED, new="carousel 3"), "default", "Bag claim: carousel 3"),
         (
