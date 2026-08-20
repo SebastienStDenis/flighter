@@ -108,7 +108,6 @@ FLIGHT: dict[str, Any] = {
 def booking(**overrides: Any) -> Booking:
     defaults: dict[str, Any] = {
         "id": 1,
-        "passenger_id": 1,
         "source": "email",
         "marketing_carrier": "AA",
         "marketing_number": "6141",
@@ -349,14 +348,14 @@ def test_unpriced_endpoints_fall_back_to_the_default() -> None:
 async def test_budget_is_untripped_one_poll_short_of_the_cap() -> None:
     # 799 polls at $0.005 is $3.995 against a $4.00 cap.
     session = FakeSession(spend=estimate_cost(FLIGHT_INFO_ENDPOINT, 1) * 799)
-    status = await budget_status(session, Settings())  # type: ignore[arg-type]
+    status = await budget_status(session)  # type: ignore[arg-type]
     assert status.spend_usd == Decimal("3.995000")
     assert status.tripped is False
 
 
 async def test_budget_trips_exactly_at_the_cap() -> None:
     session = FakeSession(spend=estimate_cost(FLIGHT_INFO_ENDPOINT, 1) * 800)
-    status = await budget_status(session, Settings())  # type: ignore[arg-type]
+    status = await budget_status(session)  # type: ignore[arg-type]
     assert status.spend_usd == Decimal("4.000000")
     assert status.tripped is True
 
@@ -364,7 +363,7 @@ async def test_budget_trips_exactly_at_the_cap() -> None:
 async def test_ensure_budget_latches_and_raises() -> None:
     session = FakeSession(spend=Decimal("4.50"))
     with pytest.raises(BudgetExceeded):
-        await ensure_budget(session, Settings())  # type: ignore[arg-type]
+        await ensure_budget(session)  # type: ignore[arg-type]
     latch = session.kv["aeroapi_budget_breaker"]
     assert latch.value["month"] == datetime.now(UTC).strftime("%Y-%m")
     assert latch.value["spend_usd"] == "4.50"
@@ -375,13 +374,13 @@ async def test_a_latch_from_this_month_trips_the_breaker_on_its_own() -> None:
     back in on a rounding difference."""
     month = datetime.now(UTC).strftime("%Y-%m")
     session = FakeSession(kv={"aeroapi_budget_breaker": KV(key="k", value={"month": month})})
-    status = await budget_status(session, Settings())  # type: ignore[arg-type]
+    status = await budget_status(session)  # type: ignore[arg-type]
     assert status.tripped is True
 
 
 async def test_a_latch_from_last_month_is_ignored() -> None:
     session = FakeSession(kv={"aeroapi_budget_breaker": KV(key="k", value={"month": "2020-01"})})
-    status = await budget_status(session, Settings())  # type: ignore[arg-type]
+    status = await budget_status(session)  # type: ignore[arg-type]
     assert status.tripped is False
 
 

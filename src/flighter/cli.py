@@ -4,12 +4,34 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import sys
+from collections.abc import AsyncIterator
 
+from . import prefs
 from .config import Settings, get_settings
 
 log = logging.getLogger(__name__)
+
+
+@contextlib.asynccontextmanager
+async def _database(settings: Settings) -> AsyncIterator[None]:
+    """Engine up, preferences loaded, engine down.
+
+    Preferences are read first because the cap, the topic and the calendar all come out
+    of them, and a command running on the built-in defaults would quietly do something
+    other than what the settings page says.
+    """
+    from .db import dispose_engine, init_engine, session_scope
+
+    init_engine(settings)
+    try:
+        async with session_scope() as session:
+            await prefs.load(session)
+        yield
+    finally:
+        await dispose_engine()
 
 
 def _configure_logging(level: str) -> None:
@@ -34,46 +56,34 @@ def _cmd_serve(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_migrate(settings: Settings, _args: argparse.Namespace) -> int:
-    from alembic import command
-    from alembic.config import Config
+def _cmd_migrate(_settings: Settings, _args: argparse.Namespace) -> int:
+    from .app import migrate
 
-    config = Config("alembic.ini")
-    config.set_main_option("sqlalchemy.url", settings.database_url)
-    command.upgrade(config, "head")
+    migrate()
     return 0
 
 
 def _cmd_seed_airports(settings: Settings, _args: argparse.Namespace) -> int:
     from .airports import seed_airports
-    from .db import dispose_engine, init_engine, session_scope
+    from .db import session_scope
 
     async def run() -> int:
-        init_engine(settings)
-        try:
-            async with session_scope() as session:
-                count = await seed_airports(session)
-        finally:
-            await dispose_engine()
+        async with _database(settings), session_scope() as session:
+            count = await seed_airports(session)
         print(f"seeded {count} airports")
         return 0
 
     return asyncio.run(run())
 
 
-def _cmd_backfill(settings: Settings, args: argparse.Namespace) -> int:
-    """One-off catch-up over recent mail, for a first run or after a long outage."""
-    from .db import dispose_engine, init_engine, session_scope
-    from .gmail import backfill
+def _cmd_import(settings: Settings, _args: argparse.Namespace) -> int:
+    """Sweep every mailbox now instead of waiting for the watcher's next pass."""
+    from .ingest import import_flagged
 
     async def run() -> int:
-        init_engine(settings)
-        try:
-            async with session_scope() as session:
-                processed = await backfill(session, days=args.days)
-        finally:
-            await dispose_engine()
-        print(f"processed {processed} messages")
+        async with _database(settings):
+            outcomes = await import_flagged(settings=settings)
+        print(f"imported {len(outcomes)} message(s)")
         return 0
 
     return asyncio.run(run())
@@ -81,15 +91,11 @@ def _cmd_backfill(settings: Settings, args: argparse.Namespace) -> int:
 
 def _cmd_poll(settings: Settings, _args: argparse.Namespace) -> int:
     """A single polling pass, for checking a change lands without waiting on the loop."""
-    from .db import dispose_engine, init_engine
     from .poller import poll_once
 
     async def run() -> int:
-        init_engine(settings)
-        try:
+        async with _database(settings):
             polled = await poll_once()
-        finally:
-            await dispose_engine()
         print(f"polled {polled} bookings")
         return 0
 
@@ -99,14 +105,10 @@ def _cmd_poll(settings: Settings, _args: argparse.Namespace) -> int:
 def _cmd_check(settings: Settings, _args: argparse.Namespace) -> int:
     """Exercise every external dependency and say which one is broken."""
     from .checks import run_checks
-    from .db import dispose_engine, init_engine
 
     async def run() -> int:
-        init_engine(settings)
-        try:
+        async with _database(settings):
             results = await run_checks(settings)
-        finally:
-            await dispose_engine()
         failed = 0
         for result in results:
             mark = "ok  " if result.ok else "FAIL"
@@ -136,14 +138,13 @@ def main(argv: list[str] | None = None) -> int:
     subparsers.add_parser("check", help="exercise every external dependency").set_defaults(
         func=_cmd_check
     )
-
-    backfill = subparsers.add_parser("backfill", help="ingest recent mail once")
-    backfill.add_argument("--days", type=int, default=30)
-    backfill.set_defaults(func=_cmd_backfill)
+    subparsers.add_parser("import", help="import every flagged email now").set_defaults(
+        func=_cmd_import
+    )
 
     args = parser.parse_args(argv)
     settings = get_settings()
-    _configure_logging(settings.log_level)
+    _configure_logging(prefs.current().log_level)
     result: int = args.func(settings, args)
     return result
 

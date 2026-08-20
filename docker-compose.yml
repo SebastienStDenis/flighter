@@ -12,12 +12,37 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      tailscale:
+        condition: service_started
     volumes:
+      # Holds the credentials the app mints for itself: today just the widget token.
+      # Losing it means re-entering that token on the phone, so it is a volume rather
+      # than a temp directory.
       - app-data:/app/data
-    # Published on loopback only. Everything from outside arrives through the tunnel,
-    # so the home network never has an inbound port open.
-    ports:
-      - "127.0.0.1:8000:8000"
+    # No ports. The app answers on the tailnet address the sidecar owns, which is the
+    # whole point: nothing is published to the internet and the home router keeps every
+    # inbound port shut.
+    network_mode: service:tailscale
+
+  tailscale:
+    image: tailscale/tailscale:latest
+    restart: unless-stopped
+    hostname: flighter
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY}
+      TS_STATE_DIR: /var/lib/tailscale
+      # Serves the app over HTTPS on the tailnet with a real certificate, which iOS
+      # prefers and the widget needs to fetch without complaint.
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_EXTRA_ARGS: --accept-dns=false
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./scripts/serve.json:/config/serve.json:ro
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
 
   db:
     image: postgres:16
@@ -36,34 +61,8 @@ services:
       timeout: 5s
       retries: 5
 
-  ntfy:
-    image: binwiederhier/ntfy
-    restart: unless-stopped
-    command: serve
-    environment:
-      NTFY_BASE_URL: http://ntfy
-      NTFY_CACHE_FILE: /var/cache/ntfy/cache.db
-      # The topic name is the secret; the service is not reachable from outside the
-      # compose network except through whatever the phone subscribes to.
-      NTFY_AUTH_DEFAULT_ACCESS: write-only
-    volumes:
-      - ntfy-cache:/var/cache/ntfy
-      - ntfy-config:/etc/ntfy
-    ports:
-      - "127.0.0.1:8080:80"
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel --no-autoupdate run
-    environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
-    depends_on:
-      - app
-
 volumes:
   app-data:
   db-data:
   backups:
-  ntfy-cache:
-  ntfy-config:
+  tailscale-state:

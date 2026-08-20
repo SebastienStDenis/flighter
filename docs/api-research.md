@@ -333,118 +333,89 @@ having no backstop.
 
 ---
 
-## 3. ntfy
+## 3. Pushover
 
-Sources: <https://docs.ntfy.sh/publish/>, <https://docs.ntfy.sh/install/>, <https://docs.ntfy.sh/config/>
+Source: <https://pushover.net/api> (the whole reference is one page), plus
+<https://pushover.net/api/validate> for the credential check.
 
-### 3.1 Publish headers
+### 3.1 Sending a message
 
-Publish is a `POST` (or `PUT`) to `<server>/<topic>` with the message body as the raw request body.
-Everything else is a header.
+One endpoint, `POST https://api.pushover.net/1/messages.json`, HTTPS only, parameters sent as a
+form body. Two of the three required parameters are credentials, which is the whole of the auth
+scheme: there is no header, no bearer token and no signature.
 
-| Purpose | Canonical header | Aliases | Value |
+| Parameter | Required | Limit | Notes |
 | --- | --- | --- | --- |
-| Title | `X-Title` | `Title`, `t` | Free text |
-| Priority | `X-Priority` | `Priority`, `prio`, `p` | See table below |
-| Click-through URL | `X-Click` | `Click` | A URL to open when the notification is tapped |
-| Tags / emoji | `X-Tags` | `Tags`, `Tag`, `ta` | Comma-separated list, e.g. `airplane,warning` |
-| Message body (header form) | `X-Message` | `Message`, `m` | Alternative to the request body |
-| Icon | `X-Icon` | `Icon` | URL of the notification icon |
-| Markdown | `X-Markdown` | `Markdown`, `md` | Or send `Content-Type: text/markdown` |
-| Delayed delivery | `X-Delay` | `Delay`, `X-At`, `At`, `X-In`, `In` | Timestamp or duration |
-| Action buttons | `X-Actions` | `Actions`, `Action` | JSON array or short format |
-| Update/clear an existing notification | `X-Sequence-ID` | `Sequence-ID`, `SID` | Sequence id |
-| Attachment by URL | `X-Attach` | `Attach`, `a` | URL |
-| Auth | `Authorization` | - | Only for protected topics |
+| `token` | yes | 30 chars, `[A-Za-z0-9]`, case-sensitive | The *application's* API token, from pushover.net/apps/build |
+| `user` | yes | 30 chars, same alphabet | The user or group key from the dashboard. Accepts a comma-separated list, max 50 |
+| `message` | yes | 1024 UTF-8 characters | The body |
+| `title` | no | 250 characters | Defaults to the application's name |
+| `url` | no | 512 characters | Supplementary URL, rendered as a tappable link |
+| `url_title` | no | 100 characters | Link text for `url` |
+| `priority` | no | `-2` to `2` | See below |
+| `device` | no | 25 chars, `[A-Za-z0-9_-]` | Target one device instead of all |
+| `sound` | no | - | Built-in or custom sound id |
+| `timestamp` | no | - | Unix time the event happened, rather than when it was sent |
+| `ttl` | no | seconds | Auto-delete after this long. Ignored at priority 2 |
+| `html` / `monospace` | no | `1` | Mutually exclusive |
+| `retry` / `expire` / `callback` | priority 2 only | see below | |
 
-Priority values - the number and the name are interchangeable:
+### 3.2 Priority, and why this service only uses three of the five
 
-| ID | Name(s) | Behaviour |
+| Value | Name | Behaviour |
 | --- | --- | --- |
-| 5 | `max`, `urgent` | Long vibration bursts, default sound, pop-over notification |
-| 4 | `high` | Long vibration burst, default sound, pop-over notification |
-| 3 | `default` | Short default vibration and sound - this is the default |
-| 2 | `low` | No vibration or sound; hidden until the drawer is pulled down |
-| 1 | `min` | No vibration or sound; filed under "Other notifications" |
+| `-2` | lowest | No notification at all; increments the iOS badge only |
+| `-1` | low | No sound and no vibration; a popup or scrolling notification only |
+| `0` | normal | Sound, vibration and alert per the device's own settings. **Treated as `-1` during the user's quiet hours** |
+| `1` | high | **Bypasses quiet hours**, always plays a sound and vibrates, displayed in red |
+| `2` | emergency | Repeats until acknowledged on the device |
 
-So `X-Priority: 5`, `Priority: urgent`, and `p: 5` are all the same thing.
+The quiet-hours line is the one that decides the mapping. A gate change, a cancellation and a
+diversion are exactly the events that cost you the flight if you sleep through them, so they go at
+`1`; everything else is read when you next look at the phone and goes at `0`, respecting quiet
+hours. The connectivity check sends at `-1` so that proving the credentials work does not buzz a
+pocket.
 
-**Case sensitivity - confirmed insensitive for headers.** Quoting the docs directly: "Parameter
-names are case-insensitive when used in HTTP headers, and must be lowercase when used as query
-parameters in the URL." The docs list them in canonical form (`X-Title`), but `x-title` and
-`TITLE` work identically as headers. The lowercase rule only bites if you switch to the
-query-parameter style (`?title=...&priority=5`).
+`2` is deliberately unused. It requires `retry` (minimum 30 seconds) and `expire` (maximum 10800),
+re-alerts up to 50 times until someone acknowledges it on the device, and returns a `receipt` to
+poll. Even a cancellation is read once and then handled with the airline, so nothing here justifies
+a page-until-acknowledged loop.
 
-One encoding note worth knowing before you put a route like `LHR -> JFK` in a title: "ntfy supports
-UTF-8 in HTTP headers, but not every library or programming language does." If non-ASCII shows up
-as `?`, RFC 2047-encode the header, e.g. `=?UTF-8?B?8J+HqfCfh6o=?=` (base64) or
-`=?UTF-8?Q?=C3=84pfel?=` (quoted-printable).
+### 3.3 Reading the response
 
-Example call:
+HTTP 200 means the request was valid and the message is queued. The body still has to be checked:
 
-```bash
-curl \
-  -H "Title: AA100 gate change" \
-  -H "Priority: high" \
-  -H "Tags: airplane,warning" \
-  -H "Click: https://tracker.lan/flights/AAL100-1234567890-airline-0123" \
-  -d "Now departing gate B22 (was B14). Boarding 18:35." \
-  http://ntfy.lan/flights-a7f3k9q2
+```json
+{"status":1,"request":"647d2300-702c-4b38-8b2f-d56326ae460b"}
 ```
 
-### 3.2 Self-hosted docker image
+A 4xx carries the reason in an array, which is worth surfacing verbatim rather than reporting a
+bare status code:
 
-Official image: **`binwiederhier/ntfy`** (amd64, armv6, armv7, arm64).
-
-Config file lives at `/etc/ntfy/server.yml`. The docs are explicit that "the Docker image does not
-contain" that file - you create it on the host and bind-mount it.
-
-```yaml
-services:
-  ntfy:
-    image: binwiederhier/ntfy
-    container_name: ntfy
-    command: ["serve"]
-    environment:
-      - TZ=UTC
-    volumes:
-      - /var/cache/ntfy:/var/cache/ntfy
-      - /etc/ntfy:/etc/ntfy
-    ports:
-      - "80:80"
-    restart: unless-stopped
+```json
+{"status":0,"errors":["application token is invalid"],"request":"5042853c-402d-4a18-abcb-168734a801de"}
 ```
 
-### 3.3 Minimal `server.yml` for an auth-less private topic on a LAN
+The documented retry policy: 4xx means the input is wrong and must not be retried unchanged; 5xx
+and timeouts are temporary and may be retried after 5 seconds or more. No more than 2 concurrent
+connections.
 
-The auth-less privacy model is the docs' own: "Because there is no sign-up, the topic is
-essentially a password, so pick something that's not easily guessable." You leave
-`auth-default-access` at its `read-write` default, run no `auth-file`, and rely on (a) the server
-only being reachable on the LAN and (b) a high-entropy topic name.
+### 3.4 Limits and cost
 
-```yaml
-# /etc/ntfy/server.yml
-base-url: "http://ntfy.lan"          # must match how clients reach it, no trailing slash
-listen-http: ":80"
+Free accounts send 10,000 messages a month, resetting on the 1st at 00:00 Central. Exceeding it
+answers HTTP 429. A tracker polling a handful of flights sends single-digit messages a day, so the
+allowance is not a constraint worth designing around.
 
-cache-file: "/var/cache/ntfy/cache.db"
-cache-duration: "12h"
+The cost is on the receiving side: the client app is a one-time purchase per platform after a
+30-day trial, with no subscription.
 
-attachment-cache-dir: ""             # attachments off - the tracker only sends text
-behind-proxy: false
-```
+### 3.5 Checking credentials without sending anything
 
-That is the whole file. Notes:
+`POST https://api.pushover.net/1/users/validate.json` with `token` and `user` answers `status: 1`
+and lists the account's devices. Useful for a setup check that should not push. This service sends
+a real message at priority `-1` instead, on the grounds that a check which proves delivery end to
+end is worth more than one that proves only that a key parses.
 
-- `base-url` is required for the web app and for iOS clients to work; it must exactly match the
-  URL clients use, scheme included.
-- No `auth-file` and no `auth-default-access` line means anonymous read-write on every topic. On a
-  LAN-only bind that is fine; anyone who can reach the port and guess the topic can publish.
-- Pick the topic like a password, e.g. `flights-a7f3k9q2xr`. Do not use `flights`.
-- If you later expose it beyond the LAN, this config is **not** adequate. Switch to
-  `auth-default-access: "deny-all"` plus an `auth-file`, which is what the docs recommend for
-  private instances. `auth-default-access` accepts `read-write` (default), `read-only`,
-  `write-only`, and `deny-all`.
 
 ---
 
@@ -554,10 +525,434 @@ Consequences for a flight widget:
 
 ---
 
-## 5. Library versions
+## 5. iCloud Calendar over CalDAV
+
+There is no iCloud Calendar REST API. CalDAV (RFC 4791) is the only programmatic way in, and it
+is WebDAV verbs plus XML rather than JSON.
+
+Sources: RFC 4791 <https://datatracker.ietf.org/doc/html/rfc4791>, RFC 4918
+<https://datatracker.ietf.org/doc/html/rfc4918>, RFC 5545
+<https://datatracker.ietf.org/doc/html/rfc5545>, RFC 5397
+<https://datatracker.ietf.org/doc/html/rfc5397>, RFC 6764
+<https://datatracker.ietf.org/doc/html/rfc6764>. iCloud-specific behaviour is not documented by
+Apple; the observations below come from third-party integration write-ups and Apple's own
+developer forums, and are marked where that is all the evidence there is.
+
+### 5.1 Endpoint and authentication
+
+| Item | Value |
+| --- | --- |
+| Host | `caldav.icloud.com`, HTTPS on 443 |
+| Auth scheme | HTTP Basic |
+| Username | the Apple Account email address |
+| Password | an app-specific password, never the account password |
+
+"Third-party CalDAV clients can't sign in with your regular Apple Account password"
+(<https://cli.nylas.com/guides/icloud-caldav-settings>). App-specific passwords are generated at
+account.apple.com under **Sign-In and Security → App-Specific Passwords**, require two-factor
+authentication, and Apple states: "Any time you change or reset your primary Apple Account
+password, all of your app-specific passwords are revoked automatically"
+(<https://support.apple.com/en-us/102654>). The limit is 25 active at once
+(<https://cli.nylas.com/guides/icloud-caldav-settings>).
+
+This is the same credential IMAP uses, so mail and calendar share one secret and one failure mode:
+an Apple ID password change breaks both at the same instant.
+
+### 5.2 Discovery - why a hard-coded URL is wrong
+
+RFC 6764 §6 describes the bootstrap: connect to the context path, "PROPFIND request to the
+initial 'context path'" whose body "SHOULD include the DAV:current-user-principal property as one
+of the properties to return", then query that principal for its calendar home.
+
+`DAV:current-user-principal` is RFC 5397: "Indicates a URL for the currently authenticated user's
+principal resource on the server." `CALDAV:calendar-home-set` is RFC 4791 §6.2.1: it "is meant to
+allow users to easily find the calendar collections owned by the principal."
+
+Three requests, in order:
+
+1. `PROPFIND https://caldav.icloud.com/`, `Depth: 0`
+
+   ```xml
+   <?xml version="1.0" encoding="utf-8"?>
+   <d:propfind xmlns:d="DAV:"><d:prop><d:current-user-principal/></d:prop></d:propfind>
+   ```
+
+   Answers `207 Multi-Status` with an href like `/200385701/principal/` - a **path**, and the
+   number is the account's principal id.
+
+2. `PROPFIND` that principal, `Depth: 0`, for `CALDAV:calendar-home-set`. Answers an **absolute**
+   href on a different host: `https://p34-caldav.icloud.com:443/200385701/calendars/`. The `pNN-`
+   prefix is the cluster the account is served from and differs between accounts.
+
+3. `PROPFIND` the home collection, `Depth: 1`, for `DAV:displayname`, `DAV:resourcetype` and
+   `CALDAV:supported-calendar-component-set`. Each `<response>` is one collection.
+
+Request and response shapes confirmed against
+<https://www.aurinko.io/blog/caldav-apple-calendar-integration/> and
+<https://cli.nylas.com/guides/icloud-caldav-settings>, which show the same principal-path /
+cluster-URL split with real captured values.
+
+Two consequences for a client:
+
+- **Hrefs must be resolved against the URL they arrived from**, because step 1 returns a path and
+  step 2 returns a URL on another host. Joining blindly onto `caldav.icloud.com` sends every
+  subsequent request to the wrong cluster.
+- Reminders lists are also calendar collections. Filter on
+  `CALDAV:supported-calendar-component-set` containing `VEVENT`, or a reminders list sharing the
+  calendar's display name can be picked instead.
+
+`Depth` and the `207 Multi-Status` envelope (`<multistatus>` → `<response>` → `<propstat>` →
+`<prop>` + `<status>`) are RFC 4918 §9.1 and §13. A property the server does not have comes back
+inside a second `<propstat>` carrying a 404 status, so a parser must read the status beside each
+prop rather than taking the first match.
+
+### 5.3 Creating a calendar - you cannot, in practice
+
+RFC 4791 §5.3.1 defines `MKCALENDAR`, and is explicit that it is optional: "Support for MKCALENDAR
+on the server is only RECOMMENDED and not REQUIRED because some calendar stores only support one
+calendar per user (or principal), and those are typically pre-created for each account."
+
+iCloud is not documented either way. The only concrete report found is an Apple developer forum
+thread where `MKCOL` against `https://caldav.icloud.com/<principal>/calendars/<name>/` returns
+`412 Precondition Failed`, and the poster's own follow-up claims `201 Created` if `calendars/` is
+dropped from the path (<https://developer.apple.com/forums/thread/110878>). That is one
+unverified forum comment, not a specification, and the resulting collection's placement is not
+described.
+
+**Conclusion for this service: do not try.** The setup step is "make a calendar in the Calendar
+app", and the app lists what the account has so it can be picked from the settings page. That is
+one manual action, once, against an undocumented write that could stop working silently.
+
+What is stored afterwards is the collection URL rather than the display name. `DAV:displayname` is
+mutable - renaming a calendar in the Calendar app changes it, and a client keyed on it would fail
+on the next write with no warning - while the collection URL is a uuid minted when the calendar was
+created and is not editable from any Apple UI. The URL is only opaque while nobody has to read it,
+which is exactly what the picker guarantees: it is chosen from a list of display names and never
+typed. The trade is that deleting and recreating a calendar of the same name needs it picked again,
+which is a visible action rather than a silent break.
+
+### 5.4 What a valid event looks like
+
+RFC 4791 §4.1 constrains a calendar object resource: it "MUST NOT contain more than one type of
+calendar component ... with the exception of VTIMEZONE components, **which MUST be specified for
+each unique TZID parameter value specified in the iCalendar object**", and all components in one
+resource share one UID.
+
+So a timed event with a named zone is:
+
+```
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//flighter//flight tracker//EN
+BEGIN:VTIMEZONE
+TZID:America/New_York
+...STANDARD / DAYLIGHT sub-components...
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:flighter-7@flighter.invalid
+DTSTAMP:20260820T120000Z
+DTSTART;TZID=America/New_York:20260912T150000
+DTEND;TZID=America/Los_Angeles:20260912T152000
+SUMMARY:DL1234 JFK -> LAX
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:DL1234 JFK -> LAX
+TRIGGER:-PT3H
+END:VALARM
+END:VEVENT
+END:VCALENDAR
+```
+
+Three spellings of a start time exist and only one is right here (RFC 5545 §3.3.5):
+
+| Form | Meaning | Verdict |
+| --- | --- | --- |
+| `DTSTART:20260912T150000` | floating - whatever the reading device's local time is | Wrong. A flight does not move when you do. |
+| `DTSTART:20260912T190000Z` | a fixed UTC instant | Correct instant, but the stored wall clock is UTC, so an edit in the Calendar app is done in the wrong units. |
+| `DTSTART;TZID=America/New_York:20260912T150000` | wall clock at a named zone | What this service writes. |
+
+`TZID` is not free: the `VTIMEZONE` requirement above means the object has to carry the transition
+rules for every zone it names. RFC 7809 (<https://datatracker.ietf.org/doc/html/rfc7809>) lets a
+server relieve clients of that, but only one advertising `calendar-no-timezone` in the `DAV`
+response header of an `OPTIONS` request. iCloud is not known to, so the VTIMEZONE goes in the
+payload. It is generated per event over a window around the flight rather than for all time,
+which keeps it to a handful of lines instead of ~4 KB of `RDATE`.
+
+A `DISPLAY` alarm needs `ACTION`, `TRIGGER` and `DESCRIPTION` (RFC 5545 §3.6.6). `STATUS:CANCELLED`
+(§3.8.1.11) marks a cancelled event without removing it.
+
+### 5.5 Create, update, delete
+
+There is no PATCH. "There is no patching! So, load an event, make changes and send its full
+payload back to the server" (<https://www.aurinko.io/blog/caldav-apple-calendar-integration/>).
+
+| Operation | Request |
+| --- | --- |
+| Create / replace | `PUT <calendar-url>/<name>.ics`, `Content-Type: text/calendar; charset=utf-8`, whole VCALENDAR as the body |
+| Delete | `DELETE <calendar-url>/<name>.ics` |
+| Read | `GET` the same URL - answers iCalendar text, not XML |
+
+The resource name is the client's choice and need not equal the UID, but keying it on the UID
+makes the URL derivable rather than stored.
+
+`ETag` / `If-Match` (RFC 4918 §8.4, RFC 4791 §5.3.2): every write and every read returns a strong
+`ETag`. To avoid clobbering a concurrent edit a client sends `If-Match: <etag>` on the PUT and
+gets `412 Precondition Failed` if the resource moved on since it was read; `If-None-Match: *`
+makes a PUT a create-only that fails with 412 if anything already exists at that URL.
+
+**This service deliberately sends neither.** The calendar is a mirror of the newest AeroAPI
+snapshot, so there is no local edit that a concurrent change could destroy, and an entry someone
+altered by hand is meant to be corrected back on the next sync. Combined with a UID derived from
+the booking id, that makes every write idempotent: a crash between the PUT and the database commit
+replays as the same resource rather than a second copy, and an event deleted by hand is recreated
+by the next PUT instead of being lost. A `412` would only ever be an obstacle to the intended
+behaviour.
+
+### 5.6 Duplicates from Apple's own mail scanning
+
+The Google equivalent of this worry was "Events from Gmail", which writes into a real calendar.
+Apple's behaviour is milder. "Event details from known providers that you receive in other apps,
+such as Mail, automatically appear in Calendar as suggested events", and they are "placed in the
+Siri Suggestions calendar, which is located in the Other section of the calendar list"
+(<https://support.apple.com/guide/calendar/use-siri-suggestions-iclc121e66ee/mac>).
+
+That calendar is separate and read-only, so a flight this service writes and a flight Siri
+suggests sit side by side rather than duplicating inside one calendar. Turning it off is **System
+Settings → Apple Intelligence & Siri → Siri Suggestions & Privacy → Calendar → Show Siri
+Suggestions in App**; Apple notes "any unconfirmed event suggestions are deleted and the Siri
+Suggestions calendar is hidden".
+
+### 5.7 Library choice: httpx, not `caldav`
+
+`caldav` (<https://pypi.org/project/caldav/>) is the obvious Python client, and it is synchronous
+and built on `requests`. This codebase is async throughout, so every call would have to cross
+`asyncio.to_thread`, and it drags in an iCalendar object model and an XML stack for what is four
+HTTP verbs against one collection.
+
+`httpx` is already a dependency, speaks arbitrary methods via `client.request("PROPFIND", ...)`,
+and its `MockTransport` makes the whole protocol testable without a server. The XML is small
+enough for `xml.etree.ElementTree`.
+
+The one part worth a library is generating iCalendar text: line folding at 75 octets (RFC 5545
+§3.1), escaping in `TEXT` values (§3.3.11), and above all deriving a `VTIMEZONE` from tzdata, which
+means walking transitions that `zoneinfo` does not expose. `icalendar` does all three, ships
+`py.typed`, is BSD-2-Clause, and its `Timezone.from_tzid(tzid, first_date=..., last_date=...)`
+generates the VTIMEZONE directly
+(<https://github.com/collective/icalendar/blob/main/src/icalendar/cal/timezone.py>).
+
+### 5.8 `calshow:` - opening the Calendar app on a day
+
+There is no URL scheme for one calendar event. `calshow:` is the only documented-by-usage way in,
+and it takes one argument: an instant counted in seconds from **2001-01-01 00:00:00 UTC**, Apple's
+own epoch, which is 978307200 seconds after the Unix one. The Calendar app opens on the day that
+instant falls on **in whatever zone the device is currently set to**, which is the whole
+difficulty: a link built from the flight's own departure instant lands on the wrong day whenever
+the phone is far enough from the airport, and a passenger reading it is by definition somewhere
+between the two. Aiming at local noon at the departure airport puts twelve hours of slack either
+side, which covers every real offset.
+
+Apple documents neither the scheme nor the epoch. Both are long-standing and widely used, and the
+epoch is the same one `NSDate`'s `timeIntervalSinceReferenceDate` counts from, but nothing here has
+been run against a real device.
+
+### 5.9 Not verified
+
+Everything in §5.2 through §5.5 about iCloud specifically rests on third-party captures rather
+than an Apple specification, and none of it has been run against a real account here. In
+particular: whether iCloud accepts a `PUT` from a non-Apple `User-Agent` without complaint, and
+whether it enforces the `VTIMEZONE` precondition strictly. Keying on the collection URL rather than
+on `DAV:displayname` takes one open question off this list - a display name is not stable across a
+rename, and nothing now depends on it being so.
+
+---
+
+## 6. iCloud Mail over IMAP, and marking a message for import
+
+The service imports the emails you tell it to rather than everything that arrives, so the
+question is what a "tell it to" can be that survives the trip from an iPhone or a Mac, through
+iCloud, to an IMAP client that is not Apple's. The answer is one colour of Apple Mail's flag.
+
+### 6.1 What a colour flag is on the wire
+
+Apple Mail's flag control offers seven fixed colours. A flag sets the `\Flagged` system flag, and
+the colour rides alongside it as up to three keywords - `$MailFlagBit0`, `$MailFlagBit1` and
+`$MailFlagBit2` - which together form a three-bit index. `$MailFlagBit0` carries the low bit,
+`$MailFlagBit1` the middle, `$MailFlagBit2` the high, and the index they add up to is the colour's
+position in Mail's own menu:
+
+| Index | `$MailFlagBit0` (1) | `$MailFlagBit1` (2) | `$MailFlagBit2` (4) | Colour |
+| ----- | ------------------- | ------------------- | ------------------- | ------ |
+| 0 | | | | red |
+| 1 | set | | | orange |
+| 2 | | set | | yellow |
+| 3 | set | set | | green |
+| 4 | | | set | blue |
+| 5 | set | | set | purple |
+| 6 | | set | set | grey |
+
+The keywords are registered by an Internet-Draft written by an Apple engineer, now adopted by the
+IETF mailmaint working group
+(<https://www.ietf.org/archive/id/draft-eggert-mailflagcolors-00.html>,
+<https://www.ietf.org/archive/id/draft-ietf-mailmaint-messageflag-mailboxattribute-04.txt>). Its
+own table is wrong on one row and should not be copied out of: the `-00` draft gives green as
+`0,1,1`, which is the row it already gave to grey, and the working-group revisions "fix" it to
+`1,1,1`, which is index 7 and leaves index 3 unassigned. The table above is what an IMAP client
+actually observes when Apple Mail sets each colour in turn - green is `$MailFlagBit0` plus
+`$MailFlagBit1`, grey is `$MailFlagBit1` plus `$MailFlagBit2`
+(<https://web.archive.org/web/2023/http://somethingfast.net/2023/imapfilter_applemailflags.html>) -
+and it is the only reading under which the seven colours are a contiguous 0-6 index in menu order.
+
+**Red is index zero, so a red flag carries no `$MailFlagBit` keyword at all.** A message flagged
+red is on the wire exactly a message flagged by a client that knows nothing about colours: bare
+`\Flagged`. There is no way to tell the two apart, so red cannot be the trigger, and it is not
+offered on the settings page. Every other colour sets at least one keyword and is unambiguous.
+
+`\Flagged` is always set alongside. The draft is explicit that the colour keywords "SHOULD be
+ignored if the `\Flagged` system flag is not set", and Mail only ever writes them as part of
+flagging, so the search asks for `FLAGGED` as well as the bits rather than trusting a stray keyword
+left behind by something else.
+
+### 6.2 Searching for one colour, and clearing it
+
+A colour is a state of all three bits, not a single keyword, so the search pins down each of them.
+`KEYWORD` and `UNKEYWORD` are core RFC 9051 search keys, mandatory for any keyword the server
+supports (<https://datatracker.ietf.org/doc/html/rfc9051#section-6.4.4>). Grey is:
+
+```
+UID SEARCH FLAGGED UNKEYWORD $MailFlagBit0 KEYWORD $MailFlagBit1 KEYWORD $MailFlagBit2
+```
+
+Search keys are ANDed by juxtaposition, so this is one message set and one round trip per mailbox.
+Without the `UNKEYWORD` half, grey's search would also match nothing else - but purple's would
+match grey, since both set `$MailFlagBit2` - so all three are always constrained.
+
+Clearing the mark is one `UID STORE` and no move:
+
+```
+UID STORE <uid> -FLAGS.SILENT (\Flagged $MailFlagBit0 $MailFlagBit1 $MailFlagBit2)
+```
+
+Removing a flag a message does not have is not an error - RFC 9051 §6.4.6 defines `-FLAGS` as
+removing the listed flags from those already set - so all three keywords go in the list whatever
+the configured colour is, and the message ends up genuinely unflagged rather than back at a plain
+red flag. The message stays exactly where it was. `.SILENT` suppresses the untagged `FETCH` that
+would otherwise come back, which nothing here reads.
+
+### 6.3 Setting the flag, on each device
+
+On the iPhone, "Swipe left on the Primary message, then choose Flag", and for a colour, "open the
+message, tap the More button, tap Flag, then select another color"
+(<https://support.apple.com/guide/iphone/iph3caefa61/ios>). The same page settles that the mark
+travels: "Flags you add to a message appear on that message in Mail on all your Apple devices where
+you're signed in to the same Apple Account." The only channel between those devices is the IMAP
+account, so the keywords are stored server-side by iCloud, which is what this design needs from it.
+
+On the Mac, "Select one or more messages. Click in the Mail toolbar, then choose a flag", and the
+reverse is "click, then choose Clear Flag"
+(<https://support.apple.com/guide/mail/flag-emails-mlhlp1052/mac>). On
+[iCloud.com](https://www.icloud.com/mail) the flag control is in the message toolbar.
+
+### 6.4 Categories view, which is why this is a choice rather than the obvious answer
+
+Apple states, of the iOS categories layout: "If you use the categories view for Mail in iOS 18.2,
+**you cannot flag emails that have been categorized as Promotions, Updates, or Transactions**"
+(<https://support.apple.com/en-us/104971>). Airline confirmations are precisely what Mail files
+under *Transactions*, and categories view is on by default, so on that page's reading the one
+gesture this design rests on is the one iOS withholds for this class of mail.
+
+The current iPhone guide reads the other way, describing flagging inside categories directly:
+"Flag all Transactions, Updates, or Promotions messages from a single sender: Swipe left on a
+message in the Transactions, Updates, or Promotions message list, then choose Flag. Flag a single
+Transactions, Updates, or Promotions message: Tap a message to open the sender's digest view, swipe
+left on the message, then tap" (<https://support.apple.com/guide/iphone/iph3caefa61/ios>). Whether
+that is a later fix or a documentation disagreement is not established here, and it does not need
+to be: the owner of this deployment does not use categories view. The escape hatch, if it were ever
+needed, is on the same Apple page - "tap the More button and choose List View to switch the overall
+layout".
+
+This is the reason a flag is a deliberate decision rather than the obvious one. Against it, one
+layout may withhold the gesture for exactly this class of mail. For it, flagging is one swipe from
+wherever the email already is, on any device, and it needs no mailbox made anywhere, no message
+moved, and nothing filed back afterwards.
+
+### 6.5 A custom keyword named `flighter` - still not settable
+
+RFC 9051 §2.3.2 allows server-defined keywords and says a server advertises `\*` in
+`PERMANENTFLAGS` when it will accept new ones
+(<https://datatracker.ietf.org/doc/html/rfc9051#section-2.3.2>). Whether iCloud advertises `\*` is
+not documented by Apple and is not established here. It matters less than it looks: `\*` gates
+*arbitrary* keywords, and the three `$MailFlagBit` keywords are Apple's own, stored and synced by
+iCloud as §6.3 shows, so they are not the case `\*` is about.
+
+It is moot anyway, because nothing on the user's side can set an arbitrary keyword. No Apple client
+offers a field for one. Renaming a flag on the Mac - "Click the flag name, click it again, then
+type a new name. For example, you could rename Red to Urgent"
+(<https://support.apple.com/guide/mail/flag-emails-mlhlp1052/mac>) - changes a label Mail keeps
+next to the colour, not anything on the server: the wire format in §6.1 carries a three-bit index
+and has nowhere to put a name. So the owner renames their chosen flag to `flighter` for their own
+benefit, and this app matches the colour underneath and never looks for the word.
+
+### 6.6 Where a flagged message can be
+
+A mailbox is a place a message is put; a flag is a property a message carries wherever it already
+is. That is the whole appeal, and it is also why the sweep cannot look in one mailbox. It runs
+`LIST "" "*"` once per connection and searches each mailbox in turn on that same connection, which
+is what keeps the cost at one: iCloud allows about five simultaneous connections per account -
+undocumented by Apple, and the figure every third-party client is built around - and the user's own
+phone and Mac are already holding some of them.
+
+Four mailboxes are skipped, found by their RFC 6154 attributes on the `LIST` reply rather than by
+name, so a non-English account still resolves them
+(<https://datatracker.ietf.org/doc/html/rfc6154>): `\Trash`, `\Junk`, `\Drafts` and `\Sent`. A
+draft or a sent copy of a forwarded confirmation carries the same flight and would import a second
+time under a different `Message-ID`, and mail in Trash was thrown away on purpose. iCloud ships
+those among its seven default folders - Inbox, VIP, Drafts, Sent, Archive, Trash and Junk
+(<https://support.apple.com/guide/icloud/organize-email-with-folders-mm6b1a6730/icloud>).
+
+`IDLE` is kept, on the inbox, but it is not what finds the work. RFC 2177 announces changes in the
+*selected* mailbox only (<https://datatracker.ietf.org/doc/html/rfc2177>), so a flag set on a
+message filed in some other folder is never announced to anybody, and only the periodic sweep sees
+it. IDLE earns its place on the common case, where the confirmation is still in the inbox and the
+push arrives within a second or two.
+
+### 6.7 `message:` URLs, for the link on a failure push
+
+A push about an email that did not import links back to the email. Apple Mail registers the
+`message:` scheme on both platforms; the structure is "the 'message:' scheme, followed by the
+message-id of the message, enclosed in angle brackets", and "the double slashes after the
+'message:' are optional, and the angle brackets surrounding the message-id value can be literal or
+URL-encoded" (<https://daringfireball.net/2007/12/message_urls_leopard_mail>). `%3C` and `%3E` are
+the percent-encodings of `<` and `>`, so `message://%3C{message-id}%3E` is one of the four working forms.
+
+NSHipster confirms the behaviour on current systems - "The stock Mail client on both iOS and macOS
+will attempt to open URLs with the custom message: scheme ... The only trick here is to
+percent-encode the Message ID in the URL" - and adds two caveats: the message has to be present in
+Mail already, and on macOS a link to a message Mail has not loaded raises an alert rather than
+opening (<https://nshipster.com/message-id/>). Neither matters here: the link is only ever sent
+about a message the user marked minutes earlier, which has not moved.
+
+Pushover carries it as the supplementary URL, capped at 512 characters
+(<https://pushover.net/api>). Pushover advises against app-specific URL schemes "in public plugins,
+websites, and apps" because handling varies by platform; this is a single-user deployment on Apple
+devices, where `message:` is handled by a system app.
+
+### 6.8 Not verified
+
+Without a real iCloud account to run against, five things rest on documentation alone: that iCloud
+accepts a `UID STORE` of the `$MailFlagBit` keywords from a third-party client rather than only
+serving ones Mail wrote; that it answers `SEARCH KEYWORD $MailFlagBitN` rather than returning an
+empty set for keywords it stores but does not index; whether it advertises `\*` in `PERMANENTFLAGS`
+(§6.5); the exact `LIST` reply shape for the account, including whether Trash, Junk, Drafts and
+Sent really carry their RFC 6154 attributes rather than only their English names; and whether the
+categories-view restriction in §6.4 still holds on current iOS.
+
+
+---
+
+## 7. Library versions
 
 Latest stable releases on PyPI, read from `https://pypi.org/pypi/<name>/json` (`info.version`) on
-2026-08-19.
+2026-08-19, except `icalendar`, read on 2026-08-20.
 
 | Package | Version |
 | --- | --- |
@@ -571,8 +966,8 @@ Latest stable releases on PyPI, read from `https://pypi.org/pypi/<name>/json` (`
 | pydantic | 2.13.4 |
 | pydantic-settings | 2.15.0 |
 | anthropic | 0.125.0 |
-| google-api-python-client | 2.198.0 |
-| google-auth-oauthlib | 1.4.0 |
+| icalendar | 7.3.0 |
+| aioimaplib | 2.0.1 |
 | airportsdata | 20260803 |
 | python-multipart | 0.0.32 |
 | pytest | 9.1.1 |
@@ -582,6 +977,10 @@ Latest stable releases on PyPI, read from `https://pypi.org/pypi/<name>/json` (`
 
 Note: `airportsdata` uses a date-stamped version scheme (`YYYYMMDD`), not semver - pin it
 explicitly or it will move under you on every rebuild.
+
+Note: `aioimaplib` is **GPLv3**, and it is the only maintained async IMAP client with real RFC 2177
+IDLE support. Nothing conflicts today because this repository declares no licence, but the
+published image links it, so it constrains any future non-GPL licensing.
 
 ---
 
@@ -675,8 +1074,12 @@ read identically to a countdown. Gate the style on `date > new Date()` and fall 
 per-flight rows in a `small` or `accessoryRectangular` widget, that reduces to a single
 `ListWidget.url` for the whole widget.
 
-### 9. ntfy: the topic name is the only secret
+### 9. Pushover: a 200 does not mean the message was accepted
 
-Headers are case-insensitive, so no correction needed there. The one thing to get right is that an
-auth-less "private" topic is private only by topic-name entropy and network reach - the docs are
-blunt that "the topic is essentially a password". Generate it, do not name it `flights`.
+The status code answers whether the request was well-formed, not whether Pushover took it. A
+malformed key still returns 4xx, but the reason lives in the JSON `errors` array, and reporting the
+status code alone throws away the one sentence that says which key is wrong. Parse the body.
+
+The other correction is the quiet-hours rule: priority `0` is silently demoted to `-1` while the
+user is in quiet hours, so a gate change sent at the default priority can arrive silently at 3am.
+Only `1` bypasses it.

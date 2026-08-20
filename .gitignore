@@ -11,6 +11,9 @@ data/
 credentials.json
 token.json
 
+# The stylesheet is built from styles/ and committed; its toolchain is not.
+node_modules/
+
 # Local overrides of the shipped example.
 docker-compose.override.yml
 

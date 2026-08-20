@@ -3,21 +3,24 @@
 // worse than a page that says it could not reach the server, so every navigation and
 // every API call goes to the network and is never stored.
 
-const SHELL = "shell-v2";
+const SHELL = "shell-v3";
 const ASSETS = [
-  "/static/app.css",
+  "/static/flighter.css",
   "/static/htmx.min.js",
+  "/static/basecoat-tabs.min.js",
+  "/static/fonts/manrope-latin-var.woff2",
+  "/static/fonts/jetbrains-mono-latin-var.woff2",
   "/static/icon.svg",
   "/static/manifest.json",
 ];
 
 const OFFLINE_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Offline</title><link rel="stylesheet" href="/static/app.css"></head><body>
-<main><div class="empty"><strong>No connection</strong>
-Flight times are only shown live, never from a cache. Reconnect and reload.
-<div class="actions" style="justify-content: center">
-<a class="btn btn--primary" href="/">Try again</a></div></div></main></body></html>`;
+<title>Offline</title><link rel="stylesheet" href="/static/flighter.css"></head>
+<body><main class="mx-auto w-full max-w-lg px-4 pt-16"><section class="empty">
+<header><h2>No connection</h2><p>Check your connection and try again.</p></header>
+<footer><a class="btn" href="/">Try again</a></footer>
+</section></main></body></html>`;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(SHELL).then((cache) => cache.addAll(ASSETS)));
@@ -41,8 +44,21 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (url.pathname.startsWith("/static/")) {
+    // Served from the cache so the shell paints offline and instantly, then refreshed in
+    // the background: an upgrade that ships a new stylesheet must not be invisible until
+    // somebody remembers to rename the cache.
     event.respondWith(
-      caches.match(request).then((hit) => hit || fetch(request))
+      caches.open(SHELL).then((cache) =>
+        cache.match(request).then((hit) => {
+          const fresh = fetch(request)
+            .then((response) => {
+              if (response.ok) cache.put(request, response.clone());
+              return response;
+            })
+            .catch(() => hit);
+          return hit || fresh;
+        })
+      )
     );
     return;
   }

@@ -2,57 +2,119 @@
 {% block title %}Health{% endblock %}
 {% block content %}
 
-<h1>Health</h1>
+<h1 class="mb-4 text-xl font-semibold tracking-tight">Health</h1>
 
-<div class="tiles">
-  <div class="tile">
-    <span class="label">AeroAPI, {{ budget.month }}</span>
-    <span class="value{{ ' stop' if budget.tripped else '' }}">
-      ${{ '%.2f'|format(budget.spend_usd) }}</span>
-    <span class="hint">of ${{ '%.2f'|format(budget.cap_usd) }}
-      {{ '- polling paused' if budget.tripped else 'cap' }}</span>
+<div class="grid grid-cols-2 gap-3">
+  <div class="card" data-size="sm">
+    <header><h3 class="text-muted-foreground!">FlightAware, {{ budget.month }}</h3></header>
+    <section>
+      <p class="font-mono text-2xl font-bold {{ 'text-stop' if budget.tripped }}">
+        ${{ '%.2f'|format(budget.spend_usd) }}</p>
+      <p class="mt-1 text-xs text-muted-foreground">
+        of ${{ '%.2f'|format(budget.cap_usd) }} {{ 'limit, updates paused' if budget.tripped else 'limit' }}</p>
+    </section>
   </div>
-  <div class="tile">
-    <span class="label">Last poll</span>
-    <span class="value">{{ at(last_snapshot, 'UTC') }}</span>
-    <span class="hint">
-      {%- if last_snapshot %}{{ at(last_snapshot, 'UTC', with_date=true) }}
-      {%- else %}nothing polled yet{% endif -%}
-    </span>
+  <div class="card" data-size="sm">
+    <header><h3 class="text-muted-foreground!">Last update</h3></header>
+    <section>
+      <p class="font-mono text-2xl font-bold">{{ at(last_snapshot, 'UTC') }}</p>
+      <p class="mt-1 text-xs text-muted-foreground">
+        {%- if last_snapshot %}{{ at(last_snapshot, 'UTC', with_date=true) }} UTC
+        {%- else %}nothing yet{% endif -%}
+      </p>
+    </section>
   </div>
 </div>
 
-<section class="panel">
-  <span class="label">Flights by status</span>
-  <dl class="facts">
-    {% for status in ('active', 'pending_review', 'completed', 'cancelled', 'archived') %}
-    <dt>{{ status.replace('_', ' ')|capitalize }}</dt>
-    <dd{% if not counts.get(status) %} class="blank"{% endif %}>{{ counts.get(status, 0) }}</dd>
-    {% endfor %}
-  </dl>
-</section>
+<div class="card mt-3" data-size="sm">
+  <header><h3>Flights</h3></header>
+  <section>
+    <div class="item-group -mx-2.5">
+      {% for status in ('active', 'pending_review', 'completed', 'cancelled', 'archived') %}
+      <div class="item" data-size="xs">
+        <section><p>{{ status.replace('_', ' ')|capitalize }}</p></section>
+        <aside class="font-mono {{ 'text-muted-foreground' if not counts.get(status) else 'font-medium' }}">
+          {{- counts.get(status, 0) -}}</aside>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
 
-<section class="panel">
-  <span class="label">Worker state</span>
-  <p class="panel-note">The poller and the Gmail sync each keep their own cursor here.</p>
-  {% if state %}
-    {% for key, value in state %}
-    <div class="label">{{ key }}</div>
-    <pre class="state">{{ value }}</pre>
-    {% endfor %}
-  {% else %}
-  <p class="panel-note" style="margin: 0">Nothing has run yet.</p>
-  {% endif %}
-</section>
+<div class="card mt-3" data-size="sm">
+  <header><h3>Services</h3></header>
+  <section>
+    <div class="item-group -mx-2.5">
+      {% for name, ready in [
+           ('iCloud', settings.icloud_configured),
+           ('iCloud Calendar', prefs.calendar_configured),
+           ('FlightAware', settings.aeroapi_configured),
+           ('Pushover', settings.pushover_configured)] %}
+      <div class="item" data-size="xs">
+        <section><p>{{ name }}</p></section>
+        <aside>
+          <span class="badge" data-variant="{{ 'ok' if ready else 'quiet' }}">
+            {{- 'Ready' if ready else 'Not set up' -}}</span>
+        </aside>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
 
-<section class="panel">
-  <span class="label">Connected services</span>
-  <dl class="facts">
-    <dt>Gmail</dt><dd class="text">{{ 'configured' if settings.gmail_configured else 'not configured' }}</dd>
-    <dt>Google Calendar</dt><dd class="text">{{ 'configured' if settings.gcal_configured else 'not configured' }}</dd>
-    <dt>AeroAPI</dt><dd class="text">{{ 'configured' if settings.aeroapi_configured else 'not configured' }}</dd>
-    <dt>ntfy</dt><dd class="text">{{ 'configured' if settings.ntfy_configured else 'not configured' }}</dd>
-  </dl>
-</section>
+{% if set_aside %}
+<div class="card mt-3" data-size="sm">
+  <header>
+    <h3>Set aside</h3>
+    <p>These emails could not be imported, so they still carry their flag in Mail.
+      Try one again, or take its flag off to drop it.</p>
+  </header>
+  <section>
+    <div class="item-group -mx-2.5">
+      {% for row in set_aside %}
+      <div class="item" data-size="xs">
+        <section>
+          <h4>{{ row.subject or 'No subject' }}</h4>
+          <p class="text-muted-foreground">{{ row.error or 'Nothing was imported.' }}</p>
+          <p class="text-muted-foreground">{{ row.attempts }} attempt(s), last
+            {{ at(row.processed_at, 'UTC', with_date=true) }} UTC</p>
+        </section>
+        <aside>
+          <form method="post" action="/health/retry">
+            <input type="hidden" name="message_id" value="{{ row.message_id }}">
+            <button class="btn" data-variant="outline" data-size="sm" type="submit">
+              Try again</button>
+          </form>
+        </aside>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+{% endif %}
+
+<div class="card mt-3 mb-4" data-size="sm">
+  <header><h3>Diagnostics</h3></header>
+  <section>
+    {% if state %}
+    <div class="accordion">
+      {% for key, value in state %}
+      <details>
+        <summary>
+          {{ key }}
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m6 9 6 6 6-6"/>
+          </svg>
+        </summary>
+        <pre class="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs">{{ value }}</pre>
+      </details>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-sm text-muted-foreground">Nothing has run yet.</p>
+    {% endif %}
+  </section>
+</div>
 
 {% endblock %}

@@ -1,0 +1,14 @@
+<div class="item-group -mx-2.5 mt-3">
+  {% for result in results %}
+  <div class="item" data-size="xs">
+    <section>
+      <h4>{{ result.name }}</h4>
+      <p>{{ result.detail }}</p>
+    </section>
+    <aside>
+      <span class="badge" data-variant="{{ 'ok' if result.ok else 'stop' }}">
+        {{- 'Working' if result.ok else 'Failed' -}}</span>
+    </aside>
+  </div>
+  {% endfor %}
+</div>

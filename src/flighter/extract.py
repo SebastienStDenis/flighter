@@ -20,8 +20,9 @@ from bs4 import BeautifulSoup
 from bs4.element import Tag
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from . import prefs
 from .config import Settings, get_settings
-from .gmail import Message
+from .mail import Message
 
 log = logging.getLogger(__name__)
 
@@ -76,7 +77,6 @@ class Extraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     is_flight_confirmation: bool
-    passenger_names: list[str]
     confidence: float = Field(ge=0.0, le=1.0)
     segments: list[Segment]
 
@@ -157,13 +157,7 @@ def from_jsonld(html: str) -> Extraction | None:
         log.debug("found %d FlightReservation node(s) but none were complete", len(reservations))
         return None
 
-    names = [name for node in reservations if (name := _passenger_name(node))]
-    return Extraction(
-        is_flight_confirmation=True,
-        passenger_names=list(dict.fromkeys(names)),
-        confidence=1.0,
-        segments=segments,
-    )
+    return Extraction(is_flight_confirmation=True, confidence=1.0, segments=segments)
 
 
 def _jsonld_blocks(soup: BeautifulSoup) -> list[Any]:
@@ -273,13 +267,6 @@ def _segment_from(reservation: dict[str, Any]) -> Segment | None:
         confirmation_code=_text(reservation.get("reservationNumber")),
         seat=_text(seat),
     )
-
-
-def _passenger_name(reservation: dict[str, Any]) -> str | None:
-    under_name = reservation.get("underName")
-    if isinstance(under_name, dict):
-        return _text(under_name.get("name"))
-    return _text(under_name)
 
 
 def _obj(value: Any) -> dict[str, Any]:
@@ -401,7 +388,7 @@ async def from_model(
         client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     response = await client.messages.create(
-        model=settings.anthropic_model,
+        model=prefs.current().anthropic_model,
         max_tokens=MAX_TOKENS,
         system=SYSTEM_PROMPT,
         # A closed JSON schema rather than a "reply with JSON" instruction: the response

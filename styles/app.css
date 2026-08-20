@@ -1,0 +1,180 @@
+/* The one stylesheet the app serves, compiled by Tailwind from Basecoat's components.
+
+   Basecoat is shadcn/ui as plain HTML classes, so the screens are built out of .card,
+   .badge, .btn, .alert, .item, .field and .empty rather than out of anything invented
+   here. What is written below is the theme those components read, and the one drawing
+   this app owns: the route between two airports with the aircraft somewhere along it. */
+
+@import "tailwindcss";
+@import "basecoat-css";
+
+@source "../src/flighter/templates";
+
+/* There is no theme switch. The phone decides, and the page follows. */
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
+@font-face {
+  font-family: "Manrope";
+  src: url("/static/fonts/manrope-latin-var.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/static/fonts/jetbrains-mono-latin-var.woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --font-sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-quiet: var(--quiet);
+  --color-plan: var(--plan);
+  --color-live: var(--live);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-stop: var(--stop);
+}
+
+/* A cold, low-chroma slate for the page and one blue for anything you can act on, so
+   the only saturated things on screen are the six status tones. Every one of those is
+   set at a lightness that clears 4.5:1 against its own badge in both schemes. */
+:root {
+  --radius: 0.75rem;
+
+  --background: oklch(0.975 0.004 258);
+  --foreground: oklch(0.205 0.02 258);
+  --card: oklch(1 0 0);
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.48 0.13 250);
+  --primary-foreground: oklch(0.99 0.003 250);
+  --secondary: oklch(0.955 0.006 258);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.955 0.006 258);
+  --muted-foreground: oklch(0.505 0.016 258);
+  --accent: oklch(0.945 0.012 250);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.495 0.17 25);
+  --border: oklch(0.905 0.008 258);
+  --input: oklch(0.885 0.008 258);
+  --ring: oklch(0.62 0.09 250);
+
+  --quiet: oklch(0.47 0.014 258);
+  --plan: oklch(0.48 0.13 250);
+  --live: oklch(0.495 0.16 300);
+  --ok: oklch(0.455 0.13 158);
+  --warn: oklch(0.48 0.14 72);
+  --stop: oklch(0.495 0.17 25);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --background: #0a0c11;
+    --foreground: oklch(0.945 0.008 258);
+    --card: oklch(0.205 0.014 262);
+    --card-foreground: var(--foreground);
+    --popover: oklch(0.225 0.014 262);
+    --popover-foreground: var(--foreground);
+    --primary: oklch(0.74 0.13 250);
+    --primary-foreground: oklch(0.175 0.02 258);
+    --secondary: oklch(0.265 0.014 262);
+    --secondary-foreground: var(--foreground);
+    --muted: oklch(0.265 0.014 262);
+    --muted-foreground: oklch(0.7 0.016 258);
+    --accent: oklch(0.3 0.02 258);
+    --accent-foreground: var(--foreground);
+    --destructive: oklch(0.73 0.17 25);
+    --border: oklch(0.31 0.016 262);
+    --input: oklch(0.34 0.016 262);
+    --ring: oklch(0.55 0.07 250);
+
+    --quiet: oklch(0.72 0.014 258);
+    --plan: oklch(0.74 0.13 250);
+    --live: oklch(0.75 0.16 300);
+    --ok: oklch(0.74 0.13 158);
+    --warn: oklch(0.78 0.14 72);
+    --stop: oklch(0.73 0.17 25);
+
+    /* Basecoat bakes the chevron's colour into a data URI, so the dark one is its own
+       image rather than a variable it can inherit. */
+    --chevron-down-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23989fa9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
+    --chevron-down-icon-50: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23989fa9" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
+    --check-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23989fa9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>');
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    /* A countdown that reflows every second is unreadable, so no digit is ever allowed
+       to be a different width from another. */
+    @apply font-sans tabular-nums antialiased;
+  }
+}
+
+@layer components {
+  /* Basecoat ships one destructive badge. A flight has six things it can be, and each
+     one is a word first and a colour second. */
+  .badge[data-variant='quiet'],
+  .badge[data-variant='plan'],
+  .badge[data-variant='live'],
+  .badge[data-variant='ok'],
+  .badge[data-variant='warn'],
+  .badge[data-variant='stop'] {
+    background-color: color-mix(in oklab, var(--tone) 14%, var(--card));
+    color: var(--tone);
+  }
+
+  .badge[data-variant='quiet'] { --tone: var(--quiet); }
+  .badge[data-variant='plan']  { --tone: var(--plan); }
+  .badge[data-variant='live']  { --tone: var(--live); }
+  .badge[data-variant='ok']    { --tone: var(--ok); }
+  .badge[data-variant='warn']  { --tone: var(--warn); }
+  .badge[data-variant='stop']  { --tone: var(--stop); }
+
+  /* The route: two airports, one rule between them, and the aircraft at the fraction of
+     the way it has actually flown. Dashed ahead of the mark, solid behind it. */
+  .route {
+    @apply grid items-center gap-3;
+    grid-template-columns: auto 1fr auto;
+  }
+
+  .route-line {
+    @apply relative h-px;
+    background: repeating-linear-gradient(
+      to right,
+      var(--border) 0 3px,
+      transparent 3px 8px
+    );
+  }
+
+  .route-line::before {
+    @apply absolute inset-y-0 left-0 content-[''];
+    width: var(--progress, 0%);
+    background: currentColor;
+  }
+
+  .route-mark {
+    @apply absolute top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center;
+    left: var(--progress, 0%);
+  }
+
+  /* The main action of every screen, inside the thumb's reach and clear of the home
+     indicator. */
+  .action-bar {
+    @apply sticky bottom-0 z-10 -mx-4 mt-auto border-t bg-background/85 px-4 pt-3 backdrop-blur;
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+}

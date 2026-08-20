@@ -10,3 +10,10 @@ data/
 docs/
 tests/
 widget/
+
+# The stylesheet is built before the image and copied in with src/.
+node_modules/
+styles/
+package.json
+package-lock.json
+.playwright-mcp/

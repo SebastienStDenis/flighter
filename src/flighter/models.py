@@ -42,17 +42,6 @@ def _created_at() -> Any:
     return mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
-class Passenger(Base):
-    __tablename__ = "passengers"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    display_name: Mapped[str] = mapped_column(Text, nullable=False)
-    is_self: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = _created_at()
-
-    bookings: Mapped[list[Booking]] = relationship(back_populates="passenger")
-
-
 class Airport(Base):
     """Seeded once at startup; the only source of truth for an airport's timezone."""
 
@@ -76,15 +65,13 @@ class Booking(Base):
             "status IN ('pending_review', 'active', 'completed', 'cancelled', 'archived')",
             name="bookings_status_check",
         ),
-        # A codeshare of the same physical flight must not become a second booking for
-        # the same passenger. Archived rows are excluded so a deleted-and-re-added
-        # booking is allowed.
+        # A codeshare of the same physical flight must not become a second booking.
+        # Archived rows are excluded so a deleted-and-re-added booking is allowed.
         # The departure *date* rather than the instant: the same booking re-sent with a
         # slightly different time must collide, and a genuine second flight on the same
-        # route the same day is not a thing one passenger does.
+        # route the same day is not a thing anyone does.
         Index(
             "bookings_dedupe",
-            "passenger_id",
             "marketing_carrier",
             "marketing_number",
             text("(scheduled_departure_utc AT TIME ZONE 'UTC')::date"),
@@ -99,9 +86,6 @@ class Booking(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    passenger_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("passengers.id"), nullable=False
-    )
     source: Mapped[str] = mapped_column(Text, nullable=False)
     source_message_id: Mapped[str | None] = mapped_column(Text)
 
@@ -127,14 +111,13 @@ class Booking(Base):
 
     status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
     extraction_confidence: Mapped[float | None] = mapped_column(Float)
-    gcal_event_id: Mapped[str | None] = mapped_column(Text)
+    calendar_event_uid: Mapped[str | None] = mapped_column(Text)
     next_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
-    passenger: Mapped[Passenger] = relationship(back_populates="bookings")
     snapshots: Mapped[list[FlightSnapshot]] = relationship(
         back_populates="booking", cascade="all, delete-orphan"
     )
@@ -185,7 +168,7 @@ class FlightSnapshot(Base):
 
 
 class FlightEvent(Base):
-    """A material change, fanned out to ntfy and Google Calendar independently."""
+    """A material change, fanned out to Pushover and iCloud Calendar independently."""
 
     __tablename__ = "flight_events"
 
@@ -206,15 +189,31 @@ class FlightEvent(Base):
 
 
 class IngestLog(Base):
-    """Every Gmail message we have looked at, so a replay never re-processes one."""
+    """Every email we have looked at, so a replay never re-processes one.
+
+    Keyed on the RFC822 Message-ID rather than anything the server hands out: an IMAP
+    UID belongs to one mailbox under one UIDVALIDITY, so keying on a UID would make the
+    same confirmation, filed by hand in two places, look like two different emails.
+
+    It is also the retry state. An `error` row keeps its message flagged and is tried
+    again once `retry_at` has passed; a null `retry_at` means the message has either been
+    decided or been set aside, and nothing will pick it up again without being asked.
+    Having an outcome already on file is what stops a second push going out about the
+    same email.
+    """
 
     __tablename__ = "ingest_log"
 
-    gmail_message_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    message_id: Mapped[str] = mapped_column(Text, primary_key=True)
     processed_at: Mapped[datetime] = _created_at()
     outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    # Kept because a Message-ID names nothing a person recognises, and the set-aside list
+    # on the health page has to say which email it is talking about.
+    subject: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     raw_extraction: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     error: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ApiUsage(Base):
@@ -229,8 +228,26 @@ class ApiUsage(Base):
     est_cost_usd: Mapped[float] = mapped_column(Numeric(10, 6), nullable=False)
 
 
+class Preferences(Base):
+    """The settings page, as one row.
+
+    One deployment means one row, and the JSONB blob means a new knob costs a field on
+    `Prefs` rather than a migration. Credentials are deliberately absent: they live in
+    the environment and the app never writes them here.
+    """
+
+    __tablename__ = "preferences"
+    __table_args__ = (CheckConstraint("id = 1", name="preferences_singleton"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    values: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class KV(Base):
-    """Small singleton state: the Gmail history cursor, breaker latches, and the like."""
+    """Small singleton state: breaker latches, and the like."""
 
     __tablename__ = "kv"
 

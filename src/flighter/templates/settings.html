@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% import "basecoat/tabs.html.jinja" as bc %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+
+<h1 class="mb-4 text-xl font-semibold tracking-tight">Settings</h1>
+
+{% if saved %}
+<div class="alert mb-3" role="status"><strong>Saved.</strong></div>
+{% endif %}
+{% if error %}
+<div class="alert mb-3" data-variant="destructive" role="alert">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="10"/>
+  </svg>
+  <strong>{{ error }}</strong>
+</div>
+{% endif %}
+
+{% set connections %}
+<div class="card" data-size="sm">
+  <header><h3>Connections</h3></header>
+  <section>
+    <div class="item-group -mx-2.5">
+      {% for name, ready, detail in [
+           ('FlightAware', settings.aeroapi_configured,
+            'Ready' if settings.aeroapi_configured else 'Add AEROAPI_KEY to .env'),
+           ('Anthropic', settings.anthropic_api_key,
+            'Ready' if settings.anthropic_api_key else 'Optional'),
+           ('iCloud', settings.icloud_configured,
+            settings.icloud_email if settings.icloud_configured
+            else 'Add ICLOUD_EMAIL and ICLOUD_APP_PASSWORD to .env'),
+           ('Calendar', prefs.calendar_configured,
+            calendar_name or calendar_error
+            or 'Pick an iCloud calendar under Preferences'),
+           ('Pushover', settings.pushover_configured,
+            'Ready' if settings.pushover_configured
+            else 'Add PUSHOVER_TOKEN and PUSHOVER_USER_KEY to .env')] %}
+      <div class="item" data-size="xs">
+        <section>
+          <h4>{{ name }}</h4>
+          <p class="font-mono break-all">{{ detail }}</p>
+        </section>
+        <aside>
+          <span class="badge" data-variant="{{ 'ok' if ready else 'quiet' }}">
+            {{- 'Ready' if ready else 'Not set up' -}}</span>
+        </aside>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+
+<div class="card mt-3" data-size="sm">
+  <header>
+    <h3>Checks</h3>
+    <p>Tries every connection in turn and names the one that is broken.</p>
+  </header>
+  <section>
+    <button class="btn w-full" data-variant="outline" type="button" hx-post="/settings/checks"
+            hx-target="#checks" hx-swap="innerHTML" hx-indicator="#checks">Run checks</button>
+    <div id="checks"></div>
+  </section>
+</div>
+{% endset %}
+
+{% set preferences %}
+<form id="settings-form" method="post" action="/settings">
+  <div class="card" data-size="sm">
+    <header><h3>This deployment</h3></header>
+    <section>
+      <fieldset class="fieldset gap-4">
+        <div role="group" class="field">
+          <label for="public_base_url">Public base URL</label>
+          <input type="url" id="public_base_url" name="public_base_url" required
+                 class="font-mono" aria-describedby="url-help"
+                 value="{{ posted['public_base_url'] }}">
+          <p id="url-help">The address links in your calendar and on your phone open.
+            You are on <code class="font-mono">{{ this_origin }}</code>.
+            <button class="btn" data-variant="link" data-size="xs" type="button"
+                    onclick="document.getElementById('public_base_url').value = '{{ this_origin }}'">
+              Use that</button>
+          </p>
+        </div>
+        <div role="group" class="field">
+          <label for="log_level">Log level</label>
+          <select id="log_level" name="log_level">
+            {% for level in log_levels %}
+            <option value="{{ level }}"{{ ' selected' if level == posted['log_level'] }}>{{ level }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </fieldset>
+    </section>
+  </div>
+
+  <div class="card mt-3" data-size="sm">
+    <header>
+      <h3>Spend</h3>
+      <p>Updates stop for the rest of the month once FlightAware costs reach the limit.</p>
+    </header>
+    <section>
+      <div class="grid grid-cols-2 gap-3">
+        <div role="group" class="field">
+          <label for="aeroapi_monthly_cap_usd">Monthly limit (USD)</label>
+          <input type="text" inputmode="decimal" class="font-mono" required
+                 id="aeroapi_monthly_cap_usd" name="aeroapi_monthly_cap_usd"
+                 value="{{ posted['aeroapi_monthly_cap_usd'] }}">
+        </div>
+        <div role="group" class="field">
+          <label for="aeroapi_rate_limit_per_minute">Checks per minute</label>
+          <input type="number" min="1" max="10" class="font-mono" required
+                 id="aeroapi_rate_limit_per_minute" name="aeroapi_rate_limit_per_minute"
+                 value="{{ posted['aeroapi_rate_limit_per_minute'] }}">
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="card mt-3" data-size="sm">
+    <header>
+      <h3>Mail</h3>
+      <p>Only the emails you flag this colour are imported. Nothing else is read.</p>
+    </header>
+    <section>
+      <fieldset class="fieldset gap-4">
+        <div role="group" class="field">
+          <label for="imap_flag_colour">Import flag</label>
+          <select id="imap_flag_colour" name="imap_flag_colour" aria-describedby="flag-help">
+            {% for colour in flag_colours %}
+            <option value="{{ colour }}"{{ ' selected' if colour == posted['imap_flag_colour'] }}>
+              {{- colour|capitalize -}}</option>
+            {% endfor %}
+          </select>
+          <p id="flag-help">Give this colour to a booking email and the flight appears here.
+            On the iPhone: <strong>open the email, tap the More button, tap Flag</strong>, then
+            pick the colour. On the Mac: select the email and <strong>choose the colour from the
+            flag button in the toolbar</strong>. Once it is imported the flag comes off and the
+            email stays exactly where it was. Anything that failed keeps its flag, is tried twice
+            more and is then set aside on the health page for you to hand back; your phone is told
+            either way. Rename the flag to <em>flighter</em> in Mail on the Mac if you like - that
+            name is only a label on that Mac, and the colour is what this watches for. <strong>Red is not on the list</strong>: it is the one colour Apple
+            sends with no marker at all, so it cannot be told apart from an ordinary flag.</p>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div role="group" class="field">
+            <label for="imap_idle_seconds">Check every (s)</label>
+            <input type="number" min="60" max="1740" id="imap_idle_seconds" class="font-mono"
+                   name="imap_idle_seconds" required value="{{ posted['imap_idle_seconds'] }}">
+          </div>
+          <div role="group" class="field">
+            <label for="extraction_confidence_threshold">Review below</label>
+            <input type="number" min="0" max="1" step="0.01" class="font-mono" required
+                   id="extraction_confidence_threshold" name="extraction_confidence_threshold"
+                   value="{{ posted['extraction_confidence_threshold'] }}">
+          </div>
+          <div role="group" class="field">
+            <label for="anthropic_model">Model</label>
+            <input type="text" id="anthropic_model" name="anthropic_model" required class="font-mono"
+                   value="{{ posted['anthropic_model'] }}">
+          </div>
+        </div>
+      </fieldset>
+    </section>
+  </div>
+
+  <div class="card mt-3" data-size="sm">
+    <header>
+      <h3>Calendar</h3>
+      <p>The iCloud calendar flights are written to. Make it in the Calendar app first;
+        iCloud does not let this app create one.</p>
+    </header>
+    <section>
+      <div role="group" class="field">
+        <label for="icloud_calendar_url">Calendar</label>
+        {% if calendar_error %}
+        <input type="hidden" name="icloud_calendar_url"
+               value="{{ posted['icloud_calendar_url'] }}">
+        <p class="text-sm text-destructive">{{ calendar_error }}</p>
+        <p id="calendar-help">The calendar cannot be listed, so it cannot be changed here
+          right now. Whichever one was picked before is still being written to. Fix the
+          connection and reload this page.</p>
+        {% else %}
+        <select id="icloud_calendar_url" name="icloud_calendar_url"
+                aria-describedby="calendar-help">
+          <option value=""{{ ' selected' if not posted['icloud_calendar_url'] }}>
+            Do not write to a calendar</option>
+          {% for calendar in calendars %}
+          <option value="{{ calendar.url }}"
+                  {{- ' selected' if calendar.url == posted['icloud_calendar_url'] }}>
+            {{- calendar.name -}}</option>
+          {% endfor %}
+          {% if posted['icloud_calendar_url'] and not calendar_name %}
+          <option value="{{ posted['icloud_calendar_url'] }}" selected>
+            The calendar that was picked, which is no longer on this account</option>
+          {% endif %}
+        </select>
+        <p id="calendar-help">Every calendar on the account that can hold events. Give
+          flights one of their own and a bad sync is undone by deleting one calendar
+          rather than hunting among appointments. Renaming it in the Calendar app is
+          safe: what is stored is the calendar itself, not what it is called.</p>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+</form>
+{% endset %}
+
+{% set widget %}
+<div class="card" data-size="sm">
+  <header>
+    <h3>Widget</h3>
+    <p>Enter this the first time you run the widget on your phone.</p>
+  </header>
+  <section>
+    <pre class="overflow-x-auto rounded-md bg-muted p-3 font-mono text-sm">{{ settings.widget_token }}</pre>
+  </section>
+</div>
+{% endset %}
+
+{{ bc.tabs(
+     id='settings-tabs',
+     tablist_attrs={'class': 'w-full'},
+     tabsets=[
+       {'tab': 'Connections', 'panel': connections},
+       {'tab': 'Preferences', 'panel': preferences},
+       {'tab': 'Widget', 'panel': widget},
+     ]) }}
+
+<div class="action-bar">
+  <button class="btn w-full" data-size="lg" type="submit" form="settings-form">Save</button>
+</div>
+
+{% endblock %}

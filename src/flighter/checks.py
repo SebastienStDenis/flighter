@@ -12,9 +12,12 @@ from dataclasses import dataclass
 import httpx
 from sqlalchemy import func, select
 
+from . import prefs
+from .aeroapi import BASE_URL
 from .config import Settings
 from .db import session_scope
 from .models import Airport
+from .notify import MESSAGES_URL, PRIORITY_QUIET
 
 log = logging.getLogger(__name__)
 
@@ -41,10 +44,10 @@ async def _check_database() -> CheckResult:
 
 async def _check_aeroapi(settings: Settings) -> CheckResult:
     if not settings.aeroapi_configured:
-        return CheckResult("aeroapi", False, "AEROAPI_KEY is not set")
+        return CheckResult("aeroapi", False, "AEROAPI_KEY is not set in .env")
     # A known-good ident on a carrier that always has flights in the window. This spends
     # one result set, which is the point: an unspent key proves nothing.
-    url = f"{settings.aeroapi_base_url}/flights/UAL4"
+    url = f"{BASE_URL}/flights/UAL4"
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
             response = await client.get(
@@ -62,54 +65,98 @@ async def _check_aeroapi(settings: Settings) -> CheckResult:
     return CheckResult("aeroapi", True, f"{len(flights)} flights returned for UAL4")
 
 
-async def _check_ntfy(settings: Settings) -> CheckResult:
-    if not settings.ntfy_configured:
-        return CheckResult("ntfy", False, "NTFY_TOPIC is not set")
-    headers = {"Title": "Flight tracker", "Priority": "low", "Tags": "white_check_mark"}
-    if settings.ntfy_token:
-        headers["Authorization"] = f"Bearer {settings.ntfy_token}"
+async def _check_pushover(settings: Settings) -> CheckResult:
+    """Sends a real push, quietly, because a token that is never spent proves nothing."""
+    if not settings.pushover_configured:
+        return CheckResult(
+            "pushover", False, "PUSHOVER_TOKEN and PUSHOVER_USER_KEY are not set in .env"
+        )
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
             response = await client.post(
-                f"{settings.ntfy_url}/{settings.ntfy_topic}",
-                content=b"Checks ran and this arrived.",
-                headers=headers,
+                MESSAGES_URL,
+                data={
+                    "token": settings.pushover_token,
+                    "user": settings.pushover_user_key,
+                    "title": "Flight tracker",
+                    "message": "Checks ran and this arrived.",
+                    "priority": str(PRIORITY_QUIET),
+                },
             )
-            response.raise_for_status()
     except Exception as exc:
-        return CheckResult("ntfy", False, str(exc))
-    return CheckResult("ntfy", True, "test push sent; check your phone")
-
-
-async def _check_gmail(settings: Settings) -> CheckResult:
-    if not settings.gmail_configured:
-        return CheckResult("gmail", False, "GMAIL_* credentials are not set")
+        return CheckResult("pushover", False, str(exc))
+    # A rejection carries a JSON body naming the field it refused, which is the difference
+    # between a bad application token and a bad user key.
     try:
-        from .gmail import profile
+        body = response.json()
+    except ValueError:
+        return CheckResult("pushover", False, f"HTTP {response.status_code}: {response.text[:200]}")
+    if body.get("status") != 1:
+        errors = "; ".join(body.get("errors", [])) or f"HTTP {response.status_code}"
+        return CheckResult("pushover", False, errors)
+    return CheckResult("pushover", True, "test push sent; check your phone")
 
-        address = await profile()
+
+async def _check_mail(settings: Settings) -> CheckResult:
+    """Logs in and counts what carries the flag, across every mailbox the sweep looks in.
+
+    That is the whole sweep short of doing the work, so it answers both questions at
+    once: can the flag be seen at all, and is anything sitting there unimported.
+    """
+    if not settings.icloud_configured:
+        return CheckResult(
+            "mail", False, "ICLOUD_EMAIL and ICLOUD_APP_PASSWORD are not set in .env"
+        )
+    from .mail import Mailbox
+
+    mailbox = Mailbox(settings)
+    try:
+        await mailbox.connect()
+        waiting = await mailbox.count_flagged()
     except Exception as exc:
-        return CheckResult("gmail", False, str(exc))
-    return CheckResult("gmail", True, f"authenticated as {address}")
+        return CheckResult("mail", False, str(exc))
+    finally:
+        await mailbox.close()
+    return CheckResult(
+        "mail",
+        True,
+        f"{waiting} message(s) flagged {mailbox.colour} across "
+        f"{len(mailbox.mailboxes)} mailbox(es)",
+    )
 
 
 async def _check_calendar(settings: Settings) -> CheckResult:
-    if not settings.gcal_configured:
-        return CheckResult("calendar", False, "GCAL_* credentials are not set")
-    try:
-        from .gcal import CalendarClient
+    """Signs in over CalDAV and lists the account's calendars, then looks for ours in it.
 
-        summary = await CalendarClient(settings).describe_calendar()
+    That is the one thing a sync cannot tell you on its own: writes go straight to a
+    stored URL, so a calendar deleted in the Calendar app is a 404 on the next flight
+    rather than something anybody was told about.
+    """
+    from .caldav import CalendarClient
+
+    chosen = prefs.current().icloud_calendar_url
+    if not chosen:
+        return CheckResult("calendar", False, "no calendar picked on the settings page")
+    try:
+        offered = await CalendarClient(settings).calendars()
     except Exception as exc:
         return CheckResult("calendar", False, str(exc))
-    return CheckResult("calendar", True, f"writing to {summary}")
+    found = next((collection for collection in offered if collection.url == chosen), None)
+    if found is None:
+        return CheckResult(
+            "calendar",
+            False,
+            f"the calendar that was picked is no longer on this account. It offers: "
+            f"{', '.join(sorted(collection.name for collection in offered)) or 'nothing'}.",
+        )
+    return CheckResult("calendar", True, f"writing to {found.name} at {found.url}")
 
 
 async def run_checks(settings: Settings) -> list[CheckResult]:
     return [
         await _check_database(),
         await _check_aeroapi(settings),
-        await _check_gmail(settings),
+        await _check_mail(settings),
         await _check_calendar(settings),
-        await _check_ntfy(settings),
+        await _check_pushover(settings),
     ]
