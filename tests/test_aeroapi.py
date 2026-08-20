@@ -108,7 +108,6 @@ FLIGHT: dict[str, Any] = {
 def booking(**overrides: Any) -> Booking:
     defaults: dict[str, Any] = {
         "id": 1,
-        "passenger_id": 1,
         "source": "email",
         "marketing_carrier": "AA",
         "marketing_number": "6141",

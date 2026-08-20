@@ -49,7 +49,6 @@ def to_booking_times(
 async def create_booking(
     session: AsyncSession,
     *,
-    passenger_id: int,
     marketing_carrier: str,
     marketing_number: str,
     origin_iata: str,
@@ -81,7 +80,6 @@ async def create_booking(
     )
 
     booking = Booking(
-        passenger_id=passenger_id,
         source=source,
         source_message_id=source_message_id,
         marketing_carrier=_carrier(marketing_carrier),
@@ -176,7 +174,6 @@ async def list_bookings(
 
 async def find_duplicate(
     session: AsyncSession,
-    passenger_id: int,
     carrier: str,
     number: str,
     departure_utc: datetime,
@@ -188,7 +185,6 @@ async def find_duplicate(
     """
     day = to_utc(departure_utc, "UTC").date()
     stmt = select(Booking).where(
-        Booking.passenger_id == passenger_id,
         Booking.marketing_carrier == _carrier(carrier),
         Booking.marketing_number == _number(number),
         Booking.status != ARCHIVED,

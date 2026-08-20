@@ -23,7 +23,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, PlainSerializer
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from . import prefs
 from .aeroapi import budget_status
@@ -92,8 +91,6 @@ class WidgetFlight(BaseModel):
     countdown_to: UtcInstant | None
     delayed: bool
     progress_percent: int | None
-    passenger: str
-    is_self: bool
 
 
 class WidgetPayload(BaseModel):
@@ -151,7 +148,6 @@ async def load_flight_rows(session: AsyncSession, now: datetime) -> list[FlightR
     bookings = (
         await session.scalars(
             select(Booking)
-            .options(selectinload(Booking.passenger))
             .where(
                 Booking.status == "active",
                 or_(
@@ -240,8 +236,6 @@ def _flight(
         # Only while airborne: the feed reports 0 on the ground and 100 after landing,
         # either of which draws a bar that says nothing.
         progress_percent=snapshot.progress_percent if snapshot and phase == AIRBORNE else None,
-        passenger=booking.passenger.display_name,
-        is_self=booking.passenger.is_self,
     )
 
 
@@ -264,7 +258,7 @@ def _countdown(
 
 
 def _subtitle(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> str | None:
-    """Gate, terminal or carousel, whichever the traveller is walking towards now."""
+    """Gate, terminal or carousel, whichever is the one to walk towards now."""
     if phase == CANCELLED:
         return "Cancelled"
     if phase == DIVERTED:

@@ -33,7 +33,7 @@ from .checks import run_checks
 from .config import Settings
 from .db import get_session
 from .gcal import CalendarClient
-from .models import KV, Airport, Booking, FlightEvent, FlightSnapshot, Passenger
+from .models import KV, Airport, Booking, FlightEvent, FlightSnapshot
 from .phase import arrival_estimate, landing_estimate
 from .timezones import format_local, to_local
 from .widget import router as widget_router
@@ -84,7 +84,7 @@ class Status(NamedTuple):
 
 @dataclass(frozen=True)
 class FlightView:
-    """A booking, its newest snapshot, both airports and the passenger, for a template.
+    """A booking, its newest snapshot and both airports, for a template.
 
     Templates ask this for values rather than reaching into a snapshot, so "estimated
     beats scheduled, actual beats estimated" is decided once instead of per page.
@@ -94,7 +94,6 @@ class FlightView:
     snapshot: FlightSnapshot | None
     origin: Airport | None
     dest: Airport | None
-    passenger: Passenger | None
 
     @property
     def flight_number(self) -> str:
@@ -106,10 +105,6 @@ class FlightView:
         if not booking.operating_carrier:
             return None
         return f"{booking.operating_carrier}{booking.operating_number or ''}"
-
-    @property
-    def passenger_name(self) -> str:
-        return self.passenger.display_name if self.passenger else MISSING
 
     @property
     def origin_tz(self) -> str:
@@ -354,32 +349,17 @@ async def build_views(session: AsyncSession, rows: Iterable[Booking]) -> list[Fl
             if iata not in airports:
                 airports[iata] = await get_airport(session, iata)
 
-    # Fetched up front rather than through booking.passenger: a lazy relationship on an
-    # async session raises instead of quietly emitting the query a template expects.
-    people = await session.execute(
-        select(Passenger).where(Passenger.id.in_({booking.passenger_id for booking in bookings}))
-    )
-    by_id = {person.id: person for person in people.scalars()}
-
     views = [
         FlightView(
             booking=booking,
             snapshot=snapshots.get(booking.id),
             origin=airports.get(booking.origin_iata),
             dest=airports.get(booking.dest_iata),
-            passenger=by_id.get(booking.passenger_id),
         )
         for booking in bookings
     ]
     views.sort(key=lambda view: view.scheduled_departure)
     return views
-
-
-async def list_passengers(session: AsyncSession) -> list[Passenger]:
-    rows = await session.execute(
-        select(Passenger).order_by(Passenger.is_self.desc(), Passenger.display_name)
-    )
-    return list(rows.scalars())
 
 
 def local_input(instant: datetime | None, tz: str) -> str:
@@ -407,7 +387,6 @@ def parse_local(value: str) -> datetime | None:
 class FlightForm:
     """The add and edit forms, which post exactly the same fields."""
 
-    passenger_id: Annotated[int, Form()]
     marketing_carrier: Annotated[str, Form()]
     marketing_number: Annotated[str, Form()]
     origin_iata: Annotated[str, Form()]
@@ -463,9 +442,8 @@ def create_app(settings: Settings) -> FastAPI:
     def from_htmx(request: Request) -> bool:
         return request.headers.get("HX-Request") == "true"
 
-    async def flight_form_page(
+    def flight_form_page(
         request: Request,
-        session: AsyncSession,
         view: FlightView | None,
         error: str | None = None,
         posted: dict[str, Any] | None = None,
@@ -473,12 +451,7 @@ def create_app(settings: Settings) -> FastAPI:
         return page(
             request,
             "form.html",
-            {
-                "view": view,
-                "passengers": await list_passengers(session),
-                "error": error,
-                "form": posted or {},
-            },
+            {"view": view, "error": error, "form": posted or {}},
             status_code=400 if error else 200,
         )
 
@@ -530,19 +503,18 @@ def create_app(settings: Settings) -> FastAPI:
 
     # Declared before /f/{booking_id} so that "new" is never read as an id.
     @app.get("/f/new")
-    async def new_flight(request: Request, session: SessionDep) -> Response:
-        return await flight_form_page(request, session, view=None)
+    async def new_flight(request: Request) -> Response:
+        return flight_form_page(request, view=None)
 
     @app.post("/f")
     async def create_flight(request: Request, session: SessionDep, form: FormDep) -> Response:
         if form.departure is None:
-            return await flight_form_page(
-                request, session, None, "Departure needs a date and a time.", form.as_posted()
+            return flight_form_page(
+                request, None, "Departure needs a date and a time.", form.as_posted()
             )
         try:
             booking = await booking_repo.create_booking(
                 session,
-                passenger_id=form.passenger_id,
                 marketing_carrier=form.marketing_carrier,
                 marketing_number=form.marketing_number,
                 origin_iata=form.origin_iata,
@@ -555,15 +527,11 @@ def create_app(settings: Settings) -> FastAPI:
                 source="manual",
             )
         except IntegrityError:
-            # The dedupe index caught a flight this passenger is already on. Roll back
-            # or every query behind the re-rendered form fails too.
+            # The dedupe index caught a flight already on the list. Roll back or every
+            # query behind the re-rendered form fails too.
             await session.rollback()
-            return await flight_form_page(
-                request,
-                session,
-                None,
-                "That passenger is already booked on this flight that day.",
-                form.as_posted(),
+            return flight_form_page(
+                request, None, "That flight is already on the list for that day.", form.as_posted()
             )
         return RedirectResponse(f"/f/{booking.id}", status_code=303)
 
@@ -579,7 +547,7 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.get("/f/{booking_id}/edit")
     async def edit_flight(request: Request, session: SessionDep, booking_id: int) -> Response:
-        return await flight_form_page(request, session, await load(session, booking_id))
+        return flight_form_page(request, await load(session, booking_id))
 
     @app.post("/f/{booking_id}")
     async def update_flight(
@@ -587,8 +555,8 @@ def create_app(settings: Settings) -> FastAPI:
     ) -> Response:
         view = await load(session, booking_id)
         if form.departure is None:
-            return await flight_form_page(
-                request, session, view, "Departure needs a date and a time.", form.as_posted()
+            return flight_form_page(
+                request, view, "Departure needs a date and a time.", form.as_posted()
             )
         origin = form.origin_iata.strip().upper()
         dest = form.dest_iata.strip().upper()
@@ -604,7 +572,6 @@ def create_app(settings: Settings) -> FastAPI:
             await booking_repo.update_booking(
                 session,
                 booking_id,
-                passenger_id=form.passenger_id,
                 # Upper-cased to match what create_booking stores: the dedupe index
                 # compares these literally, and "aa" would read as another airline.
                 marketing_carrier=form.marketing_carrier.strip().upper(),
@@ -619,12 +586,8 @@ def create_app(settings: Settings) -> FastAPI:
             )
         except IntegrityError:
             await session.rollback()
-            return await flight_form_page(
-                request,
-                session,
-                view,
-                "That passenger is already booked on this flight that day.",
-                form.as_posted(),
+            return flight_form_page(
+                request, view, "That flight is already on the list for that day.", form.as_posted()
             )
         return RedirectResponse(f"/f/{booking_id}", status_code=303)
 
@@ -669,47 +632,6 @@ def create_app(settings: Settings) -> FastAPI:
         if from_htmx(request):
             return Response(status_code=200)
         return RedirectResponse("/review", status_code=303)
-
-    @app.get("/passengers")
-    async def passengers(request: Request, session: SessionDep) -> Response:
-        return page(request, "passengers.html", {"passengers": await list_passengers(session)})
-
-    @app.post("/passengers")
-    async def add_passenger(
-        request: Request,
-        session: SessionDep,
-        display_name: Annotated[str, Form()],
-        is_self: Annotated[bool, Form()] = False,
-    ) -> Response:
-        name = display_name.strip()
-        if not name:
-            raise HTTPException(status_code=400, detail="A passenger needs a name.")
-        passenger = Passenger(display_name=name, is_self=is_self)
-        session.add(passenger)
-        await session.flush()
-        if from_htmx(request):
-            # Added from inside the flight form: hand back the option to select.
-            return page(request, "option.html", {"passenger": passenger})
-        return RedirectResponse("/passengers", status_code=303)
-
-    @app.post("/passengers/{passenger_id}/delete")
-    async def delete_passenger(
-        request: Request, session: SessionDep, passenger_id: int
-    ) -> Response:
-        passenger = await session.get(Passenger, passenger_id)
-        if passenger is None:
-            raise HTTPException(status_code=404, detail="No such passenger.")
-        booked = await session.scalar(
-            select(func.count()).select_from(Booking).where(Booking.passenger_id == passenger_id)
-        )
-        if booked:
-            raise HTTPException(
-                status_code=400, detail="That passenger still has flights on the list."
-            )
-        await session.delete(passenger)
-        if from_htmx(request):
-            return Response(status_code=200)
-        return RedirectResponse("/passengers", status_code=303)
 
     async def settings_context(request: Request) -> dict[str, Any]:
         current = prefs.current()

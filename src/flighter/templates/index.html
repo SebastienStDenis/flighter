@@ -39,7 +39,6 @@
       to {{ day(trip[-1].scheduled_departure, trip[-1].origin_tz) }}
     {%- endif %}
   </span>
-  <span class="trip-who">{{ trip|map(attribute='passenger_name')|unique|join(', ') }}</span>
 </div>
 {% for v in trip %}{{ m.card(v) }}{% endfor %}
 {% endfor %}

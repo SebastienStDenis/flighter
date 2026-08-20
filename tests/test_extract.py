@@ -48,7 +48,7 @@ MICRODATA = """
 """
 
 MODEL_ANSWER = """
-{"is_flight_confirmation": true, "passenger_names": ["SEBASTIEN ST-DENIS"], "confidence": 0.92,
+{"is_flight_confirmation": true, "confidence": 0.92,
  "segments": [{"marketing_carrier": "WS", "marketing_number": "1502",
  "operating_carrier": null, "operating_number": null, "origin_iata": "YYC",
  "dest_iata": "YVR", "departure_local": "2026-11-17T06:30:00", "departure_tz_hint": null,
@@ -124,7 +124,6 @@ def test_jsonld_is_read_exactly() -> None:
     assert extraction is not None
     assert extraction.is_flight_confirmation
     assert extraction.confidence == 1.0
-    assert extraction.passenger_names == ["SEBASTIEN ST-DENIS"]
 
     (segment,) = extraction.segments
     assert segment.marketing_carrier == "DL"
@@ -167,7 +166,6 @@ def test_microdata_is_read_like_jsonld() -> None:
     assert (segment.marketing_carrier, segment.marketing_number) == ("UA", "47")
     assert (segment.origin_iata, segment.dest_iata) == ("SFO", "EWR")
     assert segment.departure_local == "2026-12-01T08:15:00"
-    assert extraction.passenger_names == ["Sebastien St-Denis"]
 
 
 def test_html_without_a_reservation_yields_nothing() -> None:

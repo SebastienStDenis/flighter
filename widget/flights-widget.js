@@ -458,9 +458,6 @@ function subtitleFor(flight) {
   if (flight.delayed) {
     parts.push("Delayed");
   }
-  if (!flight.is_self) {
-    parts.push(flight.passenger);
-  }
   return parts.join(" · ") || phaseText(flight);
 }
 

@@ -42,17 +42,6 @@ def _created_at() -> Any:
     return mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
-class Passenger(Base):
-    __tablename__ = "passengers"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    display_name: Mapped[str] = mapped_column(Text, nullable=False)
-    is_self: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = _created_at()
-
-    bookings: Mapped[list[Booking]] = relationship(back_populates="passenger")
-
-
 class Airport(Base):
     """Seeded once at startup; the only source of truth for an airport's timezone."""
 
@@ -76,15 +65,13 @@ class Booking(Base):
             "status IN ('pending_review', 'active', 'completed', 'cancelled', 'archived')",
             name="bookings_status_check",
         ),
-        # A codeshare of the same physical flight must not become a second booking for
-        # the same passenger. Archived rows are excluded so a deleted-and-re-added
-        # booking is allowed.
+        # A codeshare of the same physical flight must not become a second booking.
+        # Archived rows are excluded so a deleted-and-re-added booking is allowed.
         # The departure *date* rather than the instant: the same booking re-sent with a
         # slightly different time must collide, and a genuine second flight on the same
-        # route the same day is not a thing one passenger does.
+        # route the same day is not a thing anyone does.
         Index(
             "bookings_dedupe",
-            "passenger_id",
             "marketing_carrier",
             "marketing_number",
             text("(scheduled_departure_utc AT TIME ZONE 'UTC')::date"),
@@ -99,9 +86,6 @@ class Booking(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    passenger_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("passengers.id"), nullable=False
-    )
     source: Mapped[str] = mapped_column(Text, nullable=False)
     source_message_id: Mapped[str | None] = mapped_column(Text)
 
@@ -134,7 +118,6 @@ class Booking(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
-    passenger: Mapped[Passenger] = relationship(back_populates="bookings")
     snapshots: Mapped[list[FlightSnapshot]] = relationship(
         back_populates="booking", cascade="all, delete-orphan"
     )

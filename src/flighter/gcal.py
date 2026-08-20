@@ -16,7 +16,6 @@ from typing import Any
 from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from sqlalchemy import inspect as sa_inspect
 
 from . import prefs
 from .config import Settings
@@ -88,15 +87,6 @@ def _location(airports: Mapping[str, Airport], iata: str) -> str:
     return ", ".join(part for part in parts if part)
 
 
-def _passenger_name(booking: Booking) -> str | None:
-    """Never triggers a lazy load, which would explode under asyncio; the caller is
-    expected to have eager-loaded the relationship."""
-    if "passenger" in sa_inspect(booking).unloaded:
-        return None
-    passenger = booking.passenger
-    return passenger.display_name if passenger else None
-
-
 def event_body(
     booking: Booking,
     snapshot: FlightSnapshot | None,
@@ -138,9 +128,6 @@ def event_body(
     }
 
     lines = []
-    passenger = _passenger_name(booking)
-    if passenger:
-        lines.append(f"Passenger: {passenger}")
     if booking.confirmation_code:
         lines.append(f"Confirmation: {booking.confirmation_code}")
     if booking.seat:

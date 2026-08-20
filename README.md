@@ -33,9 +33,6 @@ your phone left it. What has been dealt with is tracked here instead, as a UIDVA
 and the highest UID processed, and the ingest log is keyed on each email's `Message-ID`
 so re-filing a message does not make it new again.
 
-**Passengers are first-class.** Tracking your sister's flight into JFK so you know when to
-leave for the airport is a normal thing to want, and it is not a note field.
-
 **Timezones are resolved from the airport, never from the email.** Airlines state offsets
 wrong often enough that trusting them is a bug waiting for a date-line flight. Every
 airport carries an IANA zone, every instant in the database is UTC, and every time on
@@ -183,8 +180,7 @@ Open `https://flighter.<your-tailnet>.ts.net/settings` and finish there:
 3. **Run checks**. It exercises Postgres, AeroAPI, iCloud, Calendar and Pushover in turn
    and names the broken one, which is the question you will actually have.
 
-Then add a passenger for yourself on the **People** page, and either add a flight by hand
-or let the mail loop find one.
+Then either add a flight by hand or let the mail loop find one.
 
 Pushing to `main` publishes a `linux/amd64` + `linux/arm64` image to
 `ghcr.io/sebastienstdenis/flighter:latest`, so updating the home stack is:

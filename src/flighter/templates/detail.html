@@ -12,15 +12,15 @@
     {{ m.chip(v.status) }}
   </div>
   {{ m.route(v, names=true) }}
+  {% if v.progress_percent is not none or v.arrival %}
   <div class="route-meta">
     {%- if v.progress_percent is not none -%}
       {{ v.progress_percent }}% flown
-    {%- elif v.arrival -%}
-      {{ duration(v.arrival - v.departure) }} in the air
     {%- else -%}
-      {{ v.passenger_name }}
+      {{ duration(v.arrival - v.departure) }} in the air
     {%- endif -%}
   </div>
+  {% endif %}
 </div>
 
 <section class="panel">
@@ -65,7 +65,6 @@
 <section class="panel">
   <span class="label">Booking</span>
   <dl class="facts">
-    {{ m.fact("Passenger", v.passenger_name, "text") }}
     {{ m.fact("Confirmation", dash(v.booking.confirmation_code), "strong") }}
     {{ m.fact("Seat", dash(v.booking.seat), "strong") }}
     {{ m.fact("Operated as", dash(v.operating_flight)) }}

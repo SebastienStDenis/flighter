@@ -77,7 +77,6 @@ class Extraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     is_flight_confirmation: bool
-    passenger_names: list[str]
     confidence: float = Field(ge=0.0, le=1.0)
     segments: list[Segment]
 
@@ -158,13 +157,7 @@ def from_jsonld(html: str) -> Extraction | None:
         log.debug("found %d FlightReservation node(s) but none were complete", len(reservations))
         return None
 
-    names = [name for node in reservations if (name := _passenger_name(node))]
-    return Extraction(
-        is_flight_confirmation=True,
-        passenger_names=list(dict.fromkeys(names)),
-        confidence=1.0,
-        segments=segments,
-    )
+    return Extraction(is_flight_confirmation=True, confidence=1.0, segments=segments)
 
 
 def _jsonld_blocks(soup: BeautifulSoup) -> list[Any]:
@@ -274,13 +267,6 @@ def _segment_from(reservation: dict[str, Any]) -> Segment | None:
         confirmation_code=_text(reservation.get("reservationNumber")),
         seat=_text(seat),
     )
-
-
-def _passenger_name(reservation: dict[str, Any]) -> str | None:
-    under_name = reservation.get("underName")
-    if isinstance(under_name, dict):
-        return _text(under_name.get("name"))
-    return _text(under_name)
 
 
 def _obj(value: Any) -> dict[str, Any]:

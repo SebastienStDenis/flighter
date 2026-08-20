@@ -20,13 +20,11 @@ from flighter import prefs, web
 from flighter.aeroapi import BudgetStatus
 from flighter.config import Settings
 from flighter.db import get_session
-from flighter.models import Airport, Booking, FlightEvent, FlightSnapshot, Passenger
+from flighter.models import Airport, Booking, FlightEvent, FlightSnapshot
 
 NOW = datetime.now(UTC)
 DEPARTURE = NOW + timedelta(days=2)
 ARRIVAL = DEPARTURE + timedelta(hours=7)
-
-ALEX = Passenger(id=1, display_name="Alex Chen", is_self=True)
 
 AIRPORTS = {
     "YUL": Airport(
@@ -70,7 +68,6 @@ CLEAR_BUDGET = BudgetStatus(
 def booking(**kwargs: Any) -> Booking:
     defaults: dict[str, Any] = {
         "id": 1,
-        "passenger_id": ALEX.id,
         "source": "manual",
         "marketing_carrier": "AC",
         "marketing_number": "871",
@@ -170,7 +167,7 @@ class FakeSession:
 
 def build_client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """The app with a faked data layer, ready for a request."""
-    session = FakeSession(Passenger=[ALEX])
+    session = FakeSession()
 
     async def fake_get_airport(_session: Any, iata: str) -> Airport | None:
         return AIRPORTS.get(iata)
@@ -271,7 +268,6 @@ def test_a_flight_in_the_air_renders_everything_it_knows(
     assert "64% flown" in body
     # Both ends are labelled with the zone they are read in.
     assert "America/Toronto" in body and "Europe/London" in body
-    assert "Alex Chen" in body
 
 
 def test_the_timeline_shows_changes_newest_first(
@@ -304,12 +300,10 @@ def test_a_flight_that_is_not_there_is_a_404(
     assert "No such flight." in page.text
 
 
-def test_the_add_form_requires_a_passenger_and_offers_to_add_one(client: TestClient) -> None:
+def test_the_add_form_asks_only_about_the_flight(client: TestClient) -> None:
     page = client.get("/f/new")
     assert page.status_code == 200
-    assert 'name="passenger_id"' in page.text
-    assert "Alex Chen" in page.text
-    assert 'hx-post="/passengers"' in page.text
+    assert 'name="marketing_carrier"' in page.text
     # The times are wall clock at their own airport, never a UTC instant.
     assert 'type="datetime-local"' in page.text
 

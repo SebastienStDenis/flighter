@@ -12,27 +12,18 @@ from flighter import ingest
 from flighter.config import Settings
 from flighter.extract import Extraction, Segment
 from flighter.mail import Message, parse_message
-from flighter.models import IngestLog, Passenger
+from flighter.models import IngestLog
 
 FIXTURES = Path(__file__).parent / "fixtures"
-
-SELF = Passenger(id=1, display_name="Sebastien St-Denis", is_self=True)
-OTHER = Passenger(id=2, display_name="Marie Tremblay", is_self=False)
 
 
 def message(name: str) -> Message:
     return parse_message((FIXTURES / name).read_bytes(), name)
 
 
-def extraction(
-    *,
-    names: list[str] | None = None,
-    confidence: float = 0.99,
-    tz_hint: str | None = None,
-) -> Extraction:
+def extraction(*, confidence: float = 0.99, tz_hint: str | None = None) -> Extraction:
     return Extraction(
         is_flight_confirmation=True,
-        passenger_names=names if names is not None else ["SEBASTIEN ST-DENIS"],
         confidence=confidence,
         segments=[
             Segment(
@@ -52,31 +43,16 @@ def extraction(
     )
 
 
-class FakeResult:
-    def __init__(self, rows: list[Any]) -> None:
-        self._rows = rows
-
-    def scalars(self) -> FakeResult:
-        return self
-
-    def all(self) -> list[Any]:
-        return self._rows
-
-
 class FakeSession:
-    """Enough AsyncSession to run the pipeline: the ingest log, and the passenger list."""
+    """Enough AsyncSession to run the pipeline: the ingest log, and nothing else."""
 
-    def __init__(self, passengers: list[Passenger]) -> None:
-        self.passengers = passengers
+    def __init__(self) -> None:
         self.log: dict[str, IngestLog] = {}
         self.rolled_back = False
 
     async def get(self, model: type, pk: str) -> Any:
         assert model is IngestLog
         return self.log.get(pk)
-
-    async def execute(self, statement: Any) -> FakeResult:
-        return FakeResult(list(self.passengers))
 
     def add(self, row: Any) -> None:
         assert isinstance(row, IngestLog)
@@ -130,32 +106,13 @@ def use_model(monkeypatch: pytest.MonkeyPatch, result: Extraction | None) -> Non
     monkeypatch.setattr(ingest, "from_model", fake)
 
 
-# -- names ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "ticket_name",
-    ["SEBASTIEN ST-DENIS", "Sebastien St Denis", "St-Denis/Sebastien Mr", "Sébastien St-Denis"],
-)
-def test_a_name_off_a_ticket_matches_the_passenger(ticket_name: str) -> None:
-    assert ingest.names_match(ticket_name, "Sebastien St-Denis")
-
-
-def test_a_different_person_does_not_match() -> None:
-    assert not ingest.names_match("Marie Tremblay", "Sebastien St-Denis")
-
-
-def test_a_middle_name_is_ignored() -> None:
-    assert ingest.names_match("SEBASTIEN MARC ST-DENIS", "Sebastien St-Denis")
-
-
 # -- the pipeline --------------------------------------------------------------------
 
 
 async def test_structured_confirmation_becomes_an_active_booking(
     settings: Settings, recorder: Recorder
 ) -> None:
-    session = FakeSession([SELF])
+    session = FakeSession()
     outcome = await ingest.process_message(
         session,  # type: ignore[arg-type]
         message("flight_jsonld.eml"),
@@ -165,7 +122,6 @@ async def test_structured_confirmation_becomes_an_active_booking(
     assert outcome == "created"
     (created,) = recorder.created
     assert created["status"] == "active"
-    assert created["passenger_id"] == SELF.id
     assert created["marketing_carrier"] == "DL"
     assert created["departure_local"] == datetime(2026, 9, 12, 18, 40)
     assert created["source"] == "email"
@@ -180,7 +136,7 @@ async def test_structured_confirmation_becomes_an_active_booking(
 async def test_multi_segment_itinerary_books_every_leg(
     settings: Settings, recorder: Recorder
 ) -> None:
-    session = FakeSession([SELF])
+    session = FakeSession()
     outcome = await ingest.process_message(
         session,  # type: ignore[arg-type]
         message("flight_package_jsonld.eml"),
@@ -202,7 +158,7 @@ async def test_marketing_email_never_reaches_an_extractor(
         raise AssertionError("the prefilter should have stopped this")
 
     monkeypatch.setattr(ingest, "from_model", explode)
-    session = FakeSession([SELF])
+    session = FakeSession()
 
     outcome = await ingest.process_message(
         session,  # type: ignore[arg-type]
@@ -219,7 +175,7 @@ async def test_the_model_path_runs_when_there_is_no_structured_data(
     settings: Settings, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     use_model(monkeypatch, extraction())
-    session = FakeSession([SELF])
+    session = FakeSession()
 
     outcome = await ingest.process_message(
         session,  # type: ignore[arg-type]
@@ -236,7 +192,7 @@ async def test_the_stated_timezone_hint_is_discarded(
 ) -> None:
     """The airline said Asia/Tokyo for a flight out of Calgary. It is not consulted."""
     use_model(monkeypatch, extraction(tz_hint="Asia/Tokyo"))
-    session = FakeSession([SELF])
+    session = FakeSession()
 
     await ingest.process_message(
         session,  # type: ignore[arg-type]
@@ -252,45 +208,11 @@ async def test_the_stated_timezone_hint_is_discarded(
     assert recorder.zones_asked == ["YYC"]
 
 
-async def test_an_unrecognised_name_goes_to_review_under_the_self_passenger(
-    settings: Settings, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    use_model(monkeypatch, extraction(names=["JEAN-PHILIPPE BEAULIEU"]))
-    session = FakeSession([SELF])
-
-    outcome = await ingest.process_message(
-        session,  # type: ignore[arg-type]
-        message("flight_plain.eml"),
-        settings=settings,
-    )
-
-    assert outcome == "review"
-    (created,) = recorder.created
-    assert created["status"] == "pending_review"
-    assert created["passenger_id"] == SELF.id
-
-
-async def test_a_second_passenger_is_matched_by_name(
-    settings: Settings, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    use_model(monkeypatch, extraction(names=["TREMBLAY/MARIE"]))
-    session = FakeSession([SELF, OTHER])
-
-    outcome = await ingest.process_message(
-        session,  # type: ignore[arg-type]
-        message("flight_plain.eml"),
-        settings=settings,
-    )
-
-    assert outcome == "created"
-    assert recorder.created[0]["passenger_id"] == OTHER.id
-
-
 async def test_low_confidence_goes_to_review(
     settings: Settings, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     use_model(monkeypatch, extraction(confidence=0.4))
-    session = FakeSession([SELF])
+    session = FakeSession()
 
     outcome = await ingest.process_message(
         session,  # type: ignore[arg-type]
@@ -310,7 +232,7 @@ async def test_a_flight_we_already_have_is_not_booked_twice(
     monkeypatch.setattr(ingest, "airport_tz", rec.airport_tz)
     monkeypatch.setattr(ingest, "find_duplicate", rec.find_duplicate)
     monkeypatch.setattr(ingest, "create_booking", rec.create_booking)
-    session = FakeSession([SELF])
+    session = FakeSession()
 
     outcome = await ingest.process_message(
         session,  # type: ignore[arg-type]
@@ -325,7 +247,7 @@ async def test_a_flight_we_already_have_is_not_booked_twice(
 async def test_the_same_message_delivered_twice_is_a_no_op(
     settings: Settings, recorder: Recorder
 ) -> None:
-    session = FakeSession([SELF])
+    session = FakeSession()
     first = await ingest.process_message(
         session,  # type: ignore[arg-type]
         message("flight_jsonld.eml"),
@@ -348,7 +270,7 @@ async def test_a_failing_extraction_is_logged_and_swallowed(
         raise RuntimeError("model output did not match the extraction schema")
 
     monkeypatch.setattr(ingest, "from_model", boom)
-    session = FakeSession([SELF])
+    session = FakeSession()
 
     outcome = await ingest.process_message(
         session,  # type: ignore[arg-type]
@@ -367,9 +289,9 @@ async def test_an_extraction_that_is_not_a_confirmation_is_no_flight(
 ) -> None:
     use_model(
         monkeypatch,
-        Extraction(is_flight_confirmation=False, passenger_names=[], confidence=0.1, segments=[]),
+        Extraction(is_flight_confirmation=False, confidence=0.1, segments=[]),
     )
-    session = FakeSession([SELF])
+    session = FakeSession()
 
     outcome = await ingest.process_message(
         session,  # type: ignore[arg-type]

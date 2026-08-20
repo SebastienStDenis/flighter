@@ -15,7 +15,7 @@ from flighter import widget
 from flighter.aeroapi import BREAKER_KEY, month_key
 from flighter.config import Settings, get_settings
 from flighter.db import get_session
-from flighter.models import KV, Booking, FlightSnapshot, Passenger
+from flighter.models import KV, Booking, FlightSnapshot
 from flighter.widget import (
     FlightRow,
     authorize,
@@ -30,14 +30,10 @@ ARRIVAL = datetime(2026, 9, 12, 22, 15, tzinfo=UTC)
 # Anything a phone could read as an instant.
 ISO_LIKE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
-SELF = Passenger(id=1, display_name="Sébastien", is_self=True)
-OTHER = Passenger(id=2, display_name="Alex", is_self=False)
-
 
 def booking(**kwargs: Any) -> Booking:
     defaults: dict[str, Any] = {
         "id": 42,
-        "passenger": SELF,
         "marketing_carrier": "DL",
         "marketing_number": "1234",
         "origin_iata": "JFK",
@@ -76,8 +72,6 @@ def test_upcoming_flight(settings: Settings) -> None:
         "countdown_to": "2026-09-18T18:00:00Z",
         "delayed": False,
         "progress_percent": None,
-        "passenger": "Sébastien",
-        "is_self": True,
     }
 
 
@@ -161,12 +155,6 @@ def test_diverted_still_lands_somewhere(settings: Settings) -> None:
 def test_a_minute_late_is_not_delayed(settings: Settings) -> None:
     jitter = snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=1))
     assert payload([(booking(), jitter)], settings)["flights"][0]["delayed"] is False
-
-
-def test_other_passengers_are_marked(settings: Settings) -> None:
-    flight = payload([(booking(passenger=OTHER), None)], settings)["flights"][0]
-    assert flight["passenger"] == "Alex"
-    assert flight["is_self"] is False
 
 
 # --- instants -------------------------------------------------------------------------

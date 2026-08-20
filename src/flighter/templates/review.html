@@ -26,7 +26,6 @@
   </div>
   {{ m.route(v, names=true) }}
   <dl class="facts" style="margin-top: .8rem">
-    {{ m.fact("Passenger", v.passenger_name, "text") }}
     {{ m.fact("Confirmation", dash(v.booking.confirmation_code), "strong") }}
     {{ m.fact("Seat", dash(v.booking.seat)) }}
   </dl>

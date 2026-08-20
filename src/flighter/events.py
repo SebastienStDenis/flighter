@@ -16,7 +16,6 @@ from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from .models import Airport, Booking, FlightEvent, FlightSnapshot
 from .timezones import FALLBACK_TZ
@@ -304,7 +303,7 @@ async def _dispatch_calendar(session: AsyncSession, calendar: Calendar) -> None:
     for booking_id, events in pending.items():
         # The calendar carries whole-flight state, not a per-event delta, so however
         # many events a poll produced the booking needs exactly one upsert.
-        booking = await session.get(Booking, booking_id, options=[selectinload(Booking.passenger)])
+        booking = await session.get(Booking, booking_id)
         if booking is None:
             continue
         snapshot = await _latest_snapshot(session, booking_id)

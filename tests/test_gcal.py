@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 import pytest
 
 from flighter.gcal import REMINDER_MINUTES, event_body
-from flighter.models import Airport, Booking, FlightSnapshot, Passenger
+from flighter.models import Airport, Booking, FlightSnapshot
 
 BASE_URL = "https://flights.example.com"
 
@@ -57,7 +57,6 @@ def booking(**fields: object) -> Booking:
         "status": "active",
         "confirmation_code": "ABC123",
         "seat": "14A",
-        "passenger": Passenger(display_name="Sebastien"),
     }
     base.update(fields)
     return Booking(**base)
@@ -92,7 +91,6 @@ def test_normal_flight() -> None:
     assert "status" not in body
 
     description = body["description"]
-    assert "Passenger: Sebastien" in description
     assert "Confirmation: ABC123" in description
     assert "Seat: 14A" in description
     assert "Gate: B22 (Terminal 4)" in description
@@ -106,7 +104,6 @@ def test_missing_values_are_omitted_not_printed() -> None:
     assert "None" not in description
     assert "Confirmation" not in description
     assert "Seat" not in description
-    assert "Passenger: Sebastien" in description
 
 
 def test_cancelled_flight_is_patched_never_deleted() -> None:

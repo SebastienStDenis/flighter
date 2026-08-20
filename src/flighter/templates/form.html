@@ -9,29 +9,6 @@
 
 <form method="post" action="{{ '/f/' ~ b.id if view else '/f' }}">
   <section class="panel">
-    <span class="label">Who is flying</span>
-    <div class="field">
-      <label for="passenger_id">Passenger</label>
-      <select id="passenger_id" name="passenger_id" required>
-        {% if not passengers %}<option value="" disabled selected>Add someone first</option>{% endif %}
-        {% set chosen = (form['passenger_id']|int if 'passenger_id' in form
-                         else (b.passenger_id if b else none)) %}
-        {% for p in passengers %}
-        <option value="{{ p.id }}"{{ ' selected' if p.id == chosen }}>{{ p.display_name }}</option>
-        {% endfor %}
-      </select>
-      {# Nested forms are not legal HTML, so the inline add posts on its own and htmx
-         drops the new option straight into the select above. #}
-      <div class="inline-add">
-        <input type="text" id="display_name" name="display_name" placeholder="Add someone else">
-        <button class="btn btn--small" type="button"
-                hx-post="/passengers" hx-include="#display_name"
-                hx-target="#passenger_id" hx-swap="beforeend">Add</button>
-      </div>
-    </div>
-  </section>
-
-  <section class="panel">
     <span class="label">The flight</span>
     <div class="row">
       <div class="field">
