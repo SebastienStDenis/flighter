@@ -8,9 +8,6 @@
 {% if saved %}
 <div class="alert mb-3" role="status"><strong>Saved.</strong></div>
 {% endif %}
-{% if connected %}
-<div class="alert mb-3" role="status"><strong>Google is connected.</strong></div>
-{% endif %}
 {% if error %}
 <div class="alert mb-3" data-variant="destructive" role="alert">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -31,15 +28,12 @@
             'Ready' if settings.aeroapi_configured else 'Add AEROAPI_KEY to .env'),
            ('Anthropic', settings.anthropic_api_key,
             'Ready' if settings.anthropic_api_key else 'Optional'),
-           ('iCloud mail', settings.mail_configured,
-            settings.icloud_email if settings.mail_configured
+           ('iCloud', settings.icloud_configured,
+            settings.icloud_email if settings.icloud_configured
             else 'Add ICLOUD_EMAIL and ICLOUD_APP_PASSWORD to .env'),
-           ('Google', settings.google_connected,
-            'Connected' if settings.google_connected
-            else ('Sign in below to finish' if settings.google_configured
-                  else 'Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to .env')),
-           ('Calendar', prefs.gcal_calendar_id,
-            prefs.gcal_calendar_id or 'Created when you connect Google'),
+           ('Calendar', prefs.icloud_calendar_name,
+            prefs.icloud_calendar_name
+            or 'Name an iCloud calendar under Preferences'),
            ('Pushover', settings.pushover_configured,
             'Ready' if settings.pushover_configured
             else 'Add PUSHOVER_TOKEN and PUSHOVER_USER_KEY to .env')] %}
@@ -56,14 +50,6 @@
       {% endfor %}
     </div>
   </section>
-  {% if settings.google_configured %}
-  <footer class="flex-col items-stretch gap-2 border-t">
-    <a class="btn" href="/settings/google/connect">
-      {{ 'Reconnect Google' if settings.google_connected else 'Connect Google' }}</a>
-    <p class="text-xs break-all text-muted-foreground">
-      Google needs <code class="font-mono">{{ callback_url }}</code> in its list of redirect URIs.</p>
-  </footer>
-  {% endif %}
 </div>
 
 <div class="card mt-3" data-size="sm">
@@ -164,12 +150,23 @@
                    value="{{ posted['anthropic_model'] }}">
           </div>
         </div>
-        <div role="group" class="field">
-          <label for="gcal_calendar_id">Calendar id</label>
-          <input type="text" id="gcal_calendar_id" name="gcal_calendar_id" class="font-mono"
-                 value="{{ posted['gcal_calendar_id'] }}">
-        </div>
       </fieldset>
+    </section>
+  </div>
+
+  <div class="card mt-3" data-size="sm">
+    <header>
+      <h3>Calendar</h3>
+      <p>The iCloud calendar flights are written to. Make it in the Calendar app first;
+        iCloud does not let this app create one.</p>
+    </header>
+    <section>
+      <div role="group" class="field">
+        <label for="icloud_calendar_name">Calendar name</label>
+        <input type="text" id="icloud_calendar_name" name="icloud_calendar_name"
+               class="font-mono" placeholder="Flights"
+               value="{{ posted['icloud_calendar_name'] }}">
+      </div>
     </section>
   </div>
 </form>

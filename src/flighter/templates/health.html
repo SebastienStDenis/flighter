@@ -46,9 +46,8 @@
   <section>
     <div class="item-group -mx-2.5">
       {% for name, ready in [
-           ('iCloud mail', settings.mail_configured),
-           ('Google', settings.google_connected),
-           ('Google Calendar', prefs.calendar_configured),
+           ('iCloud', settings.icloud_configured),
+           ('iCloud Calendar', prefs.calendar_configured),
            ('FlightAware', settings.aeroapi_configured),
            ('Pushover', settings.pushover_configured)] %}
       <div class="item" data-size="xs">

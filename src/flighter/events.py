@@ -308,14 +308,14 @@ async def _dispatch_calendar(session: AsyncSession, calendar: Calendar) -> None:
             continue
         snapshot = await _latest_snapshot(session, booking_id)
         try:
-            event_id = await calendar.upsert(booking, snapshot)
+            uid = await calendar.upsert(booking, snapshot)
         except Exception:
             log.warning(
                 "calendar sync for booking %s failed; will retry", booking_id, exc_info=True
             )
             continue
-        if event_id:
-            booking.gcal_event_id = event_id
+        if uid:
+            booking.calendar_event_uid = uid
         synced_at = datetime.now(UTC)
         for event in events:
             event.calendar_synced_at = synced_at

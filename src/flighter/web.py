@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import logging
-import secrets
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, fields
 from datetime import UTC, datetime, timedelta
@@ -26,13 +25,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import bookings as booking_repo
-from . import gcal, google_auth, prefs
+from . import prefs
 from .aeroapi import budget_status
 from .airports import airport_tz, get_airport
+from .caldav import CalendarClient
 from .checks import run_checks
 from .config import Settings
 from .db import get_session
-from .gcal import CalendarClient
 from .models import KV, Airport, Booking, FlightEvent, FlightSnapshot
 from .phase import (
     AIRBORNE,
@@ -71,9 +70,6 @@ DELAY_THRESHOLD = timedelta(minutes=15)
 # and a red-eye that lands tomorrow both fall inside a day; a return a week later does
 # not, which is the split a person means by "trip".
 TRIP_GAP = timedelta(hours=24)
-
-# Where the consent flow parks its one-time state between the redirect out and back.
-OAUTH_STATE_KEY = "google_oauth_state"
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
@@ -564,14 +560,6 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(status_code=404, detail="No such flight.")
         return (await build_views(session, [booking]))[0]
 
-    def base_url() -> str:
-        """Where this deployment answers, for a link that leaves the browser.
-
-        The stored value wins because a push notification is opened long after the
-        request that would have implied one.
-        """
-        return prefs.current().public_base_url
-
     @app.get("/")
     async def index(request: Request, session: SessionDep, pending: ReviewDep) -> Response:
         views = await build_views(
@@ -696,7 +684,7 @@ def create_app(settings: Settings) -> FastAPI:
         booking = await booking_repo.get_booking(session, booking_id)
         if booking is None:
             raise HTTPException(status_code=404, detail="No such flight.")
-        if booking.gcal_event_id:
+        if booking.calendar_event_uid:
             try:
                 await CalendarClient(settings).delete(booking)
             except Exception:
@@ -738,12 +726,10 @@ def create_app(settings: Settings) -> FastAPI:
             "posted": current.model_dump(mode="json"),
             "settings": settings,
             "log_levels": LOG_LEVELS,
-            "callback_url": google_auth.callback_url(base_url()),
             # What the browser is talking to right now, offered as the public base URL
             # because on a first visit it is almost always the right answer.
             "this_origin": str(request.base_url).rstrip("/"),
             "saved": "saved" in request.query_params,
-            "connected": "connected" in request.query_params,
             "error": None,
         }
 
@@ -763,7 +749,7 @@ def create_app(settings: Settings) -> FastAPI:
         extraction_confidence_threshold: Annotated[str, Form()],
         imap_folder: Annotated[str, Form()],
         imap_idle_seconds: Annotated[str, Form()],
-        gcal_calendar_id: Annotated[str, Form()] = "",
+        icloud_calendar_name: Annotated[str, Form()] = "",
     ) -> Response:
         posted = {
             "public_base_url": public_base_url.strip(),
@@ -774,7 +760,7 @@ def create_app(settings: Settings) -> FastAPI:
             "extraction_confidence_threshold": extraction_confidence_threshold.strip(),
             "imap_folder": imap_folder.strip(),
             "imap_idle_seconds": imap_idle_seconds.strip(),
-            "gcal_calendar_id": gcal_calendar_id.strip(),
+            "icloud_calendar_name": icloud_calendar_name.strip(),
         }
         try:
             await prefs.save(session, posted)
@@ -784,34 +770,6 @@ def create_app(settings: Settings) -> FastAPI:
             context["posted"] = posted
             return page(request, "settings.html", context, status_code=400)
         return RedirectResponse("/settings?saved=1", status_code=303)
-
-    @app.get("/settings/google/connect")
-    async def google_connect(session: SessionDep) -> Response:
-        if not settings.google_configured:
-            raise HTTPException(
-                status_code=400,
-                detail="Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env first.",
-            )
-        url, state = google_auth.consent_url(settings, google_auth.callback_url(base_url()))
-        await session.merge(KV(key=OAUTH_STATE_KEY, value={"state": state}))
-        return RedirectResponse(url, status_code=303)
-
-    @app.get("/settings/google/callback")
-    async def google_callback(
-        request: Request, session: SessionDep, state: str = "", code: str = "", error: str = ""
-    ) -> Response:
-        if error:
-            raise HTTPException(status_code=400, detail=f"Google refused: {error}")
-        stored = await session.get(KV, OAUTH_STATE_KEY)
-        if stored is None or not secrets.compare_digest(state, str(stored.value.get("state", ""))):
-            raise HTTPException(status_code=400, detail="That sign-in did not start here.")
-        await session.delete(stored)
-        authorised = await google_auth.exchange_code(
-            settings, google_auth.callback_url(base_url()), state, code
-        )
-        if not prefs.current().calendar_configured:
-            await prefs.save(session, {"gcal_calendar_id": await gcal.create_calendar(authorised)})
-        return RedirectResponse("/settings?connected=1", status_code=303)
 
     @app.post("/settings/checks")
     async def run_checks_now(request: Request) -> Response:

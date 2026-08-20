@@ -99,7 +99,7 @@ async def _check_pushover(settings: Settings) -> CheckResult:
 
 async def _check_mail(settings: Settings) -> CheckResult:
     """Logs in and selects the folder, which is everything the watcher needs to work."""
-    if not settings.mail_configured:
+    if not settings.icloud_configured:
         return CheckResult(
             "mail", False, "ICLOUD_EMAIL and ICLOUD_APP_PASSWORD are not set in .env"
         )
@@ -116,17 +116,21 @@ async def _check_mail(settings: Settings) -> CheckResult:
 
 
 async def _check_calendar(settings: Settings) -> CheckResult:
-    if not settings.google_connected:
-        return CheckResult("calendar", False, "Google is not connected")
-    if not prefs.current().calendar_configured:
-        return CheckResult("calendar", False, "no calendar chosen")
+    """Signs in over CalDAV and walks discovery, which is everything a sync does but the PUT."""
+    if not settings.icloud_configured:
+        return CheckResult(
+            "calendar", False, "ICLOUD_EMAIL and ICLOUD_APP_PASSWORD are not set in .env"
+        )
+    name = prefs.current().icloud_calendar_name
+    if not name:
+        return CheckResult("calendar", False, "no calendar named on the settings page")
     try:
-        from .gcal import CalendarClient
+        from .caldav import CalendarClient
 
-        summary = await CalendarClient(settings).describe_calendar()
+        url = await CalendarClient(settings).describe_calendar()
     except Exception as exc:
         return CheckResult("calendar", False, str(exc))
-    return CheckResult("calendar", True, f"writing to {summary}")
+    return CheckResult("calendar", True, f"writing to {name} at {url}")
 
 
 async def run_checks(settings: Settings) -> list[CheckResult]:

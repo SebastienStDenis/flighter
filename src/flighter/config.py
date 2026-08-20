@@ -6,9 +6,9 @@ Everything else is a *preference*: it has a working default, it is edited on the
 settings page, and the database is the only place it lives - see `prefs`.
 
 The app writes exactly one file: `data/secrets.env`, holding the credentials it mints
-itself rather than asking a person for - the Google refresh token the consent flow
-returns, and the widget token generated on first boot. Those keys never appear in
-`.env`, so there is still one home per value and never a precedence question.
+itself rather than asking a person for - today just the widget token generated on first
+boot. That key never appears in `.env`, so there is still one home per value and never a
+precedence question.
 """
 
 from __future__ import annotations
@@ -43,17 +43,11 @@ class Settings(BaseSettings):
     # --- Anthropic, the extraction fallback ------------------------------------------
     anthropic_api_key: str = Field(default="", repr=False)
 
-    # --- iCloud, the mailbox we watch ------------------------------------------------
-    # An app-specific password from appleid.apple.com, not the Apple ID password: IMAP
-    # refuses the account password outright once two-factor authentication is on.
+    # --- iCloud, the mailbox we watch and the calendar we write -----------------------
+    # One app-specific password from appleid.apple.com covers both IMAP and CalDAV, and
+    # neither accepts the Apple ID password once two-factor authentication is on.
     icloud_email: str = ""
     icloud_app_password: str = Field(default="", repr=False)
-
-    # --- Google Calendar -------------------------------------------------------------
-    google_client_id: str = ""
-    google_client_secret: str = Field(default="", repr=False)
-    # Minted by the consent flow at /settings/google/connect, not typed by anyone.
-    google_refresh_token: str = Field(default="", repr=False)
 
     # --- Pushover, the phone ----------------------------------------------------------
     # The token belongs to the application registered at pushover.net; the user key
@@ -66,16 +60,8 @@ class Settings(BaseSettings):
     widget_token: str = Field(default="", repr=False)
 
     @property
-    def mail_configured(self) -> bool:
+    def icloud_configured(self) -> bool:
         return bool(self.icloud_email and self.icloud_app_password)
-
-    @property
-    def google_configured(self) -> bool:
-        return bool(self.google_client_id and self.google_client_secret)
-
-    @property
-    def google_connected(self) -> bool:
-        return bool(self.google_configured and self.google_refresh_token)
 
     @property
     def aeroapi_configured(self) -> bool:
@@ -94,7 +80,7 @@ def get_settings() -> Settings:
 def write_secret(key: str, value: str) -> Settings:
     """Persist one app-minted credential and make it live in this process.
 
-    Written whole rather than appended so re-authorising replaces the dead token instead
+    Written whole rather than appended so a re-minted value replaces the old one instead
     of leaving two lines and letting the parser pick.
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -122,7 +108,7 @@ def reload_settings() -> Settings:
     """Re-read the environment into the object every caller is already holding.
 
     The alternative, returning a fresh instance, leaves the poller and the dispatcher
-    talking to Google with the token that was live when they started.
+    holding the values that were live when they started.
     """
     current = get_settings()
     fresh = Settings()

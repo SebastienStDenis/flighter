@@ -169,7 +169,7 @@ async def run_ingest_loop(stopping: asyncio.Event, *, settings: Settings | None 
     backoff = RECONNECT_MIN_SECONDS
 
     while not stopping.is_set():
-        if not settings.mail_configured:
+        if not settings.icloud_configured:
             log.debug("iCloud is not configured; not watching the mailbox")
             await _pause(stopping, prefs.current().imap_idle_seconds)
             continue
@@ -217,7 +217,7 @@ async def backfill(days: int = 30, *, settings: Settings | None = None) -> list[
     longer than the sweep takes.
     """
     settings = settings or get_settings()
-    if not settings.mail_configured:
+    if not settings.icloud_configured:
         log.warning("iCloud is not configured; nothing to backfill")
         return []
 

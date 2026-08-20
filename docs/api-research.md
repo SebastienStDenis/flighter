@@ -525,10 +525,227 @@ Consequences for a flight widget:
 
 ---
 
-## 5. Library versions
+## 5. iCloud Calendar over CalDAV
+
+There is no iCloud Calendar REST API. CalDAV (RFC 4791) is the only programmatic way in, and it
+is WebDAV verbs plus XML rather than JSON.
+
+Sources: RFC 4791 <https://datatracker.ietf.org/doc/html/rfc4791>, RFC 4918
+<https://datatracker.ietf.org/doc/html/rfc4918>, RFC 5545
+<https://datatracker.ietf.org/doc/html/rfc5545>, RFC 5397
+<https://datatracker.ietf.org/doc/html/rfc5397>, RFC 6764
+<https://datatracker.ietf.org/doc/html/rfc6764>. iCloud-specific behaviour is not documented by
+Apple; the observations below come from third-party integration write-ups and Apple's own
+developer forums, and are marked where that is all the evidence there is.
+
+### 5.1 Endpoint and authentication
+
+| Item | Value |
+| --- | --- |
+| Host | `caldav.icloud.com`, HTTPS on 443 |
+| Auth scheme | HTTP Basic |
+| Username | the Apple Account email address |
+| Password | an app-specific password, never the account password |
+
+"Third-party CalDAV clients can't sign in with your regular Apple Account password"
+(<https://cli.nylas.com/guides/icloud-caldav-settings>). App-specific passwords are generated at
+account.apple.com under **Sign-In and Security → App-Specific Passwords**, require two-factor
+authentication, and Apple states: "Any time you change or reset your primary Apple Account
+password, all of your app-specific passwords are revoked automatically"
+(<https://support.apple.com/en-us/102654>). The limit is 25 active at once
+(<https://cli.nylas.com/guides/icloud-caldav-settings>).
+
+This is the same credential IMAP uses, so mail and calendar share one secret and one failure mode:
+an Apple ID password change breaks both at the same instant.
+
+### 5.2 Discovery - why a hard-coded URL is wrong
+
+RFC 6764 §6 describes the bootstrap: connect to the context path, "PROPFIND request to the
+initial 'context path'" whose body "SHOULD include the DAV:current-user-principal property as one
+of the properties to return", then query that principal for its calendar home.
+
+`DAV:current-user-principal` is RFC 5397: "Indicates a URL for the currently authenticated user's
+principal resource on the server." `CALDAV:calendar-home-set` is RFC 4791 §6.2.1: it "is meant to
+allow users to easily find the calendar collections owned by the principal."
+
+Three requests, in order:
+
+1. `PROPFIND https://caldav.icloud.com/`, `Depth: 0`
+
+   ```xml
+   <?xml version="1.0" encoding="utf-8"?>
+   <d:propfind xmlns:d="DAV:"><d:prop><d:current-user-principal/></d:prop></d:propfind>
+   ```
+
+   Answers `207 Multi-Status` with an href like `/200385701/principal/` - a **path**, and the
+   number is the account's principal id.
+
+2. `PROPFIND` that principal, `Depth: 0`, for `CALDAV:calendar-home-set`. Answers an **absolute**
+   href on a different host: `https://p34-caldav.icloud.com:443/200385701/calendars/`. The `pNN-`
+   prefix is the cluster the account is served from and differs between accounts.
+
+3. `PROPFIND` the home collection, `Depth: 1`, for `DAV:displayname`, `DAV:resourcetype` and
+   `CALDAV:supported-calendar-component-set`. Each `<response>` is one collection.
+
+Request and response shapes confirmed against
+<https://www.aurinko.io/blog/caldav-apple-calendar-integration/> and
+<https://cli.nylas.com/guides/icloud-caldav-settings>, which show the same principal-path /
+cluster-URL split with real captured values.
+
+Two consequences for a client:
+
+- **Hrefs must be resolved against the URL they arrived from**, because step 1 returns a path and
+  step 2 returns a URL on another host. Joining blindly onto `caldav.icloud.com` sends every
+  subsequent request to the wrong cluster.
+- Reminders lists are also calendar collections. Filter on
+  `CALDAV:supported-calendar-component-set` containing `VEVENT`, or a reminders list sharing the
+  calendar's display name can be picked instead.
+
+`Depth` and the `207 Multi-Status` envelope (`<multistatus>` → `<response>` → `<propstat>` →
+`<prop>` + `<status>`) are RFC 4918 §9.1 and §13. A property the server does not have comes back
+inside a second `<propstat>` carrying a 404 status, so a parser must read the status beside each
+prop rather than taking the first match.
+
+### 5.3 Creating a calendar - you cannot, in practice
+
+RFC 4791 §5.3.1 defines `MKCALENDAR`, and is explicit that it is optional: "Support for MKCALENDAR
+on the server is only RECOMMENDED and not REQUIRED because some calendar stores only support one
+calendar per user (or principal), and those are typically pre-created for each account."
+
+iCloud is not documented either way. The only concrete report found is an Apple developer forum
+thread where `MKCOL` against `https://caldav.icloud.com/<principal>/calendars/<name>/` returns
+`412 Precondition Failed`, and the poster's own follow-up claims `201 Created` if `calendars/` is
+dropped from the path (<https://developer.apple.com/forums/thread/110878>). That is one
+unverified forum comment, not a specification, and the resulting collection's placement is not
+described.
+
+**Conclusion for this service: do not try.** The setup step is "make a calendar called Flights in
+the Calendar app", and the app finds it by display name. That is one manual action, once, against
+an undocumented write that could stop working silently.
+
+### 5.4 What a valid event looks like
+
+RFC 4791 §4.1 constrains a calendar object resource: it "MUST NOT contain more than one type of
+calendar component ... with the exception of VTIMEZONE components, **which MUST be specified for
+each unique TZID parameter value specified in the iCalendar object**", and all components in one
+resource share one UID.
+
+So a timed event with a named zone is:
+
+```
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//flighter//flight tracker//EN
+BEGIN:VTIMEZONE
+TZID:America/New_York
+...STANDARD / DAYLIGHT sub-components...
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:flighter-7@flighter.invalid
+DTSTAMP:20260820T120000Z
+DTSTART;TZID=America/New_York:20260912T150000
+DTEND;TZID=America/Los_Angeles:20260912T152000
+SUMMARY:DL1234 JFK -> LAX
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:DL1234 JFK -> LAX
+TRIGGER:-PT3H
+END:VALARM
+END:VEVENT
+END:VCALENDAR
+```
+
+Three spellings of a start time exist and only one is right here (RFC 5545 §3.3.5):
+
+| Form | Meaning | Verdict |
+| --- | --- | --- |
+| `DTSTART:20260912T150000` | floating - whatever the reading device's local time is | Wrong. A flight does not move when you do. |
+| `DTSTART:20260912T190000Z` | a fixed UTC instant | Correct instant, but the stored wall clock is UTC, so an edit in the Calendar app is done in the wrong units. |
+| `DTSTART;TZID=America/New_York:20260912T150000` | wall clock at a named zone | What this service writes. |
+
+`TZID` is not free: the `VTIMEZONE` requirement above means the object has to carry the transition
+rules for every zone it names. RFC 7809 (<https://datatracker.ietf.org/doc/html/rfc7809>) lets a
+server relieve clients of that, but only one advertising `calendar-no-timezone` in the `DAV`
+response header of an `OPTIONS` request. iCloud is not known to, so the VTIMEZONE goes in the
+payload. It is generated per event over a window around the flight rather than for all time,
+which keeps it to a handful of lines instead of ~4 KB of `RDATE`.
+
+A `DISPLAY` alarm needs `ACTION`, `TRIGGER` and `DESCRIPTION` (RFC 5545 §3.6.6). `STATUS:CANCELLED`
+(§3.8.1.11) marks a cancelled event without removing it.
+
+### 5.5 Create, update, delete
+
+There is no PATCH. "There is no patching! So, load an event, make changes and send its full
+payload back to the server" (<https://www.aurinko.io/blog/caldav-apple-calendar-integration/>).
+
+| Operation | Request |
+| --- | --- |
+| Create / replace | `PUT <calendar-url>/<name>.ics`, `Content-Type: text/calendar; charset=utf-8`, whole VCALENDAR as the body |
+| Delete | `DELETE <calendar-url>/<name>.ics` |
+| Read | `GET` the same URL - answers iCalendar text, not XML |
+
+The resource name is the client's choice and need not equal the UID, but keying it on the UID
+makes the URL derivable rather than stored.
+
+`ETag` / `If-Match` (RFC 4918 §8.4, RFC 4791 §5.3.2): every write and every read returns a strong
+`ETag`. To avoid clobbering a concurrent edit a client sends `If-Match: <etag>` on the PUT and
+gets `412 Precondition Failed` if the resource moved on since it was read; `If-None-Match: *`
+makes a PUT a create-only that fails with 412 if anything already exists at that URL.
+
+**This service deliberately sends neither.** The calendar is a mirror of the newest AeroAPI
+snapshot, so there is no local edit that a concurrent change could destroy, and an entry someone
+altered by hand is meant to be corrected back on the next sync. Combined with a UID derived from
+the booking id, that makes every write idempotent: a crash between the PUT and the database commit
+replays as the same resource rather than a second copy, and an event deleted by hand is recreated
+by the next PUT instead of being lost. A `412` would only ever be an obstacle to the intended
+behaviour.
+
+### 5.6 Duplicates from Apple's own mail scanning
+
+The Google equivalent of this worry was "Events from Gmail", which writes into a real calendar.
+Apple's behaviour is milder. "Event details from known providers that you receive in other apps,
+such as Mail, automatically appear in Calendar as suggested events", and they are "placed in the
+Siri Suggestions calendar, which is located in the Other section of the calendar list"
+(<https://support.apple.com/guide/calendar/use-siri-suggestions-iclc121e66ee/mac>).
+
+That calendar is separate and read-only, so a flight this service writes and a flight Siri
+suggests sit side by side rather than duplicating inside one calendar. Turning it off is **System
+Settings → Apple Intelligence & Siri → Siri Suggestions & Privacy → Calendar → Show Siri
+Suggestions in App**; Apple notes "any unconfirmed event suggestions are deleted and the Siri
+Suggestions calendar is hidden".
+
+### 5.7 Library choice: httpx, not `caldav`
+
+`caldav` (<https://pypi.org/project/caldav/>) is the obvious Python client, and it is synchronous
+and built on `requests`. This codebase is async throughout, so every call would have to cross
+`asyncio.to_thread`, and it drags in an iCalendar object model and an XML stack for what is four
+HTTP verbs against one collection.
+
+`httpx` is already a dependency, speaks arbitrary methods via `client.request("PROPFIND", ...)`,
+and its `MockTransport` makes the whole protocol testable without a server. The XML is small
+enough for `xml.etree.ElementTree`.
+
+The one part worth a library is generating iCalendar text: line folding at 75 octets (RFC 5545
+§3.1), escaping in `TEXT` values (§3.3.11), and above all deriving a `VTIMEZONE` from tzdata, which
+means walking transitions that `zoneinfo` does not expose. `icalendar` does all three, ships
+`py.typed`, is BSD-2-Clause, and its `Timezone.from_tzid(tzid, first_date=..., last_date=...)`
+generates the VTIMEZONE directly
+(<https://github.com/collective/icalendar/blob/main/src/icalendar/cal/timezone.py>).
+
+### 5.8 Not verified
+
+Everything in §5.2 through §5.5 about iCloud specifically rests on third-party captures rather
+than an Apple specification, and none of it has been run against a real account here. In
+particular: whether iCloud accepts a `PUT` from a non-Apple `User-Agent` without complaint,
+whether it enforces the `VTIMEZONE` precondition strictly, and whether a display name is a stable
+enough key across renames in the Calendar app.
+
+---
+
+## 6. Library versions
 
 Latest stable releases on PyPI, read from `https://pypi.org/pypi/<name>/json` (`info.version`) on
-2026-08-19.
+2026-08-19, except `icalendar`, read on 2026-08-20.
 
 | Package | Version |
 | --- | --- |
@@ -542,8 +759,7 @@ Latest stable releases on PyPI, read from `https://pypi.org/pypi/<name>/json` (`
 | pydantic | 2.13.4 |
 | pydantic-settings | 2.15.0 |
 | anthropic | 0.125.0 |
-| google-api-python-client | 2.198.0 |
-| google-auth-oauthlib | 1.4.0 |
+| icalendar | 7.3.0 |
 | aioimaplib | 2.0.1 |
 | airportsdata | 20260803 |
 | python-multipart | 0.0.32 |

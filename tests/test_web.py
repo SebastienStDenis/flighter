@@ -11,7 +11,6 @@ from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
-from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -57,7 +56,7 @@ SETTINGS_FORM = {
     "extraction_confidence_threshold": "0.85",
     "imap_folder": "INBOX",
     "imap_idle_seconds": "300",
-    "gcal_calendar_id": "cal-id",
+    "icloud_calendar_name": "Flights",
 }
 
 CLEAR_BUDGET = BudgetStatus(
@@ -362,9 +361,10 @@ def test_healthz_is_liveness_only(client: TestClient) -> None:
 # --- Settings ------------------------------------------------------------------------
 
 
-def test_the_settings_page_names_the_redirect_uri_google_needs(client: TestClient) -> None:
+def test_the_settings_page_shows_what_is_connected(client: TestClient) -> None:
     body = client.get("/settings").text
-    assert "https://flights.example.com/settings/google/callback" in body
+    assert "someone@icloud.com" in body
+    assert "Flights" in body
     # The token has to be readable: it is typed into Scriptable by hand.
     assert "test-token" in body
 
@@ -386,27 +386,10 @@ def test_a_typo_in_the_cap_is_refused_with_the_field_named(client: TestClient) -
     assert "four dollars" in response.text
 
 
-def test_connecting_google_needs_the_client_from_the_env_first(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(settings, "google_client_id", "")
-    response = build_client(settings, monkeypatch).get(
-        "/settings/google/connect", follow_redirects=False
-    )
-    assert response.status_code == 400
-    assert "GOOGLE_CLIENT_ID" in response.text
+def test_naming_the_calendar_turns_the_sync_on(client: TestClient) -> None:
+    client.post("/settings", data=SETTINGS_FORM | {"icloud_calendar_name": ""})
+    assert not prefs.current().calendar_configured
 
-
-def test_connect_sends_the_browser_to_google_with_our_callback(client: TestClient) -> None:
-    response = client.get("/settings/google/connect", follow_redirects=False)
-    assert response.status_code == 303
-    location = response.headers["location"]
-    assert location.startswith("https://accounts.google.com/")
-    assert quote("https://flights.example.com/settings/google/callback", safe="") in location
-    # Google only returns a refresh token on a fresh grant.
-    assert "prompt=consent" in location
-
-
-def test_a_callback_that_did_not_start_here_is_refused(client: TestClient) -> None:
-    response = client.get("/settings/google/callback?state=forged&code=abc")
-    assert response.status_code == 400
+    client.post("/settings", data=SETTINGS_FORM | {"icloud_calendar_name": "Trips"})
+    assert prefs.current().icloud_calendar_name == "Trips"
+    assert prefs.current().calendar_configured

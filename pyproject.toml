@@ -1,7 +1,7 @@
 [project]
 name = "flighter"
 version = "0.1.0"
-description = "Self-hosted flight tracking: iCloud bookings in, AeroAPI status, Google Calendar and a phone widget out."
+description = "Self-hosted flight tracking: iCloud bookings in, AeroAPI status, iCloud Calendar and a phone widget out."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -13,9 +13,8 @@ dependencies = [
     "asyncpg>=0.30",
     "beautifulsoup4>=4.13",
     "fastapi>=0.118",
-    "google-api-python-client>=2.190",
-    "google-auth-oauthlib>=1.2",
     "httpx>=0.28",
+    "icalendar>=7.0",
     "jinja2>=3.1",
     "pydantic>=2.11",
     "pydantic-settings>=2.10",
@@ -54,18 +53,14 @@ python_version = "3.12"
 strict = true
 files = ["src"]
 
-# The Google and IMAP client libraries ship no type information, so calls into them are
-# untyped.
+# The IMAP client library ships no type information, so calls into it are untyped.
 [[tool.mypy.overrides]]
-module = ["flighter.gcal", "flighter.google_auth", "flighter.mail"]
+module = ["flighter.mail"]
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]
 module = [
     "aioimaplib.*",
-    "googleapiclient.*",
-    "google_auth_oauthlib.*",
-    "google.*",
     "airportsdata.*",
     "bs4.*",
 ]

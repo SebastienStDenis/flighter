@@ -28,12 +28,12 @@ def test_a_minted_secret_is_live_without_a_restart(deployment: Path) -> None:
     assert held.widget_token == "deadbeef"
 
 
-def test_re_authorising_replaces_the_dead_token(deployment: Path) -> None:
-    write_secret("GOOGLE_REFRESH_TOKEN", "first")
-    write_secret("GOOGLE_REFRESH_TOKEN", "second")
+def test_minting_a_secret_twice_leaves_one_line(deployment: Path) -> None:
+    write_secret("WIDGET_TOKEN", "first")
+    write_secret("WIDGET_TOKEN", "second")
     written = (deployment / "data" / "secrets.env").read_text()
-    assert written.count("GOOGLE_REFRESH_TOKEN") == 1
-    assert get_settings().google_refresh_token == "second"
+    assert written.count("WIDGET_TOKEN") == 1
+    assert get_settings().widget_token == "second"
 
 
 def test_the_file_is_not_world_readable(deployment: Path) -> None:

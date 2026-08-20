@@ -21,9 +21,6 @@ def settings() -> Settings:
         widget_token="test-token",
         icloud_email="someone@icloud.com",
         icloud_app_password="abcd-efgh-ijkl-mnop",
-        google_client_id="client-id",
-        google_client_secret="client-secret",
-        google_refresh_token="refresh-token",
         pushover_token="app-token",
         pushover_user_key="user-key",
     )
@@ -38,7 +35,7 @@ def preferences(monkeypatch: pytest.MonkeyPatch) -> Prefs:
     """
     configured = Prefs(
         public_base_url="https://flights.example.com",
-        gcal_calendar_id="cal-id",
+        icloud_calendar_name="Flights",
     )
     monkeypatch.setattr(prefs, "_current", configured)
     return configured

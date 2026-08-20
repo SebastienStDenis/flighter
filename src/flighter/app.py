@@ -27,15 +27,15 @@ DISPATCH_INTERVAL_SECONDS = 20
 
 
 async def _dispatch_loop(settings: Settings, stopping: asyncio.Event) -> None:
-    """Drain undelivered events to Pushover and Google Calendar.
+    """Drain undelivered events to Pushover and iCloud Calendar.
 
-    Kept apart from the poller so a Google outage delays notifications instead of
+    Kept apart from the poller so an Apple outage delays notifications instead of
     stalling the polling that produces them.
     """
     from sqlalchemy import select
 
+    from .caldav import CalendarClient
     from .events import dispatch_pending
-    from .gcal import CalendarClient
     from .models import Airport
     from .notify import Notifier
 
@@ -110,10 +110,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ),
         asyncio.create_task(_supervise("ingest", run_ingest_loop(stopping)), name="ingest"),
     ]
-    if not settings.mail_configured:
+    if not settings.icloud_configured:
         log.warning("iCloud is not configured; bookings must be added by hand")
-    if not settings.google_connected:
-        log.warning("Google is not connected; nothing will reach the calendar")
+    elif not prefs.current().calendar_configured:
+        log.warning("no iCloud calendar is named; nothing will reach the calendar")
 
     app.state.background_tasks = tasks
     try:

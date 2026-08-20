@@ -111,7 +111,7 @@ class Booking(Base):
 
     status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
     extraction_confidence: Mapped[float | None] = mapped_column(Float)
-    gcal_event_id: Mapped[str | None] = mapped_column(Text)
+    calendar_event_uid: Mapped[str | None] = mapped_column(Text)
     next_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = mapped_column(
@@ -168,7 +168,7 @@ class FlightSnapshot(Base):
 
 
 class FlightEvent(Base):
-    """A material change, fanned out to Pushover and Google Calendar independently."""
+    """A material change, fanned out to Pushover and iCloud Calendar independently."""
 
     __tablename__ = "flight_events"
 

@@ -50,9 +50,10 @@ class Prefs(BaseModel):
     # minutes is well inside what either tolerates.
     imap_folder: str = "INBOX"
     imap_idle_seconds: int = 300
-    # A calendar of its own, so a bad sync is undone by deleting one calendar. Created
-    # by the consent flow rather than looked up by hand.
-    gcal_calendar_id: str = ""
+    # The display name of the iCloud calendar flights are written to, found by name
+    # because iCloud will not let a client create one. A calendar of its own, so a bad
+    # sync is undone by deleting one calendar rather than hunting among appointments.
+    icloud_calendar_name: str = ""
 
     @field_validator("public_base_url")
     @classmethod
@@ -61,7 +62,7 @@ class Prefs(BaseModel):
 
     @property
     def calendar_configured(self) -> bool:
-        return bool(self.gcal_calendar_id)
+        return bool(self.icloud_calendar_name)
 
 
 _current = Prefs()

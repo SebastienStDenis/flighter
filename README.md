@@ -1,7 +1,7 @@
 # flighter
 
 A self-hosted replacement for Flighty. It reads flight bookings out of your iCloud
-mailbox, tracks them on FlightAware, keeps a Google Calendar honest, and puts a live
+mailbox, tracks them on FlightAware, keeps an iCloud calendar honest, and puts a live
 countdown on your phone's lock screen. One user, one machine, no App Store.
 
 ```
@@ -11,8 +11,8 @@ IDLE            JSON-LD                     cadence tightens    append-only    d
                 review queue                approaches                             │
                                                                          ┌─────────┴─────────┐
                                                                          ▼                   ▼
-                                                                   Pushover push     Google Calendar
-                                                                         │
+                                                                   Pushover push     iCloud Calendar
+                                                                         │                 CalDAV
                                                    web UI  ←─────────────┘─────→  Scriptable widget
                                                    flight detail                  live countdown
 ```
@@ -61,12 +61,12 @@ is the only place it lives. No value has two homes, so there is never a
 question of which one wins.
 
 The one file the app writes for itself is `data/secrets.env`, holding the credentials it
-mints rather than asks for: the Google refresh token from the consent flow, and the
-widget token generated on first boot. Those keys never appear in `.env` either.
+mints rather than asks for: today just the widget token generated on first boot. That key
+never appears in `.env` either.
 
 ## Prerequisites
 
-Five accounts and an Apple ID you already have, and only three of them involve a form.
+Four accounts and an Apple ID you already have, and only three of them involve a form.
 
 ### Tailscale
 
@@ -86,9 +86,10 @@ it drops, the widget shows the last data it had rather than failing loudly.
 
 ### iCloud app-specific password
 
-The mail loop signs in to `imap.mail.me.com` as you. With two-factor authentication on -
-and it is, for every Apple ID that can reach iCloud Mail - IMAP refuses your Apple ID
-password outright, so it needs an app-specific one.
+The mail loop signs in to `imap.mail.me.com` and the calendar sync signs in to
+`caldav.icloud.com`, both as you, and **one app-specific password covers both**. With
+two-factor authentication on - and it is, for every Apple ID that can reach iCloud Mail -
+neither service accepts your Apple ID password, so an app-specific one is not optional.
 
 At [appleid.apple.com](https://appleid.apple.com), **Sign-In and Security →
 App-Specific Passwords → +**, name it `flighter`, and put the generated
@@ -103,6 +104,25 @@ The folder to watch is a preference, `INBOX` by default, and only one connection
 held: iCloud allows about five per account, and your phone and your Mac are already using
 some of them.
 
+### A calendar called Flights
+
+Open the Calendar app on any of your devices and make a new iCloud calendar. Call it
+`Flights`, or anything else, and type that name into `/settings`. The app finds it by
+name - it never guesses a URL, because iCloud serves every account from a different
+cluster under a different numeric principal.
+
+It has to be made by hand: iCloud does not let a CalDAV client create a calendar, and
+writing flights into your main calendar would mean undoing a bad sync one event at a
+time instead of by deleting one calendar.
+
+> Apple can also put flights on your calendar by itself, from the same emails. Those
+> land in the read-only **Siri Suggestions** calendar under *Other* rather than in a real
+> one, so they show up beside this app's entries rather than duplicating them inside the
+> same calendar. If the pair annoys you, turn the suggestions off: on a Mac, **System
+> Settings → Apple Intelligence & Siri → Siri Suggestions & Privacy → Calendar**, and
+> switch off *Show Siri Suggestions in App*; on iOS the same switch is under
+> **Settings → Apps → Calendar → Siri**.
+
 ### FlightAware AeroAPI key
 
 Sign up for the **Personal** tier at
@@ -114,25 +134,6 @@ licensed for personal use only.
 > Personal has a $100/month minimum with no free allowance, and FlightAware provides no
 > cap of its own. The monthly cap on the settings page defaults to `$4.00` and stops all
 > polling when month-to-date estimated spend passes it. `/health` shows the running total.
-
-### Google OAuth client (Calendar)
-
-One project, one client. A five-minute setup you do once, and the only Google value you
-ever paste is the client id and secret - the refresh token is minted by the app.
-
-1. At [console.cloud.google.com](https://console.cloud.google.com), create a project.
-2. **APIs & Services → Library** → enable the **Google Calendar API**.
-3. **APIs & Services → OAuth consent screen**: set it up for **External** users, then set
-   the publishing status to **In production**.
-4. **APIs & Services → Credentials → Create Credentials → OAuth client ID → Web
-   application**. Add `https://flighter.<your-tailnet>.ts.net/settings/google/callback`
-   as an authorised redirect URI - the settings page prints the exact string. Copy the
-   client id and secret into `.env`.
-
-Step 3 is not optional. An app left in **Testing** issues refresh tokens that expire after
-**7 days**, and the service will silently stop working every week. Publishing does not
-require Google's verification review; you will see a one-time "Google hasn't verified this
-app" screen (Advanced → Go to …), and Google exempts apps used only by their author.
 
 ### Anthropic API key
 
@@ -175,10 +176,11 @@ airport table with its timezones, generates the widget token, and starts serving
 Open `https://flighter.<your-tailnet>.ts.net/settings` and finish there:
 
 1. Set the **public base URL** - the page offers the address you opened it on.
-2. **Connect Google**, once. Sign in, accept the calendar scope, and the app stores the
-   refresh token and creates a calendar called *Flights* to write into.
-3. **Run checks**. It exercises Postgres, AeroAPI, iCloud, Calendar and Pushover in turn
-   and names the broken one, which is the question you will actually have.
+2. Type the **calendar name** you made in the Calendar app, `Flights` or whatever you
+   called it. Leave it empty and nothing is written to any calendar.
+3. **Run checks**. It exercises Postgres, AeroAPI, iCloud mail, iCloud Calendar and
+   Pushover in turn and names the broken one, which is the question you will actually
+   have.
 
 Then either add a flight by hand or let the mail loop find one.
 
