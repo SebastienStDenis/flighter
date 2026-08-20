@@ -1,4 +1,4 @@
-# flight-tracker
+# flighter
 
 A self-hosted replacement for Flighty. It reads flight bookings out of your Gmail, tracks
 them on FlightAware, keeps a Google Calendar honest, and puts a live countdown on your
@@ -104,19 +104,19 @@ in `TUNNEL_TOKEN`.
 ## Run it
 
 ```sh
-git clone https://github.com/sebastienstdenis/flight-tracker
-cd flight-tracker
+git clone https://github.com/sebastienstdenis/flighter
+cd flighter
 cp .env.example .env
 $EDITOR .env
 docker compose pull          # fetch the published image instead of compiling it here
 docker compose up -d
-docker compose exec app flight-tracker migrate
-docker compose exec app flight-tracker seed-airports
-docker compose exec app flight-tracker check
+docker compose exec app flighter migrate
+docker compose exec app flighter seed-airports
+docker compose exec app flighter check
 ```
 
 Pushing to `main` publishes a multi-arch image to
-`ghcr.io/sebastienstdenis/flight-tracker:latest`, so updating the home stack is
+`ghcr.io/sebastienstdenis/flighter:latest`, so updating the home stack is
 `docker compose pull && docker compose up -d`. The package GitHub creates on the first
 publish is **private**: either flip it to public in the package settings, or run
 `docker login ghcr.io` once on the desktop with a token carrying `read:packages`, or the
@@ -133,27 +133,27 @@ a flight by hand or let the mail loop find one.
 To pick up flights already sitting in your mailbox:
 
 ```sh
-docker compose exec app flight-tracker backfill --days 30
+docker compose exec app flighter backfill --days 30
 ```
 
 ### Running from a checkout
 
 ```sh
 uv sync --all-groups
-uv run flight-tracker migrate
-uv run flight-tracker serve
+uv run flighter migrate
+uv run flighter serve
 ```
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
-| `flight-tracker serve` | The API, the poll worker and the mail loop |
-| `flight-tracker migrate` | Apply database migrations |
-| `flight-tracker seed-airports` | Load the airport table and its IANA timezones |
-| `flight-tracker backfill --days 30` | Ingest recent mail once |
-| `flight-tracker poll` | One polling pass, then exit |
-| `flight-tracker check` | Exercise every external dependency |
+| `flighter serve` | The API, the poll worker and the mail loop |
+| `flighter migrate` | Apply database migrations |
+| `flighter seed-airports` | Load the airport table and its IANA timezones |
+| `flighter backfill --days 30` | Ingest recent mail once |
+| `flighter poll` | One polling pass, then exit |
+| `flighter check` | Exercise every external dependency |
 
 ## The widget
 

@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 import pytest
 
-from flight_tracker.aeroapi import (
+from flighter.aeroapi import (
     DEFAULT_PRICE_USD,
     FLIGHT_INFO_ENDPOINT,
     AeroAPIClient,
@@ -25,8 +25,8 @@ from flight_tracker.aeroapi import (
     select_match,
     to_snapshot_fields,
 )
-from flight_tracker.config import Settings
-from flight_tracker.models import KV, ApiUsage, Booking
+from flighter.config import Settings
+from flighter.models import KV, ApiUsage, Booking
 
 DEPARTURE = datetime(2026, 9, 12, 18, 40, tzinfo=UTC)
 

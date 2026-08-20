@@ -3,7 +3,7 @@ services:
     # Published by .github/workflows/release.yml on every push to main. `build` stays so
     # a checkout can still compile its own, but the home stack pulls: `docker compose
     # pull` fetches the built image rather than making the desktop compile it.
-    image: ghcr.io/sebastienstdenis/flight-tracker:latest
+    image: ghcr.io/sebastienstdenis/flighter:latest
     build: .
     restart: unless-stopped
     env_file: .env

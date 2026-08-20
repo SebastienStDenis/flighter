@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from flight_tracker.poller import (
+from flighter.poller import (
     ABANDON_AFTER,
     CLOSE_INTERVAL,
     DAILY_INTERVAL,

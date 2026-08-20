@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from flight_tracker.models import Booking, FlightSnapshot
-from flight_tracker.phase import (
+from flighter.models import Booking, FlightSnapshot
+from flighter.phase import (
     AIRBORNE,
     BOARDING,
     CANCELLED,

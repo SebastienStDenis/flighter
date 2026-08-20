@@ -33,7 +33,7 @@ script only changes when the layout changes.
      clock, choose Scriptable, and pick the rectangular widget. Set the script the same
      way.
 
-To change the token later, run the script in-app after deleting the `flight-tracker-token`
+To change the token later, run the script in-app after deleting the `flighter-token`
 entry, or long press the script and use Scriptable's own settings.
 
 ## Sizes

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from flight_tracker.airlines import IATA_TO_ICAO, to_icao
+from flighter.airlines import IATA_TO_ICAO, to_icao
 
 
 @pytest.mark.parametrize(

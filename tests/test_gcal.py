@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from flight_tracker.gcal import REMINDER_MINUTES, event_body
-from flight_tracker.models import Airport, Booking, FlightSnapshot, Passenger
+from flighter.gcal import REMINDER_MINUTES, event_body
+from flighter.models import Airport, Booking, FlightSnapshot, Passenger
 
 BASE_URL = "https://flights.example.com"
 

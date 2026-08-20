@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from flight_tracker.events import (
+from flighter.events import (
     ARRIVAL_TIME_CHANGED,
     BAGGAGE_CLAIM_ASSIGNED,
     CANCELLED,
@@ -19,7 +19,7 @@ from flight_tracker.events import (
     DetectedChange,
     diff_snapshots,
 )
-from flight_tracker.models import FlightSnapshot
+from flighter.models import FlightSnapshot
 
 DEPARTS = datetime(2026, 9, 12, 19, 0, tzinfo=UTC)
 ARRIVES = datetime(2026, 9, 12, 22, 30, tzinfo=UTC)

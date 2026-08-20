@@ -1,5 +1,5 @@
 [project]
-name = "flight-tracker"
+name = "flighter"
 version = "0.1.0"
 description = "Self-hosted flight tracking: Gmail bookings in, AeroAPI status, Google Calendar and a phone widget out."
 readme = "README.md"
@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.scripts]
-flight-tracker = "flight_tracker.cli:main"
+flighter = "flighter.cli:main"
 
 [dependency-groups]
 dev = [
@@ -39,7 +39,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/flight_tracker"]
+packages = ["src/flighter"]
 
 [tool.ruff]
 line-length = 100
@@ -55,7 +55,7 @@ files = ["src"]
 
 # The Google client libraries ship no type information, so calls into them are untyped.
 [[tool.mypy.overrides]]
-module = ["flight_tracker.gcal", "flight_tracker.gmail"]
+module = ["flighter.gcal", "flighter.gmail"]
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]

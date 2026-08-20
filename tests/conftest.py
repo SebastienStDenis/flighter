@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from flight_tracker.config import Settings
+from flighter.config import Settings
 
 
 @pytest.fixture

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from flight_tracker.timezones import format_local, same_local_date, to_local, to_utc
+from flighter.timezones import format_local, same_local_date, to_local, to_utc
 
 JFK = "America/New_York"
 LHR = "Europe/London"

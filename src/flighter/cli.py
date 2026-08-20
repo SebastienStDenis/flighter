@@ -118,7 +118,7 @@ def _cmd_check(settings: Settings, _args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="flight-tracker")
+    parser = argparse.ArgumentParser(prog="flighter")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     serve = subparsers.add_parser("serve", help="run the API, poller and mail loop")

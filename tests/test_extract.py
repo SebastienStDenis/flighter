@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from flight_tracker.config import Settings
-from flight_tracker.extract import (
+from flighter.config import Settings
+from flighter.extract import (
     Extraction,
     ExtractionError,
     from_jsonld,
@@ -17,7 +17,7 @@ from flight_tracker.extract import (
     looks_like_flight,
     render,
 )
-from flight_tracker.gmail import Message, parse_message
+from flighter.gmail import Message, parse_message
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

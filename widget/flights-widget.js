@@ -15,8 +15,8 @@
 // Every timer here is gated on its date still being in the future.
 
 const API = "https://flights.example.com"; // your own hostname, no trailing slash
-const TOKEN_KEY = "flight-tracker-token";
-const CACHE_FILE = "flight-tracker-widget.json";
+const TOKEN_KEY = "flighter-token";
+const CACHE_FILE = "flighter-widget.json";
 const REQUEST_TIMEOUT_SECONDS = 15;
 // iOS budgets reloads and ignores an eager request anyway, so do not ask for one.
 const MIN_REFRESH_SECONDS = 60;

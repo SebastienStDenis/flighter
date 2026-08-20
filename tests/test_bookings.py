@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from flight_tracker.bookings import _normalised, to_booking_times
+from flighter.bookings import _normalised, to_booking_times
 
 JFK = "America/New_York"
 LHR = "Europe/London"

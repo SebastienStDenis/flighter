@@ -8,8 +8,8 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from flight_tracker.config import Settings
-from flight_tracker.events import (
+from flighter.config import Settings
+from flighter.events import (
     BAGGAGE_CLAIM_ASSIGNED,
     CANCELLED,
     DEPARTED,
@@ -19,8 +19,8 @@ from flight_tracker.events import (
     GATE_CHANGED,
     LANDED,
 )
-from flight_tracker.models import Booking, FlightEvent
-from flight_tracker.notify import Notifier
+from flighter.models import Booking, FlightEvent
+from flighter.notify import Notifier
 
 ORIGIN_TZ = "America/New_York"
 DEST_TZ = "America/Los_Angeles"

@@ -8,11 +8,11 @@ from typing import Any
 
 import pytest
 
-from flight_tracker import ingest
-from flight_tracker.config import Settings
-from flight_tracker.extract import Extraction, Segment
-from flight_tracker.gmail import Message, parse_message
-from flight_tracker.models import IngestLog, Passenger
+from flighter import ingest
+from flighter.config import Settings
+from flighter.extract import Extraction, Segment
+from flighter.gmail import Message, parse_message
+from flighter.models import IngestLog, Passenger
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

@@ -11,12 +11,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from flight_tracker import widget
-from flight_tracker.aeroapi import BREAKER_KEY, month_key
-from flight_tracker.config import Settings, get_settings
-from flight_tracker.db import get_session
-from flight_tracker.models import KV, Booking, FlightSnapshot, Passenger
-from flight_tracker.widget import (
+from flighter import widget
+from flighter.aeroapi import BREAKER_KEY, month_key
+from flighter.config import Settings, get_settings
+from flighter.db import get_session
+from flighter.models import KV, Booking, FlightSnapshot, Passenger
+from flighter.widget import (
     FlightRow,
     authorize,
     build_payload,

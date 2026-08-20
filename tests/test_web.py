@@ -15,11 +15,11 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from flight_tracker import web
-from flight_tracker.aeroapi import BudgetStatus
-from flight_tracker.config import Settings
-from flight_tracker.db import get_session
-from flight_tracker.models import Airport, Booking, FlightEvent, FlightSnapshot, Passenger
+from flighter import web
+from flighter.aeroapi import BudgetStatus
+from flighter.config import Settings
+from flighter.db import get_session
+from flighter.models import Airport, Booking, FlightEvent, FlightSnapshot, Passenger
 
 NOW = datetime.now(UTC)
 DEPARTURE = NOW + timedelta(days=2)

@@ -10,8 +10,8 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from flight_tracker.config import Settings
-from flight_tracker.models import Base
+from flighter.config import Settings
+from flighter.models import Base
 
 config = context.config
 

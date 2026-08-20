@@ -423,7 +423,7 @@ FormDep = Annotated[FlightForm, Depends()]
 
 
 def create_app(settings: Settings) -> FastAPI:
-    app = FastAPI(title="flight-tracker")
+    app = FastAPI(title="flighter")
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     app.include_router(widget_router)
 
