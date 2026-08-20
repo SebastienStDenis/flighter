@@ -7,8 +7,10 @@ from datetime import UTC, datetime, timedelta
 from flighter.models import Booking, FlightSnapshot
 from flighter.phase import (
     AIRBORNE,
+    ARRIVAL_DELAY_THRESHOLD,
     CANCELLED,
     DAY_OF,
+    DEPARTURE_DELAY_THRESHOLD,
     DIVERTED,
     LANDED,
     TAXIING,
@@ -129,6 +131,24 @@ def test_departure_estimate_falls_back_to_the_booking() -> None:
     assert departure_estimate(booking(), snapshot(scheduled_out=DEPARTURE)) == DEPARTURE
     late = snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=25))
     assert departure_estimate(booking(), late) == DEPARTURE + timedelta(minutes=25)
+
+
+def test_departure_estimate_prefers_what_actually_happened() -> None:
+    """Once the flight has pushed back, the estimate is history; the calendar block and
+    the page both want the time it left."""
+    left = snapshot(
+        scheduled_out=DEPARTURE,
+        estimated_out=DEPARTURE + timedelta(minutes=25),
+        actual_out=DEPARTURE + timedelta(minutes=31),
+    )
+    assert departure_estimate(booking(), left) == DEPARTURE + timedelta(minutes=31)
+
+
+def test_delay_thresholds_agree_with_the_industry() -> None:
+    """Anything under a quarter hour is on time, to the airline statistic, the page, the
+    widget and the push alike."""
+    assert timedelta(minutes=15) == DEPARTURE_DELAY_THRESHOLD
+    assert timedelta(minutes=15) == ARRIVAL_DELAY_THRESHOLD
 
 
 def test_arrival_estimate_prefers_the_estimate_then_the_schedule() -> None:

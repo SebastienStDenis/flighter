@@ -17,11 +17,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import inspect
 
 from flighter import prefs, web
-from flighter.aeroapi import BudgetStatus
+from flighter.aeroapi import BREAKER_KEY, BudgetStatus
+from flighter.airports import UnknownAirport
 from flighter.caldav import CalendarUnavailable, Collection
 from flighter.config import Settings
 from flighter.db import get_session
-from flighter.models import Airport, Booking, FlightEvent, FlightSnapshot, IngestLog
+from flighter.models import KV, Airport, Booking, FlightEvent, FlightSnapshot, IngestLog
 
 NOW = datetime.now(UTC)
 DEPARTURE = NOW + timedelta(days=2)
@@ -32,36 +33,19 @@ FLIGHTS_CALENDAR = f"{CALDAV_HOME}6c1f4f0e-flights/"
 
 AIRPORTS = {
     "YUL": Airport(
-        iata="YUL",
-        name="Montreal-Trudeau",
-        city="Montreal",
-        country="CA",
-        latitude=45.5,
-        longitude=-73.6,
-        tz="America/Toronto",
+        iata="YUL", name="Montreal-Trudeau", city="Montreal", country="CA", tz="America/Toronto"
     ),
     "LHR": Airport(
-        iata="LHR",
-        name="London Heathrow",
-        city="London",
-        country="GB",
-        latitude=51.5,
-        longitude=-0.5,
-        tz="Europe/London",
+        iata="LHR", name="London Heathrow", city="London", country="GB", tz="Europe/London"
     ),
 }
 
-# Every field the settings form posts, so a test can change one of them.
+# Every field the preferences form posts, so a test can change one of them.
 SETTINGS_FORM = {
     "public_base_url": "https://flights.example.com",
     "log_level": "INFO",
     "aeroapi_monthly_cap_usd": "4.00",
-    "aeroapi_rate_limit_per_minute": "8",
-    "anthropic_model": "claude-sonnet-5",
-    "extraction_confidence_threshold": "0.85",
     "imap_flag_colour": "grey",
-    "imap_idle_seconds": "300",
-    "icloud_calendar_url": FLIGHTS_CALENDAR,
 }
 
 # What discovery answers with, so the settings page has a picker to render.
@@ -69,6 +53,9 @@ CALENDARS = [Collection("Flights", FLIGHTS_CALENDAR), Collection("Home", f"{CALD
 
 CLEAR_BUDGET = BudgetStatus(
     spend_usd=Decimal("0.42"), cap_usd=Decimal("4.00"), tripped=False, month="2026-08"
+)
+SPENT_BUDGET = BudgetStatus(
+    spend_usd=Decimal("4.01"), cap_usd=Decimal("4.00"), tripped=True, month="2026-08"
 )
 
 
@@ -97,7 +84,6 @@ def full_snapshot() -> FlightSnapshot:
         id=2,
         booking_id=1,
         observed_at=NOW,
-        status_text="En Route / On Time",
         cancelled=False,
         diverted=False,
         gate_origin="B27",
@@ -114,14 +100,7 @@ def full_snapshot() -> FlightSnapshot:
         progress_percent=64,
         aircraft_type="B789",
         registration="C-FVLQ",
-        raw={
-            "route": "BOSOX Q812 YAHOO DCT LOGAN",
-            "filed_altitude": 380,
-            "route_distance": 3251,
-            "seats_cabin_first": 4,
-            "seats_cabin_business": 30,
-            "seats_cabin_coach": 250,
-        },
+        raw={},
     )
 
 
@@ -141,6 +120,7 @@ class FakeSession:
 
     def __init__(self, **rows: Sequence[Any]) -> None:
         self.rows: dict[str, Sequence[Any]] = dict(rows)
+        self.deleted: list[Any] = []
 
     async def execute(self, statement: Any) -> FakeResult:
         entity = statement.column_descriptions[0]["entity"]
@@ -157,7 +137,7 @@ class FakeSession:
         return None
 
     def add(self, instance: Any) -> None:
-        self.rows.setdefault(type(instance).__name__, [])
+        self.rows.setdefault(type(instance).__name__, []).append(instance)  # type: ignore[attr-defined]
 
     async def flush(self) -> None:
         return None
@@ -166,19 +146,27 @@ class FakeSession:
         return None
 
     async def delete(self, instance: Any) -> None:
-        return None
+        self.deleted.append(instance)
 
     async def merge(self, instance: Any) -> Any:
         self.rows.setdefault(type(instance).__name__, [])
         return instance
 
 
-def build_client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def build_client(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, *, raising: bool = True
+) -> TestClient:
     """The app with a faked data layer, ready for a request."""
     session = FakeSession()
 
     async def fake_get_airport(_session: Any, iata: str) -> Airport | None:
         return AIRPORTS.get(iata)
+
+    async def fake_airport_tz(_session: Any, iata: str) -> str:
+        airport = AIRPORTS.get(iata)
+        if airport is None:
+            raise UnknownAirport(iata)
+        return airport.tz
 
     async def fake_budget(_session: Any, _settings: Any = None) -> BudgetStatus:
         return CLEAR_BUDGET
@@ -189,14 +177,15 @@ def build_client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> TestCli
     async def fake_calendars(self: Any) -> list[Collection]:
         return list(CALENDARS)
 
-    monkeypatch.setattr(web, "get_airport", fake_get_airport)
+    monkeypatch.setattr(web.views, "get_airport", fake_get_airport)
+    monkeypatch.setattr(web.views, "airport_tz", fake_airport_tz)
     monkeypatch.setattr(web, "budget_status", fake_budget)
     monkeypatch.setattr(web.booking_repo, "list_bookings", no_bookings)
     monkeypatch.setattr(web.CalendarClient, "calendars", fake_calendars)
 
     app = web.create_app(settings)
     app.dependency_overrides[get_session] = lambda: session
-    test_client = TestClient(app)
+    test_client = TestClient(app, raise_server_exceptions=raising)
     test_client.session = session  # type: ignore[attr-defined]
     return test_client
 
@@ -228,32 +217,123 @@ def show(monkeypatch: pytest.MonkeyPatch, view_booking: Booking, snapshot: Any) 
     async def latest(_session: Any, _ids: Any) -> dict[int, Any]:
         return {view_booking.id: snapshot} if snapshot is not None else {}
 
+    async def list_bookings(_session: Any, **_kwargs: Any) -> list[Booking]:
+        return [view_booking]
+
     monkeypatch.setattr(web.booking_repo, "get_booking", get_booking)
-    monkeypatch.setattr(web, "latest_snapshots", latest)
+    monkeypatch.setattr(web.booking_repo, "list_bookings", list_bookings)
+    monkeypatch.setattr(web.views.booking_repo, "latest_snapshots", latest)
 
 
-def test_the_list_says_what_to_do_when_there_are_no_flights(client: TestClient) -> None:
+# --- The board -----------------------------------------------------------------------
+
+
+def test_the_board_says_what_to_do_when_there_are_no_flights(client: TestClient) -> None:
     page = client.get("/")
     assert page.status_code == 200
     assert "Nothing on the board" in page.text
     assert "/f/new" in page.text
 
 
-def test_the_review_banner_is_absent_until_something_is_pending(
+def test_a_booking_nobody_has_checked_sits_on_the_board_with_a_badge(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert "to check" not in client.get("/").text
+    """It is a flight like any other; the badge is the whole of the difference."""
+    show(monkeypatch, booking(status="pending_review"), None)
 
-    pending = booking(id=7, status="pending_review", extraction_confidence=0.62)
+    body = client.get("/").text
+    assert "AC871" in body
+    assert "Check this" in body
+    assert 'href="/f/1"' in body
 
-    async def list_bookings(_session: Any, *, statuses: Sequence[str] = (), **_kw: Any) -> Any:
-        return [pending] if "pending_review" in statuses else []
 
-    monkeypatch.setattr(web.booking_repo, "list_bookings", list_bookings)
+def test_the_board_offers_one_tap_out_of_a_spent_budget(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def spent(_session: Any) -> BudgetStatus:
+        return SPENT_BUDGET
 
-    page = client.get("/")
-    assert "1 booking to check" in page.text
-    assert 'href="/review"' in page.text
+    monkeypatch.setattr(web, "budget_status", spent)
+
+    body = client.get("/").text
+    assert "Updates paused" in body
+    assert "$4.01" in body
+    assert "Raise limit to $6.00" in body
+    assert 'action="/limit"' in body
+
+
+def test_raising_the_limit_also_lets_polling_start_again(client: TestClient) -> None:
+    """Raising the cap on its own changes nothing: the breaker latches until it is cleared."""
+    latch = KV(key=BREAKER_KEY, value={"month": "2026-08"})
+    client.session.rows["KV"] = [latch]  # type: ignore[attr-defined]
+
+    response = client.post("/limit", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    assert prefs.current().aeroapi_monthly_cap_usd == Decimal("6.00")
+    assert client.session.deleted == [latch]  # type: ignore[attr-defined]
+
+
+def test_the_board_says_which_email_could_not_be_read(client: TestClient) -> None:
+    client.session.rows["IngestLog"] = [set_aside_row()]  # type: ignore[attr-defined]
+
+    body = client.get("/").text
+
+    assert "Could not read Your booking is confirmed" in body
+    assert "Try again" in body
+    assert "Ignore" in body
+
+
+def test_trying_a_set_aside_message_again_puts_it_back_in_the_queue(
+    client: TestClient,
+) -> None:
+    row = set_aside_row()
+    client.session.rows["IngestLog"] = [row]  # type: ignore[attr-defined]
+
+    response = client.post(
+        "/mail/retry", data={"message_id": row.message_id}, follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    # The email never lost its flag, so clearing the give-up is all it takes.
+    assert row.attempts == 0
+    assert row.retry_at is not None
+
+
+def test_ignoring_a_set_aside_message_lets_the_next_sweep_unflag_it(
+    client: TestClient,
+) -> None:
+    row = set_aside_row()
+    client.session.rows["IngestLog"] = [row]  # type: ignore[attr-defined]
+
+    response = client.post(
+        "/mail/ignore", data={"message_id": row.message_id}, follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    assert row.outcome == "no_flight"
+    assert row.retry_at is None
+
+
+def test_a_message_that_is_not_set_aside_is_a_404(client: TestClient) -> None:
+    for path in ("/mail/retry", "/mail/ignore"):
+        assert client.post(path, data={"message_id": "<nope@icloud.invalid>"}).status_code == 404
+
+
+def set_aside_row() -> IngestLog:
+    return IngestLog(
+        message_id="<abc@icloud.invalid>",
+        processed_at=NOW,
+        outcome="error",
+        subject="Your booking is confirmed",
+        error="RuntimeError: the model timed out",
+        attempts=3,
+        retry_at=None,
+    )
+
+
+# --- One flight ----------------------------------------------------------------------
 
 
 def test_a_flight_with_nothing_known_yet_still_renders(
@@ -268,50 +348,63 @@ def test_a_flight_with_nothing_known_yet_still_renders(
     assert "AC871" in body
     assert "YUL" in body and "LHR" in body
     # Every fact keeps its row and reads as a plain dash rather than disappearing.
-    for label in ("Gate", "Terminal", "Baggage", "Registration", "Filed altitude"):
+    for label in ("Gate", "Terminal", "Baggage", "Wheels up"):
         assert label in body
-    assert body.count(">-<") >= 8
+    assert body.count(">-<") >= 6
     assert "None" not in body
     # A missing value is a dash in its row, never the page-level empty state.
     assert 'class="empty"' not in body
     assert "Scheduled" in body
 
 
-def test_a_flight_in_the_air_renders_everything_it_knows(
+def test_a_flight_in_the_air_renders_what_is_worth_knowing(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     show(monkeypatch, booking(confirmation_code="X7QW2P", seat="14A"), full_snapshot())
 
     body = client.get("/f/1").text
     assert "B27" in body and "A14" in body
-    assert "C-FVLQ" in body and "B789" in body
-    assert "FL380" in body
-    assert "3,251 mi" in body
-    assert "BOSOX Q812 YAHOO DCT LOGAN" in body
+    assert "B789" in body
     assert "X7QW2P" in body and "14A" in body
-    assert "64% flown" in body
-    # Both ends are labelled with the zone they are read in.
-    assert "America/Toronto" in body and "Europe/London" in body
+    # What is on the ticket, not what is in the flight plan.
+    for gone in ("Filed route", "Distance", "Registration", "Timezone", "Last checked"):
+        assert gone not in body
 
 
-def test_the_timeline_shows_changes_newest_first(
+def test_a_cancelled_flight_says_who_said_so(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AeroAPI's flag means "no longer tracked", which is not the same as being told."""
+    show(monkeypatch, booking(), FlightSnapshot(id=3, booking_id=1, cancelled=True, raw={}))
+
+    body = client.get("/f/1").text
+    assert "Maybe cancelled" in body
+    assert "confirm with the airline" in body
+
+
+def test_the_newest_change_is_on_the_page_and_the_rest_are_behind_a_fold(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     show(monkeypatch, booking(), full_snapshot())
+    moved = (DEPARTURE + timedelta(minutes=20)).isoformat()
     client.session.rows["FlightEvent"] = [  # type: ignore[attr-defined]
+        FlightEvent(id=2, booking_id=1, kind="GateChanged", old_value="B12", new_value="B27"),
         FlightEvent(
-            id=2,
+            id=1,
             booking_id=1,
-            kind="gate_change",
-            old_value="B12",
-            new_value="B27",
-            occurred_at=NOW,
+            kind="DepartureDelayed",
+            old_value=DEPARTURE.isoformat(),
+            new_value=moved,
         ),
     ]
 
     body = client.get("/f/1").text
-    assert "Gate change" in body
+    assert "Gate changed" in body
     assert "B12" in body and "B27" in body
+    assert "Departure delayed" in body
+    # A stored instant is a time at the airport, never the ISO string it is kept as.
+    assert moved not in body
+    assert "Earlier changes" in body
 
 
 def test_a_flight_that_is_not_there_is_a_404(
@@ -324,12 +417,51 @@ def test_a_flight_that_is_not_there_is_a_404(
     assert "No such flight." in page.text
 
 
+def test_a_page_that_breaks_still_looks_like_the_app(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Starlette's plain-text 500 is a dead end; this one has a way back to the board."""
+
+    async def broken(_session: Any, **_kwargs: Any) -> list[Booking]:
+        raise RuntimeError("the database went away")
+
+    with build_client(settings, monkeypatch, raising=False) as client:
+        monkeypatch.setattr(web.booking_repo, "list_bookings", broken)
+        page = client.get("/")
+    assert page.status_code == 500
+    assert "Something went wrong." in page.text
+    assert 'href="/"' in page.text
+
+
 def test_the_add_form_asks_only_about_the_flight(client: TestClient) -> None:
     page = client.get("/f/new")
     assert page.status_code == 200
     assert 'name="marketing_carrier"' in page.text
     # The times are wall clock at their own airport, never a UTC instant.
     assert 'type="datetime-local"' in page.text
+
+
+def test_an_airport_nobody_has_heard_of_comes_back_as_a_sentence(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def unknown(*_args: Any, **_kwargs: Any) -> Booking:
+        raise UnknownAirport("XYZ")
+
+    monkeypatch.setattr(web.booking_repo, "create_booking", unknown)
+
+    page = client.post(
+        "/f",
+        data={
+            "marketing_carrier": "AC",
+            "marketing_number": "871",
+            "origin_iata": "YUL",
+            "dest_iata": "XYZ",
+            "departure_local": "2026-09-12T18:40",
+        },
+    )
+
+    assert page.status_code == 400
+    assert "XYZ is not an airport we know." in page.text
 
 
 def test_a_flight_on_the_calendar_offers_a_way_into_the_calendar_app(
@@ -357,6 +489,61 @@ def test_the_edit_form_shows_local_wall_clock_not_utc(
     assert 'value="2026-09-12T18:40"' in body  # 22:40Z is 18:40 in Montreal.
 
 
+def test_an_edit_hands_the_booking_layer_what_the_user_typed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Normalising a carrier is the booking layer's job, and it is the dedupe key."""
+    show(monkeypatch, booking(), empty_snapshot())
+    written: dict[str, Any] = {}
+
+    async def update_booking(_session: Any, booking_id: int, **fields: Any) -> Booking:
+        written.update(fields)
+        return booking()
+
+    monkeypatch.setattr(web.booking_repo, "update_booking", update_booking)
+
+    response = client.post(
+        "/f/1",
+        data={
+            "marketing_carrier": "ac",
+            "marketing_number": "871",
+            "origin_iata": "YUL",
+            "dest_iata": "LHR",
+            "departure_local": "2026-09-12T18:40",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert written["marketing_carrier"] == "ac"
+    # 18:40 in Montreal is 22:40Z, read at the origin airport rather than at the server.
+    assert written["scheduled_departure_utc"] == datetime(2026, 9, 12, 22, 40, tzinfo=UTC)
+
+
+def test_confirming_a_booking_starts_it_being_tracked(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    row = booking(status="pending_review")
+    show(monkeypatch, row, None)
+    kept: dict[str, Any] = {}
+
+    async def update_booking(_session: Any, booking_id: int, **fields: Any) -> Booking:
+        kept.update({"id": booking_id} | fields)
+        return row
+
+    monkeypatch.setattr(web.booking_repo, "update_booking", update_booking)
+
+    response = client.post("/f/1/keep", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/f/1"
+    assert kept == {"id": 1, "status": "active"}
+
+
+def test_confirming_a_flight_that_is_not_there_is_a_404(client: TestClient) -> None:
+    assert client.post("/f/9/keep").status_code == 404
+
+
 def test_deleting_a_flight_redirects_home(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -376,76 +563,16 @@ def test_deleting_a_flight_redirects_home(
     assert deleted == [1]
 
 
-def test_htmx_gets_an_empty_body_so_the_row_just_goes(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    row = booking()
-    show(monkeypatch, row, empty_snapshot())
-
-    async def delete_booking(_session: Any, booking_id: int) -> Booking:
-        return row
-
-    monkeypatch.setattr(web.booking_repo, "delete_booking", delete_booking)
-
-    page = client.post("/f/1/delete", headers={"HX-Request": "true"})
-    assert page.status_code == 200
-    assert page.text == ""
-
-
-# --- Health --------------------------------------------------------------------------
-
-
-def set_aside_row() -> IngestLog:
-    return IngestLog(
-        message_id="<abc@icloud.invalid>",
-        processed_at=NOW,
-        outcome="error",
-        subject="Your booking is confirmed",
-        error="RuntimeError: the model timed out",
-        attempts=3,
-        retry_at=None,
-    )
-
-
-def test_the_health_page_lists_what_was_set_aside(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    client.session.rows["IngestLog"] = [set_aside_row()]  # type: ignore[attr-defined]
-
-    body = client.get("/health").text
-
-    assert "Your booking is confirmed" in body
-    assert "the model timed out" in body
-    assert "Try again" in body
-
-
-def test_trying_a_set_aside_message_again_puts_it_back_in_the_queue(
-    client: TestClient,
-) -> None:
-    row = set_aside_row()
-    client.session.rows["IngestLog"] = [row]  # type: ignore[attr-defined]
-
-    response = client.post(
-        "/health/retry", data={"message_id": row.message_id}, follow_redirects=False
-    )
-
-    assert response.status_code == 303
-    # The email never lost its flag, so clearing the give-up is all it takes.
-    assert row.attempts == 0
-    assert row.retry_at is not None
-
-
-def test_trying_a_message_that_is_not_set_aside_is_a_404(client: TestClient) -> None:
-    assert (
-        client.post("/health/retry", data={"message_id": "<nope@icloud.invalid>"}).status_code
-        == 404
-    )
-
-
 def test_healthz_is_liveness_only(client: TestClient) -> None:
     page = client.get("/healthz")
     assert page.status_code == 200
     assert page.json() == {"status": "ok"}
+
+
+def test_the_schema_is_not_published(client: TestClient) -> None:
+    """Nothing writes against these routes, so a map of them is only ever a gift."""
+    for path in ("/docs", "/openapi.json"):
+        assert client.get(path).status_code == 404
 
 
 # --- Settings ------------------------------------------------------------------------
@@ -458,6 +585,10 @@ def test_the_settings_page_shows_what_is_connected(client: TestClient) -> None:
     assert "Flights" in body
     # The token has to be readable: it is typed into Scriptable by hand.
     assert "test-token" in body
+
+
+def test_the_settings_page_says_what_the_month_has_cost(client: TestClient) -> None:
+    assert "$0.42 of $4.00 this" in client.get("/settings").text
 
 
 def test_no_stored_credential_is_ever_rendered_back(client: TestClient) -> None:
@@ -481,6 +612,21 @@ def test_a_fresh_deployment_is_told_what_to_do_in_order(
         assert f">{step}<" in body
     # And the board says where to go rather than sitting there empty.
     assert "Nothing is connected yet" in fresh.get("/").text
+
+
+def test_a_deployment_nobody_has_told_its_address_is_offered_this_one(
+    unconfigured: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It is read on the phone, so the address the page was opened on is the likely one."""
+    monkeypatch.setattr(prefs, "_current", prefs.Prefs())
+    with build_client(unconfigured, monkeypatch) as fresh:
+        body = fresh.get("/settings").text
+    assert 'value="http://testserver"' in body
+    assert "localhost:8000" not in body
+
+
+def test_an_address_that_was_set_is_left_alone(client: TestClient) -> None:
+    assert 'value="https://flights.example.com"' in client.get("/settings").text
 
 
 def test_the_first_run_signpost_goes_away_once_everything_is_set_up(
@@ -535,6 +681,16 @@ def test_saving_a_preference_redirects_and_takes_effect(client: TestClient) -> N
     assert prefs.current().log_level == "DEBUG"
 
 
+def test_a_card_that_posts_one_field_leaves_the_others_alone(client: TestClient) -> None:
+    """Each card is its own form, so what arrives is a slice rather than the lot."""
+    client.post("/settings", data=SETTINGS_FORM | {"log_level": "WARNING"})
+
+    client.post("/settings", data={"icloud_calendar_url": CALENDARS[1].url})
+
+    assert prefs.current().icloud_calendar_url == CALENDARS[1].url
+    assert prefs.current().log_level == "WARNING"
+
+
 def test_a_typo_in_the_cap_is_refused_with_the_field_named(client: TestClient) -> None:
     response = client.post(
         "/settings", data=SETTINGS_FORM | {"aeroapi_monthly_cap_usd": "four dollars"}
@@ -548,9 +704,10 @@ def test_a_typo_in_the_cap_is_refused_with_the_field_named(client: TestClient) -
 def test_the_settings_page_offers_every_usable_flag_colour(client: TestClient) -> None:
     """Red is the one Apple sends unmarked, so it is not on the list to be chosen."""
     body = client.get("/settings").text
-    for colour in ("Orange", "Yellow", "Green", "Blue", "Purple", "Grey"):
-        assert f">{colour}<" in body
-    assert '"red"' not in body
+    for colour in ("orange", "yellow", "green", "blue", "purple", "grey"):
+        assert f'value="{colour}"' in body
+        assert f'data-colour="{colour}"' in body
+    assert 'value="red"' not in body
 
 
 def test_a_flag_colour_the_app_cannot_watch_for_is_refused(client: TestClient) -> None:
@@ -560,10 +717,10 @@ def test_a_flag_colour_the_app_cannot_watch_for_is_refused(client: TestClient) -
 
 
 def test_picking_a_calendar_turns_the_sync_on(client: TestClient) -> None:
-    client.post("/settings", data=SETTINGS_FORM | {"icloud_calendar_url": ""})
+    client.post("/settings", data={"icloud_calendar_url": ""})
     assert not prefs.current().calendar_configured
 
-    client.post("/settings", data=SETTINGS_FORM | {"icloud_calendar_url": CALENDARS[1].url})
+    client.post("/settings", data={"icloud_calendar_url": CALENDARS[1].url})
     assert prefs.current().icloud_calendar_url == CALENDARS[1].url
     assert prefs.current().calendar_configured
 
@@ -573,6 +730,25 @@ def test_the_settings_page_offers_the_calendars_the_account_has(client: TestClie
     for calendar in CALENDARS:
         assert f'value="{calendar.url}"' in body
         assert f">{calendar.name}<" in body
+
+
+def test_the_calendars_are_not_asked_for_until_there_is_an_account(
+    unconfigured: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Discovery is a network call on a page render, so it waits for a reason to make it."""
+    asked = False
+
+    async def counted(self: Any) -> list[Collection]:
+        nonlocal asked
+        asked = True
+        return list(CALENDARS)
+
+    monkeypatch.setattr(web.CalendarClient, "calendars", counted)
+    with build_client(unconfigured, monkeypatch) as fresh:
+        body = fresh.get("/settings").text
+
+    assert asked is False
+    assert "Connect the Apple ID above to pick a calendar." in body
 
 
 def test_the_settings_page_still_opens_when_icloud_cannot_be_reached(
@@ -587,6 +763,7 @@ def test_the_settings_page_still_opens_when_icloud_cannot_be_reached(
 
     page = client.get("/settings")
     assert page.status_code == 200
-    assert "cannot reach caldav.icloud.com" in page.text
-    # The calendar that was picked keeps being written to rather than being cleared.
-    assert f'value="{FLIGHTS_CALENDAR}"' in page.text
+    # A sentence about what to do, not the repr of whatever was raised.
+    assert "iCloud did not answer" in page.text
+    assert "CalendarUnavailable" not in page.text
+    assert 'name="imap_flag_colour"' in page.text

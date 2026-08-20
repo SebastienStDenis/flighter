@@ -10,22 +10,38 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from .airports import airport_tz
-from .models import Booking
-from .timezones import to_utc
+from .cadence import first_poll_at
+from .models import Booking, BookingStatus, FlightSnapshot
+from .timezones import same_local_date, to_local, to_utc
 
 log = logging.getLogger(__name__)
 
-ARCHIVED = "archived"
-ACTIVE = "active"
+# id, the timestamps and the dedupe date are the database's to set, not a caller's.
+_EDITABLE_FIELDS = frozenset(Booking.__table__.columns.keys()) - {
+    "id",
+    "created_at",
+    "updated_at",
+    "departure_local_date",
+}
 
-# id and the timestamps are the database's to set, not a caller's.
-_EDITABLE_FIELDS = frozenset(Booking.__table__.columns.keys()) - {"id", "created_at", "updated_at"}
+# Wide enough to catch every booking that could share a local calendar day with the
+# departure being checked, on any pair of zones; the local date decides from there.
+_DEDUPE_WINDOW = timedelta(days=1)
+
+
+def flight_label(booking: Booking) -> str:
+    """`DL1234 JFK -> LAX`, the one string that identifies a flight to a human."""
+    return (
+        f"{booking.marketing_carrier}{booking.marketing_number} "
+        f"{booking.origin_iata} -> {booking.dest_iata}"
+    )
 
 
 def to_booking_times(
@@ -60,7 +76,7 @@ async def create_booking(
     confirmation_code: str | None = None,
     seat: str | None = None,
     notes: str | None = None,
-    status: str = ACTIVE,
+    status: str = BookingStatus.ACTIVE,
     extraction_confidence: float | None = None,
     operating_carrier: str | None = None,
     operating_number: str | None = None,
@@ -72,13 +88,12 @@ async def create_booking(
     """
     origin = _code(origin_iata)
     dest = _code(dest_iata)
+    origin_tz = await airport_tz(session, origin)
     departure_utc, arrival_utc = to_booking_times(
-        departure_local,
-        await airport_tz(session, origin),
-        arrival_local,
-        await airport_tz(session, dest),
+        departure_local, origin_tz, arrival_local, await airport_tz(session, dest)
     )
 
+    now = datetime.now(UTC)
     booking = Booking(
         source=source,
         source_message_id=source_message_id,
@@ -89,13 +104,14 @@ async def create_booking(
         origin_iata=origin,
         dest_iata=dest,
         scheduled_departure_utc=departure_utc,
+        departure_local_date=to_local(departure_utc, origin_tz).date(),
         scheduled_arrival_utc=arrival_utc,
         confirmation_code=confirmation_code,
         seat=seat,
         notes=notes,
         status=status,
         extraction_confidence=extraction_confidence,
-        next_poll_at=datetime.now(UTC) if status == ACTIVE else None,
+        next_poll_at=first_poll_at(now, departure_utc) if status == BookingStatus.ACTIVE else None,
     )
     session.add(booking)
     await session.flush()
@@ -120,10 +136,19 @@ async def update_booking(
     for name, value in fields.items():
         setattr(booking, name, _normalised(name, value))
 
+    if "scheduled_departure_utc" in fields or "origin_iata" in fields:
+        booking.departure_local_date = await _local_date(
+            session, booking.scheduled_departure_utc, booking.origin_iata
+        )
+
     # Reactivating a booking has to hand it back to the poller, or it sits untouched
     # until something else happens to write a next_poll_at.
-    if booking.status == ACTIVE and "next_poll_at" not in fields and booking.next_poll_at is None:
-        booking.next_poll_at = datetime.now(UTC)
+    if (
+        booking.status == BookingStatus.ACTIVE
+        and "next_poll_at" not in fields
+        and booking.next_poll_at is None
+    ):
+        booking.next_poll_at = first_poll_at(datetime.now(UTC), booking.scheduled_departure_utc)
 
     await session.flush()
     return booking
@@ -140,7 +165,7 @@ async def delete_booking(session: AsyncSession, booking_id: int) -> Booking | No
     if booking is None:
         return None
 
-    booking.status = ARCHIVED
+    booking.status = BookingStatus.ARCHIVED
     booking.next_poll_at = None
     await session.flush()
     return booking
@@ -178,20 +203,75 @@ async def find_duplicate(
     number: str,
     departure_utc: datetime,
 ) -> Booking | None:
-    """The row the `bookings_dedupe` index would collide with, if there is one.
+    """The booking already on the list for this flight on this day, if there is one.
 
-    Mirrors the index exactly, including the UTC calendar date: the same booking re-sent
-    with a corrected departure time must be recognised as the flight we already have.
+    Same day means the calendar day at the origin airport, read off the candidate's own
+    origin since a duplicate necessarily shares it: a 23:30 departure re-sent with a
+    corrected time must be recognised, and it is already tomorrow in UTC. The flight is
+    matched on either pair of codes, because the ticket's marketing number and the
+    number FlightAware tracks are the same aeroplane.
     """
-    day = to_utc(departure_utc, "UTC").date()
-    stmt = select(Booking).where(
-        Booking.marketing_carrier == _carrier(carrier),
-        Booking.marketing_number == _number(number),
-        Booking.status != ARCHIVED,
-        func.date(Booking.scheduled_departure_utc) == day.isoformat(),
+    flight_carrier = _carrier(carrier)
+    flight_number = _number(number)
+    departure_utc = to_utc(departure_utc, "UTC")
+    stmt = (
+        select(Booking)
+        .where(
+            or_(
+                and_(
+                    Booking.marketing_carrier == flight_carrier,
+                    Booking.marketing_number == flight_number,
+                ),
+                and_(
+                    Booking.operating_carrier == flight_carrier,
+                    Booking.operating_number == flight_number,
+                ),
+            ),
+            Booking.status != BookingStatus.ARCHIVED,
+            Booking.scheduled_departure_utc >= departure_utc - _DEDUPE_WINDOW,
+            Booking.scheduled_departure_utc <= departure_utc + _DEDUPE_WINDOW,
+        )
+        .order_by(Booking.id)
     )
-    result = await session.execute(stmt)
-    return result.scalars().first()
+    for candidate in (await session.scalars(stmt)).all():
+        tz = await airport_tz(session, candidate.origin_iata)
+        if same_local_date(candidate.scheduled_departure_utc, departure_utc, tz):
+            return candidate
+    return None
+
+
+async def latest_snapshot(session: AsyncSession, booking_id: int) -> FlightSnapshot | None:
+    """The newest observation of one booking, or None before the first poll."""
+    return (await latest_snapshots(session, [booking_id])).get(booking_id)
+
+
+async def latest_snapshots(
+    session: AsyncSession, booking_ids: Sequence[int]
+) -> dict[int, FlightSnapshot]:
+    """The newest snapshot per booking, in one query.
+
+    Snapshots are append-only, so "newest row wins" is the whole of the read model. The
+    newest is picked per booking by a correlated subquery rather than by `DISTINCT ON`,
+    which SQLite does not have and would quietly ignore.
+    """
+    if not booking_ids:
+        return {}
+    other = aliased(FlightSnapshot)
+    newest_id = (
+        select(other.id)
+        .where(other.booking_id == FlightSnapshot.booking_id)
+        .order_by(other.observed_at.desc(), other.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    stmt = select(FlightSnapshot).where(
+        FlightSnapshot.booking_id.in_(list(booking_ids)), FlightSnapshot.id == newest_id
+    )
+    return {snapshot.booking_id: snapshot for snapshot in (await session.scalars(stmt)).all()}
+
+
+async def _local_date(session: AsyncSession, departure_utc: datetime, origin_iata: str) -> date:
+    return to_local(departure_utc, await airport_tz(session, origin_iata)).date()
 
 
 # Normalised on the way in, because all three are part of the dedupe key: "aa" and "AA"

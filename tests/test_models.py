@@ -1,10 +1,11 @@
-"""The column that keeps every instant in the database UTC.
+"""The column that keeps every instant in the database UTC, and the enums that keep the
+status strings honest.
 
 SQLite has no `timestamptz`: it writes back whatever wall clock it is given and hands it
 back naive. Without `UtcDateTime` an aware Montreal time would be stored with its offset
 quietly dropped, and every time on screen would be four hours wrong in the direction
 nobody notices until they are at the gate. These are the two conversions, in both
-directions, plus the calendar day the dedupe index is built on.
+directions.
 """
 
 from __future__ import annotations
@@ -14,7 +15,14 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 from sqlalchemy.dialects import sqlite
 
-from flighter.models import UtcDateTime
+from flighter.models import (
+    Booking,
+    BookingSource,
+    BookingStatus,
+    EventKind,
+    IngestOutcome,
+    UtcDateTime,
+)
 from flighter.timezones import to_utc
 
 DIALECT = sqlite.dialect()
@@ -53,11 +61,19 @@ def test_nothing_is_still_nothing_in_both_directions() -> None:
     assert COLUMN.process_result_value(None, DIALECT) is None
 
 
-def test_the_dedupe_index_reads_the_utc_calendar_day() -> None:
-    """`bookings_dedupe` indexes `date(scheduled_departure_utc)`, which reads the stored
-    text. A late evening departure belongs to the next UTC day, and the same booking
-    re-sent an hour out has to land on that same day to collide."""
-    stored = COLUMN.process_bind_param(datetime(2026, 9, 12, 22, 0, tzinfo=EDT), DIALECT)
-    again = COLUMN.process_bind_param(datetime(2026, 9, 12, 23, 0, tzinfo=EDT), DIALECT)
-    assert stored is not None and again is not None
-    assert stored.date() == again.date() == datetime(2026, 9, 13).date()
+def test_status_enums_are_the_strings_the_database_holds() -> None:
+    """Rows written before the enums existed hold plain strings, and the check
+    constraints are spelled from the same values, so the two must compare equal."""
+    assert BookingStatus.ACTIVE == "active"
+    assert BookingSource.EMAIL == "email"
+    assert IngestOutcome.NO_FLIGHT == "no_flight"
+    assert EventKind.DEPARTURE_MOVED_EARLIER == "DepartureMovedEarlier"
+    assert "archived" in {BookingStatus.ARCHIVED}
+
+
+def test_the_status_constraint_is_spelled_from_the_enum() -> None:
+    constraints = {constraint.name: constraint for constraint in Booking.__table__.constraints}
+    status_check = str(constraints["bookings_status_check"].sqltext)
+    for status in BookingStatus:
+        assert f"'{status}'" in status_check
+    assert "cancelled" not in status_check

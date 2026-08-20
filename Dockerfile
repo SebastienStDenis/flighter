@@ -31,7 +31,10 @@ WORKDIR /app
 VOLUME ["/app/data"]
 
 EXPOSE 8000
-HEALTHCHECK --interval=1m --timeout=10s --start-period=30s --retries=3 \
+# The grace period covers a first boot on a cold volume, which migrates the schema and
+# seeds the whole airport table before anything answers; a shorter one restarts the
+# container part way through the seed and starts it over.
+HEALTHCHECK --interval=1m --timeout=10s --start-period=90s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=5).status == 200 else 1)"
 
 ENTRYPOINT ["flighter"]

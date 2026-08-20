@@ -19,6 +19,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          python-version: "3.12"
       - run: uv sync --frozen --all-groups
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -42,6 +43,25 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Watchtower pulls :latest unattended, so the image proves it boots before it
+      # is pushed: an amd64 build of the same context, run once against /healthz.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: flighter:smoke
+          cache-from: type=gha
+      - name: boot and probe /healthz
+        run: |
+          docker run -d --name flighter-smoke -p 8000:8000 flighter:smoke
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/healthz; then exit 0; fi
+            sleep 2
+          done
+          docker logs flighter-smoke
+          exit 1
 
       - id: meta
         uses: docker/metadata-action@v5

@@ -8,13 +8,15 @@ would silently erase events.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Dialect,
     Float,
@@ -30,9 +32,51 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-BOOKING_STATUSES = ("pending_review", "active", "completed", "cancelled", "archived")
-BOOKING_SOURCES = ("email", "manual")
-INGEST_OUTCOMES = ("created", "duplicate", "no_flight", "review", "error")
+
+class BookingStatus(StrEnum):
+    """Where a booking stands with the poller.
+
+    There is deliberately no cancelled status. AeroAPI's `cancelled` flag means the
+    flight is no longer tracked, which is usually but not always an airline
+    cancellation, so it is carried on the snapshot under its own name and never
+    promoted to a fact about the booking.
+    """
+
+    PENDING_REVIEW = "pending_review"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ARCHIVED = "archived"
+
+
+class BookingSource(StrEnum):
+    EMAIL = "email"
+    MANUAL = "manual"
+
+
+class IngestOutcome(StrEnum):
+    CREATED = "created"
+    DUPLICATE = "duplicate"
+    NO_FLIGHT = "no_flight"
+    REVIEW = "review"
+    ERROR = "error"
+
+
+class EventKind(StrEnum):
+    GATE_ASSIGNED = "GateAssigned"
+    GATE_CHANGED = "GateChanged"
+    TERMINAL_CHANGED = "TerminalChanged"
+    DEPARTURE_DELAYED = "DepartureDelayed"
+    DEPARTURE_MOVED_EARLIER = "DepartureMovedEarlier"
+    ARRIVAL_TIME_CHANGED = "ArrivalTimeChanged"
+    DEPARTED = "Departed"
+    LANDED = "Landed"
+    BAGGAGE_CLAIM_ASSIGNED = "BaggageClaimAssigned"
+    CANCELLED = "Cancelled"
+    DIVERTED = "Diverted"
+
+
+def _one_of(column: str, values: type[StrEnum]) -> str:
+    return f"{column} IN ({', '.join(repr(str(value)) for value in values)})"
 
 
 class Base(DeclarativeBase):
@@ -94,23 +138,20 @@ class Airport(Base):
 class Booking(Base):
     __tablename__ = "bookings"
     __table_args__ = (
-        CheckConstraint("source IN ('email', 'manual')", name="bookings_source_check"),
-        CheckConstraint(
-            "status IN ('pending_review', 'active', 'completed', 'cancelled', 'archived')",
-            name="bookings_status_check",
-        ),
+        CheckConstraint(_one_of("source", BookingSource), name="bookings_source_check"),
+        CheckConstraint(_one_of("status", BookingStatus), name="bookings_status_check"),
         # A codeshare of the same physical flight must not become a second booking.
         # Archived rows are excluded so a deleted-and-re-added booking is allowed.
         # The departure *date* rather than the instant: the same booking re-sent with a
         # slightly different time must collide, and a genuine second flight on the same
-        # route the same day is not a thing anyone does. `date()` reads the stored text
-        # directly, and every instant in the column is UTC, so the day it yields is the
-        # UTC calendar day with no zone conversion to get wrong.
+        # route the same day is not a thing anyone does. The date is the one at the
+        # origin airport, kept in its own column because SQLite cannot convert zones: a
+        # 23:30 departure is already tomorrow in UTC, and the ticket does not say so.
         Index(
             "bookings_dedupe",
             "marketing_carrier",
             "marketing_number",
-            text("date(scheduled_departure_utc)"),
+            "departure_local_date",
             unique=True,
             sqlite_where=text("status != 'archived'"),
         ),
@@ -130,20 +171,21 @@ class Booking(Base):
     marketing_number: Mapped[str] = mapped_column(Text, nullable=False)
     operating_carrier: Mapped[str | None] = mapped_column(Text)
     operating_number: Mapped[str | None] = mapped_column(Text)
-    aeroapi_ident: Mapped[str | None] = mapped_column(Text)
     # Pinned on first successful resolution; unambiguous, so later polls skip matching.
     aeroapi_fa_flight_id: Mapped[str | None] = mapped_column(Text)
 
     origin_iata: Mapped[str] = mapped_column(String(3), ForeignKey("airports.iata"), nullable=False)
     dest_iata: Mapped[str] = mapped_column(String(3), ForeignKey("airports.iata"), nullable=False)
     scheduled_departure_utc: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    # The departure's calendar day at the origin, which is what the dedupe index keys on.
+    departure_local_date: Mapped[date] = mapped_column(Date, nullable=False)
     scheduled_arrival_utc: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
     confirmation_code: Mapped[str | None] = mapped_column(Text)
     seat: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
 
-    status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
+    status: Mapped[str] = mapped_column(Text, nullable=False, default=BookingStatus.ACTIVE)
     extraction_confidence: Mapped[float | None] = mapped_column(Float)
     calendar_event_uid: Mapped[str | None] = mapped_column(Text)
     next_poll_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
@@ -242,7 +284,7 @@ class IngestLog(Base):
     processed_at: Mapped[datetime] = _created_at()
     outcome: Mapped[str] = mapped_column(Text, nullable=False)
     # Kept because a Message-ID names nothing a person recognises, and the set-aside list
-    # on the health page has to say which email it is talking about.
+    # on the board has to say which email it is talking about.
     subject: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     raw_extraction: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     error: Mapped[str | None] = mapped_column(Text)
@@ -258,7 +300,8 @@ class ApiUsage(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     called_at: Mapped[datetime] = _created_at()
     endpoint: Mapped[str] = mapped_column(Text, nullable=False)
-    result_sets: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # A float because SQLite has no decimal type and the driver would round-trip a
+    # Decimal through one anyway; the sums it feeds are estimates to the cent.
     est_cost_usd: Mapped[float] = mapped_column(Numeric(10, 6, asdecimal=False), nullable=False)
 
 

@@ -4,35 +4,25 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import datetime
 from decimal import Decimal
 from urllib.parse import quote
 
 import httpx
 
 from . import prefs
+from .bookings import flight_label
 from .config import Settings
-from .events import (
-    ARRIVAL_TIME_CHANGED,
-    BAGGAGE_CLAIM_ASSIGNED,
-    CANCELLED,
-    DEPARTED,
-    DEPARTURE_DELAYED,
-    DEPARTURE_MOVED_EARLIER,
-    DIVERTED,
-    GATE_ASSIGNED,
-    GATE_CHANGED,
-    LANDED,
-    TERMINAL_CHANGED,
-)
-from .models import Booking, FlightEvent
-from .timezones import FALLBACK_TZ, format_local
+from .models import Booking, EventKind, FlightEvent, IngestOutcome
+from .phase import CANCELLED_NOTICE
+from .timezones import FALLBACK_TZ, format_local, parse_instant
 
 log = logging.getLogger(__name__)
 
 # One form-encoded POST, with the application token and the user key as ordinary fields.
 # https://pushover.net/api
 MESSAGES_URL = "https://api.pushover.net/1/messages.json"
+
+TIMEOUT_SECONDS = 10
 
 # An over-long field is rejected rather than trimmed at the far end, so every value is cut
 # here first: a truncated push beats no push.
@@ -56,22 +46,22 @@ PRIORITY_HIGH = 1
 PRIORITY_NORMAL = 0
 PRIORITY_QUIET = -1
 
-_HIGH_PRIORITY_KINDS = frozenset({CANCELLED, DIVERTED, GATE_CHANGED})
+_HIGH_PRIORITY_KINDS = frozenset({EventKind.CANCELLED, EventKind.DIVERTED, EventKind.GATE_CHANGED})
 
 # The lock screen shows the title above the message, so each kind leads with one glyph
 # that says what happened before a word of it is read.
-_EMOJI = {
-    GATE_ASSIGNED: "🚪",
-    GATE_CHANGED: "⚠️",
-    TERMINAL_CHANGED: "⚠️",
-    DEPARTURE_DELAYED: "⏳",
-    DEPARTURE_MOVED_EARLIER: "⏩",
-    ARRIVAL_TIME_CHANGED: "🕒",
-    DEPARTED: "🛫",
-    LANDED: "🛬",
-    BAGGAGE_CLAIM_ASSIGNED: "🧳",
-    CANCELLED: "❌",
-    DIVERTED: "⚠️",
+_EMOJI: dict[str, str] = {
+    EventKind.GATE_ASSIGNED: "🚪",
+    EventKind.GATE_CHANGED: "⚠️",
+    EventKind.TERMINAL_CHANGED: "⚠️",
+    EventKind.DEPARTURE_DELAYED: "⏳",
+    EventKind.DEPARTURE_MOVED_EARLIER: "⏩",
+    EventKind.ARRIVAL_TIME_CHANGED: "🕒",
+    EventKind.DEPARTED: "🛫",
+    EventKind.LANDED: "🛬",
+    EventKind.BAGGAGE_CLAIM_ASSIGNED: "🧳",
+    EventKind.CANCELLED: "❌",
+    EventKind.DIVERTED: "⚠️",
 }
 DEFAULT_EMOJI = "✈️"
 BUDGET_EMOJI = "💸"
@@ -79,18 +69,20 @@ IMPORT_FAILED_EMOJI = "📭"
 
 # What each import outcome is called on the lock screen, and the sentence under it.
 _IMPORTED = {
-    "created": ("Flight added", "{flights}"),
-    "review": ("Flight needs a look", "{flights} - the extraction was not confident enough."),
-    "duplicate": ("Already tracked", "{flights} was already on the list; nothing was added."),
+    IngestOutcome.CREATED: ("Flight added", "{flights}"),
+    IngestOutcome.REVIEW: (
+        "Flight needs a look",
+        "{flights} - the extraction was not confident enough.",
+    ),
+    IngestOutcome.DUPLICATE: (
+        "Already tracked",
+        "{flights} was already on the list; nothing was added.",
+    ),
 }
 
 
-def flight_label(booking: Booking) -> str:
-    """`DL1234 JFK -> LAX`, the one string that identifies a flight to a human."""
-    return (
-        f"{booking.marketing_carrier}{booking.marketing_number} "
-        f"{booking.origin_iata} -> {booking.dest_iata}"
-    )
+class PushFailed(RuntimeError):
+    """Pushover did not take the message; the text is its own reason where it gave one."""
 
 
 def message_url(message_id: str) -> str:
@@ -102,17 +94,8 @@ def message_url(message_id: str) -> str:
     return f"message://%3C{quote(message_id.strip().strip('<>'), safe='@')}%3E"
 
 
-def _parse(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
-
-
 def _minutes_between(old: str | None, new: str | None) -> int | None:
-    start, end = _parse(old), _parse(new)
+    start, end = parse_instant(old), parse_instant(new)
     if start is None or end is None:
         return None
     return round(abs((end - start).total_seconds()) / 60)
@@ -124,14 +107,14 @@ def _moved(event: FlightEvent, tz: str, *, verb: str, fallback: str, now: str) -
     Degrades to whichever half survives when a value is missing, because format_local
     renders a missing time as a dash and that is not a sentence.
     """
-    when = _parse(event.new_value)
+    when = parse_instant(event.new_value)
     minutes = _minutes_between(event.old_value, event.new_value)
     head = fallback if minutes is None else f"{verb} {minutes} min"
     return head if when is None else f"{head}, {now} {format_local(when, tz)}"
 
 
 def _at(verb: str, value: str | None, tz: str) -> str:
-    instant = _parse(value)
+    instant = parse_instant(value)
     return f"{verb} at {format_local(instant, tz)}" if instant else verb
 
 
@@ -139,21 +122,21 @@ def event_message(event: FlightEvent, *, origin_tz: str, dest_tz: str) -> str:
     """One plain sentence a person can act on without opening anything."""
     kind, old, new = event.kind, event.old_value, event.new_value
 
-    if kind == GATE_ASSIGNED:
+    if kind == EventKind.GATE_ASSIGNED:
         return f"Gate {new}"
-    if kind == GATE_CHANGED:
+    if kind == EventKind.GATE_CHANGED:
         return f"Gate changed from {old} to {new}"
-    if kind == TERMINAL_CHANGED:
+    if kind == EventKind.TERMINAL_CHANGED:
         return f"Terminal changed from {old} to {new}" if old else f"Terminal {new}"
-    if kind == DEPARTURE_DELAYED:
+    if kind == EventKind.DEPARTURE_DELAYED:
         return _moved(
             event, origin_tz, verb="Delayed", fallback="Departure delayed", now="now departing"
         )
-    if kind == DEPARTURE_MOVED_EARLIER:
+    if kind == EventKind.DEPARTURE_MOVED_EARLIER:
         return _moved(
             event, origin_tz, verb="Moved up", fallback="Departure moved up", now="now departing"
         )
-    if kind == ARRIVAL_TIME_CHANGED:
+    if kind == EventKind.ARRIVAL_TIME_CHANGED:
         return _moved(
             event,
             dest_tz,
@@ -161,34 +144,55 @@ def event_message(event: FlightEvent, *, origin_tz: str, dest_tz: str) -> str:
             fallback="Arrival time changed",
             now="now arriving",
         )
-    if kind == DEPARTED:
+    if kind == EventKind.DEPARTED:
         return _at("Left the gate", new, origin_tz)
-    if kind == LANDED:
+    if kind == EventKind.LANDED:
         return _at("Landed", new, dest_tz)
-    if kind == BAGGAGE_CLAIM_ASSIGNED:
+    if kind == EventKind.BAGGAGE_CLAIM_ASSIGNED:
         return f"Bag claim: {new}"
-    if kind == CANCELLED:
-        # AeroAPI's `cancelled` only means FlightAware stopped tracking, so the copy
-        # reports who said it rather than asserting the flight is off.
-        return "Marked cancelled by FlightAware - confirm with the airline"
-    if kind == DIVERTED:
+    if kind == EventKind.CANCELLED:
+        return CANCELLED_NOTICE
+    if kind == EventKind.DIVERTED:
         return "Flight diverted"
     return kind
 
 
-class Notifier:
-    """Fire-and-forget pushes; a no-op until Pushover credentials are set.
+_http: httpx.AsyncClient | None = None
 
-    Delivery is strictly best-effort: a Pushover outage must never stall or fail a poll, so
-    send failures are logged and swallowed. The caller decides when a send counts as
-    delivered, and only a clean return says so.
+
+def shared_http() -> httpx.AsyncClient:
+    """One connection pool for the process; `close_client` is wired into shutdown."""
+    global _http
+    if _http is None:
+        _http = httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
+    return _http
+
+
+async def close_client() -> None:
+    global _http
+    if _http is not None:
+        await _http.aclose()
+    _http = None
+
+
+class Notifier:
+    """Pushes to the phone; a no-op until Pushover credentials are set.
+
+    A send that Pushover refuses or that never reaches it raises `PushFailed`, and the
+    caller decides what a failure means: the event dispatcher leaves the event pending
+    and tries again next pass, the budget breaker logs and carries on, and the import
+    pipeline, which has no retry of its own, logs and lets the email count as handled.
     """
 
     def __init__(
         self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None
     ) -> None:
         self._settings = settings
-        self._transport = transport
+        self._http = (
+            httpx.AsyncClient(transport=transport, timeout=TIMEOUT_SECONDS)
+            if transport is not None
+            else None
+        )
 
     async def flight_event(
         self,
@@ -215,31 +219,40 @@ class Notifier:
         waking somebody up, and the flight page is the link because it carries the live
         gate and status. iCloud publishes no web address for a single calendar event, so
         there is nothing to link to on that side even when one has been written.
+
+        Best effort: the ingest log is the record of the decision and is written whether
+        or not the phone heard about it, and there is no column to retry a push from.
         """
-        title, body = _IMPORTED[outcome]
+        title, body = _IMPORTED[IngestOutcome(outcome)]
         flights = ", ".join(flight_label(booking) for booking in bookings)
-        await self._send(
-            title=f"{DEFAULT_EMOJI} {title}",
-            message=body.format(flights=flights or "The flight"),
-            priority=PRIORITY_NORMAL,
-            url=self._flight_url(bookings),
-            url_title="Open the flight",
-        )
+        try:
+            await self._send(
+                title=f"{DEFAULT_EMOJI} {title}",
+                message=body.format(flights=flights or "The flight"),
+                priority=PRIORITY_NORMAL,
+                url=self._flight_url(bookings),
+                url_title="Open the flight",
+            )
+        except PushFailed:
+            log.warning("push about an imported email failed", exc_info=True)
 
     async def mail_failed(self, *, message_id: str, subject: str, reason: str) -> None:
         """Nothing came of an email that was marked.
 
         Priority 0 as well: an import that did not happen costs nobody a flight. The link
         opens the email itself in Mail, on the phone or on the Mac, which is where the
-        next move is made either way.
+        next move is made either way. Best effort, for the same reason as above.
         """
-        await self._send(
-            title=f"{IMPORT_FAILED_EMOJI} Nothing imported",
-            message=f"{subject}\n{reason}" if subject else reason,
-            priority=PRIORITY_NORMAL,
-            url=message_url(message_id),
-            url_title="Open the email",
-        )
+        try:
+            await self._send(
+                title=f"{IMPORT_FAILED_EMOJI} Nothing imported",
+                message=f"{subject}\n{reason}" if subject else reason,
+                priority=PRIORITY_NORMAL,
+                url=message_url(message_id),
+                url_title="Open the email",
+            )
+        except PushFailed:
+            log.warning("push about a failed import failed", exc_info=True)
 
     async def budget_tripped(self, spend: Decimal, cap: Decimal) -> None:
         """The AeroAPI breaker has latched: tracking is stale until someone raises the cap."""
@@ -252,6 +265,12 @@ class Notifier:
             priority=PRIORITY_HIGH,
             url=prefs.current().public_base_url,
             url_title="Open flighter",
+        )
+
+    async def check(self) -> None:
+        """A real push, quietly, because a token that is never spent proves nothing."""
+        await self._send(
+            title="Flight tracker", message="Checks ran and this arrived.", priority=PRIORITY_QUIET
         )
 
     @staticmethod
@@ -283,8 +302,25 @@ class Notifier:
             if url_title:
                 data["url_title"] = url_title
         try:
-            async with httpx.AsyncClient(transport=self._transport, timeout=10) as client:
-                response = await client.post(MESSAGES_URL, data=data)
-                response.raise_for_status()
-        except Exception:
-            log.warning("Pushover notification failed", exc_info=True)
+            response = await (self._http or shared_http()).post(MESSAGES_URL, data=data)
+        except httpx.HTTPError as exc:
+            raise PushFailed(f"Pushover is unreachable: {exc}") from exc
+        _accepted(response)
+
+
+def _accepted(response: httpx.Response) -> None:
+    """A 200 only says the request parsed; the body says whether the message was taken.
+
+    A rejection names the field it refused, which is the difference between a bad
+    application token and a bad user key, so that is what the error carries.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    if isinstance(body, dict) and body.get("status") == 1:
+        return
+    errors = body.get("errors") if isinstance(body, dict) else None
+    if isinstance(errors, list) and errors:
+        raise PushFailed("; ".join(str(error) for error in errors))
+    raise PushFailed(f"Pushover answered HTTP {response.status_code}: {response.text[:200]}")

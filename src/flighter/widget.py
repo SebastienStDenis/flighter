@@ -24,23 +24,27 @@ from pydantic import BaseModel, PlainSerializer
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from . import bookings as booking_repo
 from . import prefs
 from .aeroapi import budget_status
 from .config import Settings, get_settings
 from .db import get_session
-from .models import Booking, FlightSnapshot
+from .models import Booking, BookingStatus, FlightSnapshot
 from .phase import (
     AIRBORNE,
+    ARRIVAL_DELAY_THRESHOLD,
     CANCELLED,
+    CANCELLED_NOTICE,
     DAY_OF,
+    DEPARTURE_DELAY_THRESHOLD,
     DIVERTED,
     LANDED,
     TAXIING,
     Phase,
     compute_phase,
     departure_estimate,
-    landing_estimate,
 )
+from .views import countdown, phase_rank
 
 log = logging.getLogger(__name__)
 
@@ -52,27 +56,19 @@ MAX_FLIGHTS: Final = 3
 # Wider than MAX_FLIGHTS because relevance order is not departure order: an airborne
 # flight sorts ahead of one that departs sooner.
 CANDIDATE_LIMIT: Final = 12
-# A flight leaves the widget once it has landed, not once it has departed: the whole
-# point of the airborne row is the "Lands in" countdown. This mirrors the rule in
-# bookings.list_bookings(upcoming_only=True), plus a grace period so a flight that just
-# landed sticks around long enough to tell you which carousel to walk to.
-LANDED_GRACE: Final = timedelta(hours=2)
-
-# How far past its ticketed arrival a flight is still fetched. The schedule is all the
-# query has to filter on, so this has to cover the delay as well as the grace period.
+# How far past its ticketed arrival a flight is still fetched. A flight leaves the widget
+# once it has landed rather than once it has departed - the whole point of the airborne
+# row is the "Lands in" countdown - so this has to cover the delay as well as the stretch
+# afterwards where it still says which carousel to walk to.
 LATE_ARRIVAL_ALLOWANCE: Final = timedelta(hours=14)
 
 REFRESH_IDLE_SECONDS: Final = 900
 REFRESH_ACTIVE_SECONDS: Final = 600
 
-# Feeds restate scheduled times with a minute of jitter; below this a "delay" is noise.
-DELAY_THRESHOLD: Final = timedelta(minutes=15)
-
 # The poller runs a close flight every 10 minutes and a same-day one every 30, so a
 # snapshot this old means polling has stopped rather than that nothing has changed.
 POLL_STALE_AFTER: Final = timedelta(minutes=45)
 
-PHASES_IN_PROGRESS: Final = frozenset({TAXIING, AIRBORNE, DIVERTED})
 PHASES_IMMINENT: Final = frozenset({DAY_OF, TAXIING, AIRBORNE, DIVERTED})
 
 
@@ -84,7 +80,6 @@ UtcInstant = Annotated[datetime, PlainSerializer(_iso_z, return_type=str)]
 
 
 class WidgetFlight(BaseModel):
-    id: int
     detail_url: str
     phase: Phase
     title: str
@@ -96,7 +91,6 @@ class WidgetFlight(BaseModel):
 
 
 class WidgetPayload(BaseModel):
-    generated_at: UtcInstant
     flights: list[WidgetFlight]
     refresh_seconds: int
     degraded: bool
@@ -151,7 +145,7 @@ async def load_flight_rows(session: AsyncSession, now: datetime) -> list[FlightR
         await session.scalars(
             select(Booking)
             .where(
-                Booking.status == "active",
+                Booking.status == BookingStatus.ACTIVE,
                 # Measured against the schedule plus the longest delay worth still
                 # showing, so a flight running hours late stays on the widget until it
                 # has actually landed rather than vanishing while it is still in the air.
@@ -170,16 +164,8 @@ async def load_flight_rows(session: AsyncSession, now: datetime) -> list[FlightR
     if not bookings:
         return []
 
-    latest = (
-        await session.scalars(
-            select(FlightSnapshot)
-            .where(FlightSnapshot.booking_id.in_([b.id for b in bookings]))
-            .distinct(FlightSnapshot.booking_id)
-            .order_by(FlightSnapshot.booking_id, FlightSnapshot.observed_at.desc())
-        )
-    ).all()
-    by_booking = {snapshot.booking_id: snapshot for snapshot in latest}
-    return [(booking, by_booking.get(booking.id)) for booking in bookings]
+    latest = await booking_repo.latest_snapshots(session, [booking.id for booking in bookings])
+    return [(booking, latest.get(booking.id)) for booking in bookings]
 
 
 async def read_degraded(session: AsyncSession) -> str | None:
@@ -213,7 +199,6 @@ def build_payload(
 
     reason = degraded_reason or _stale_reason(min(observed, default=None), now)
     return WidgetPayload(
-        generated_at=now,
         flights=flights,
         refresh_seconds=_refresh_seconds(flights),
         degraded=reason is not None,
@@ -227,7 +212,6 @@ def _flight(
     phase = compute_phase(booking, snapshot, now)
     label, countdown_to = countdown(phase, booking, snapshot)
     return WidgetFlight(
-        id=booking.id,
         detail_url=f"{prefs.current().public_base_url}/f/{booking.id}",
         phase=phase,
         title=(
@@ -244,29 +228,10 @@ def _flight(
     )
 
 
-def countdown(
-    phase: Phase, booking: Booking, snapshot: FlightSnapshot | None
-) -> tuple[str | None, datetime | None]:
-    """The one instant to count to, and what to call it.
-
-    The lock screen and the flight page count to the same moment, so this lives here
-    once rather than being decided twice.
-    """
-    if phase in (AIRBORNE, DIVERTED):
-        # Wheels down, not the gate: this is the number someone stares at from a seat,
-        # and taxiing is not part of what they are counting.
-        landing = landing_estimate(booking, snapshot)
-        return ("Lands in", landing) if landing is not None else (None, None)
-    # Nothing upstream predicts how long a taxi takes, so the honest answer is no number.
-    if phase in (TAXIING, LANDED, CANCELLED):
-        return None, None
-    return "Departs in", departure_estimate(booking, snapshot)
-
-
 def _subtitle(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> str | None:
     """Gate, terminal or carousel, whichever is the one to walk towards now."""
     if phase == CANCELLED:
-        return "Cancelled"
+        return CANCELLED_NOTICE
     if phase == DIVERTED:
         return "Diverted"
 
@@ -305,25 +270,15 @@ def _delayed(snapshot: FlightSnapshot | None) -> bool:
     departure = (snapshot.estimated_out or snapshot.actual_out, snapshot.scheduled_out)
     # Once the aircraft is off the ground a late pushback is history, and the only
     # question left is whether it still arrives late.
-    pairs = (arrival,) if snapshot.actual_off is not None else (departure, arrival)
-    return any(
-        expected is not None and scheduled is not None and expected - scheduled >= DELAY_THRESHOLD
-        for expected, scheduled in pairs
+    pairs = (
+        ((arrival, ARRIVAL_DELAY_THRESHOLD),)
+        if snapshot.actual_off is not None
+        else ((departure, DEPARTURE_DELAY_THRESHOLD), (arrival, ARRIVAL_DELAY_THRESHOLD))
     )
-
-
-def phase_rank(phase: Phase) -> int:
-    """In progress first, then what is still coming, then what has already landed.
-
-    Departure time breaks the tie in every band, including for a cancelled flight, which
-    still belongs on the day it was supposed to leave. The web list leads with the same
-    flight the widget does, because it asks this the same question.
-    """
-    if phase in PHASES_IN_PROGRESS:
-        return 0
-    if phase == LANDED:
-        return 2
-    return 1
+    return any(
+        expected is not None and scheduled is not None and expected - scheduled >= threshold
+        for (expected, scheduled), threshold in pairs
+    )
 
 
 def _refresh_seconds(flights: Sequence[WidgetFlight]) -> int:

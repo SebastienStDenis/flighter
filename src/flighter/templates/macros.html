@@ -113,3 +113,14 @@
   </aside>
 </div>
 {% endmacro %}
+
+{# One change, on one line: what moved, from what to what, and when we were told. #}
+{% macro change(e, tz) %}
+<p class="flex flex-wrap items-baseline gap-x-2 text-sm">
+  <span class="font-medium">{{ change_title(e.kind) }}</span>
+  <span class="font-mono">
+    {{- change_value(e.old_value, tz) }} &rarr; {{ change_value(e.new_value, tz) -}}
+  </span>
+  <span class="font-mono text-xs text-muted-foreground">{{ at(e.occurred_at, tz) }}</span>
+</p>
+{% endmacro %}

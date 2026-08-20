@@ -16,7 +16,6 @@ from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Airport
-from .timezones import FALLBACK_TZ
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +23,14 @@ log = logging.getLogger(__name__)
 _SEED_CHUNK_ROWS = 500
 
 _tz_cache: dict[str, str] = {}
+
+
+class UnknownAirport(ValueError):
+    """A code the airports table has no row for, and so no timezone to read a time in."""
+
+    def __init__(self, iata: str) -> None:
+        super().__init__(f"unknown airport code {iata!r}")
+        self.iata = iata
 
 
 def _dataset_rows() -> list[dict[str, Any]]:
@@ -90,10 +97,11 @@ async def get_airport(session: AsyncSession, iata: str) -> Airport | None:
 
 
 async def airport_tz(session: AsyncSession, iata: str) -> str:
-    """The IANA zone for an airport, falling back to UTC for one we do not know.
+    """The IANA zone for an airport.
 
-    UTC is the wrong answer, but it is a stable wrong answer that keeps a booking
-    visible instead of failing the whole ingestion; the warning is the signal to seed.
+    Raises `UnknownAirport` rather than guessing: a booking converted against the wrong
+    zone is hours out and looks perfectly plausible, which is worse than one that is
+    refused with the code that needs correcting.
     """
     code = (iata or "").strip().upper()
     cached = _tz_cache.get(code)
@@ -102,13 +110,8 @@ async def airport_tz(session: AsyncSession, iata: str) -> str:
 
     airport = await get_airport(session, code)
     if airport is None:
-        log.warning("no airport row for %r; falling back to %s", iata, FALLBACK_TZ)
-        return FALLBACK_TZ
+        raise UnknownAirport(iata)
 
     # Only real hits are cached, so an airport seeded after a miss is picked up.
     _tz_cache[code] = airport.tz
     return airport.tz
-
-
-def clear_tz_cache() -> None:
-    _tz_cache.clear()

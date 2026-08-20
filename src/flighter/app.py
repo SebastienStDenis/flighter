@@ -3,7 +3,7 @@
 They all live in one process on purpose. There is one user and a handful of flights in
 flight at a time, so the coordination a second process would need costs more than it
 saves. The pieces are still independent tasks: any one of them failing leaves the others
-running, and the health page says which is unhappy.
+running and is started again after a pause that doubles each time.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from fastapi import FastAPI
 
@@ -24,6 +24,12 @@ log = logging.getLogger(__name__)
 # Slow enough to be invisible in API cost, fast enough that a gate change reaches the
 # phone within a poll cycle rather than sitting in the table until the next one.
 DISPATCH_INTERVAL_SECONDS = 20
+
+# A background loop that dies is started again after a pause that doubles each time, up
+# to a ceiling: a bug that kills it on every pass must not turn into a busy loop, and a
+# process whose poller is dead must not go on looking healthy.
+RESTART_MIN_SECONDS = 5.0
+RESTART_MAX_SECONDS = 300.0
 
 
 async def _dispatch_loop(settings: Settings, stopping: asyncio.Event) -> None:
@@ -51,22 +57,29 @@ async def _dispatch_loop(settings: Settings, stopping: asyncio.Event) -> None:
 
     while not stopping.is_set():
         try:
-            async with session_scope() as session:
-                await dispatch_pending(session, notifier, calendar)
+            await dispatch_pending(notifier, calendar)
         except Exception:
             log.exception("event dispatch failed; retrying next pass")
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(stopping.wait(), DISPATCH_INTERVAL_SECONDS)
 
 
-async def _supervise(name: str, coro: object) -> None:
-    """Run a background loop, logging rather than silently swallowing its death."""
-    try:
-        await coro  # type: ignore[misc]
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        log.exception("background task %s stopped", name)
+async def _supervise(
+    name: str, start: Callable[[], Awaitable[None]], stopping: asyncio.Event
+) -> None:
+    """Run a background loop for the life of the process, restarting it when it dies."""
+    pause = RESTART_MIN_SECONDS
+    while not stopping.is_set():
+        try:
+            await start()
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("background task %s died; restarting in %.0fs", name, pause)
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stopping.wait(), pause)
+        pause = min(pause * 2, RESTART_MAX_SECONDS)
 
 
 def migrate() -> None:
@@ -81,6 +94,14 @@ def migrate() -> None:
     from alembic.config import Config
 
     command.upgrade(Config("alembic.ini"), "head")
+
+
+async def _close_clients() -> None:
+    from . import aeroapi, caldav, notify
+
+    await aeroapi.close_client()
+    await notify.close_client()
+    await caldav.close_client()
 
 
 @contextlib.asynccontextmanager
@@ -105,12 +126,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ensure_widget_token()
 
     stopping = asyncio.Event()
+    loops: dict[str, Callable[[], Awaitable[None]]] = {
+        "poller": lambda: run_poller(stopping),
+        "dispatch": lambda: _dispatch_loop(settings, stopping),
+        "ingest": lambda: run_ingest_loop(stopping),
+    }
     tasks = [
-        asyncio.create_task(_supervise("poller", run_poller(stopping)), name="poller"),
-        asyncio.create_task(
-            _supervise("dispatch", _dispatch_loop(settings, stopping)), name="dispatch"
-        ),
-        asyncio.create_task(_supervise("ingest", run_ingest_loop(stopping)), name="ingest"),
+        asyncio.create_task(_supervise(name, start, stopping), name=name)
+        for name, start in loops.items()
     ]
     if not settings.icloud_configured:
         log.warning("nothing is connected yet; open /settings and work down Connections")
@@ -125,6 +148,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await _close_clients()
         await dispose_engine()
 
 

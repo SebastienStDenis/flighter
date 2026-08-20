@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable
 from datetime import UTC, datetime
 from email import message_from_bytes, policy
 from email.utils import parsedate_to_datetime
@@ -76,6 +76,11 @@ _UNFLAG = " ".join(("\\Flagged", *FLAG_KEYWORDS))
 # IDLE announces changes in the selected mailbox only, and the inbox is where a booking
 # confirmation is flagged nine times in ten.
 IDLE_MAILBOX = "INBOX"
+
+# How long to idle before sweeping every mailbox again, which is the only way a flag set
+# on a message filed outside the inbox is ever found. Five minutes is well inside what an
+# impatient server or a NAT table will tolerate from a silent connection.
+IDLE_CYCLE_SECONDS = 300.0
 
 # A wait is served as a run of short IDLEs rather than one long one. The thread running
 # it cannot be interrupted, so this is how long a shutdown can be left waiting on it, and
@@ -209,15 +214,23 @@ class Mailbox:
         """Hang up. Never raises: this runs while something else is already going wrong."""
         await asyncio.to_thread(self._close)
 
-    async def poll(self) -> list[Marked]:
-        """Every message carrying the flag right now, mailbox by mailbox, oldest first.
+    async def poll(self) -> AsyncIterator[list[Marked]]:
+        """Every message carrying the flag right now, one mailbox at a time, oldest first.
 
         No de-duplication and no cursor: a flag is only ever set by the user and only ever
         cleared by `clear_mark`, so what is flagged is exactly what is still to be done.
+
+        A mailbox's messages are all read out before any of them is handed over: the
+        pipeline takes a model call and a handful of network writes per message, and
+        iCloud drops a connection left holding a half-consumed fetch across all of that.
+        The next mailbox is not touched until the caller asks for it, so what sits in
+        memory at once is one mailbox's worth rather than the whole account's.
         """
-        marked = await asyncio.to_thread(self._poll)
-        self.waiting = len(marked)
-        return marked
+        self.waiting = 0
+        for mailbox in self.mailboxes:
+            marked = await asyncio.to_thread(self._poll, mailbox)
+            self.waiting += len(marked)
+            yield marked
 
     async def count_flagged(self) -> int:
         """How many messages carry the flag, without fetching any of them."""
@@ -269,19 +282,13 @@ class Mailbox:
         with contextlib.suppress(Exception):
             box.logout()
 
-    def _poll(self) -> list[Marked]:
+    def _poll(self, mailbox: str) -> list[Marked]:
+        self._select(mailbox)
         marked = []
-        for mailbox in self.mailboxes:
-            self._select(mailbox)
-            # Everything is read out before any of it is processed: the pipeline takes a
-            # model call and a handful of network writes per message, and iCloud drops a
-            # connection left holding a half-consumed fetch across all of that.
-            for message in self._require_box().fetch(self._criteria, mark_seen=False):
-                uid = int(message.uid or 0)
-                raw = message.obj.as_bytes()
-                marked.append(
-                    Marked(mailbox, uid, parse_message(raw, _message_id(raw, mailbox, uid)))
-                )
+        for message in self._require_box().fetch(self._criteria, mark_seen=False):
+            uid = int(message.uid or 0)
+            raw = message.obj.as_bytes()
+            marked.append(Marked(mailbox, uid, parse_message(raw, _message_id(raw, mailbox, uid))))
         return marked
 
     def _count_flagged(self) -> int:

@@ -3,14 +3,22 @@
 Tests here are deliberately database-free: everything worth testing in this project is a
 pure function over data (timezone normalisation, poll cadence, snapshot diffing, payload
 shaping), and a suite that needs a database on disk is a suite that stops being run.
+The exception is SQL that has to be proven against SQLite itself - the dedupe rule, the
+newest-snapshot query, delivery stamping, pruning - which runs against an in-memory
+database that lives exactly as long as the test.
 """
 
 from __future__ import annotations
 
-import pytest
+from collections.abc import AsyncIterator
 
-from flighter import prefs
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+
+from flighter import airports, db, prefs
 from flighter.config import CREDENTIALS, Settings
+from flighter.models import Base
 from flighter.prefs import Prefs
 
 # Every credential named explicitly, so that a developer's own .env or data/secrets.env
@@ -52,3 +60,23 @@ def preferences(monkeypatch: pytest.MonkeyPatch) -> Prefs:
     )
     monkeypatch.setattr(prefs, "_current", configured)
     return configured
+
+
+@pytest.fixture
+async def database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """An empty in-memory database installed as the process's engine.
+
+    One connection, shared, so that `session_scope()` everywhere in the code under test
+    reaches the same tables - and so that a transaction left open across another is an
+    immediate error here rather than a busy timeout in production.
+    """
+    monkeypatch.setattr(db, "_engine", None)
+    monkeypatch.setattr(db, "_sessionmaker", None)
+    monkeypatch.setattr(airports, "_tz_cache", {})
+    engine = db.bind_engine(create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool))
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    yield db.sessionmaker()
+    await db.dispose_engine()

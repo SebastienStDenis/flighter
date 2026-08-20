@@ -2,23 +2,47 @@
 {% import "macros.html" as m %}
 {% import "basecoat/dialog.html.jinja" as bc %}
 {% set s = v.snapshot %}
+{% set id = v.booking.id %}
 {% block title %}{{ v.flight_number }} {{ v.booking.origin_iata }} to {{ v.booking.dest_iata }}{% endblock %}
 {% block content %}
+
+<h1 class="sr-only">{{ v.flight_number }}, {{ v.booking.origin_iata }} to {{ v.booking.dest_iata }}</h1>
+
+{% if v.unchecked %}
+<div class="card mb-3" data-size="sm">
+  <header>
+    <h3>Does this look right?</h3>
+    <p>It was read out of an email we were not certain about, so nothing is being
+      tracked until you say.</p>
+  </header>
+  <footer class="grid grid-cols-3 gap-2 border-t">
+    <form method="post" action="/f/{{ id }}/keep">
+      <button class="btn w-full" type="submit">Looks right</button>
+    </form>
+    <a class="btn" data-variant="outline" href="/f/{{ id }}/edit">Fix details</a>
+    <form method="post" action="/f/{{ id }}/delete">
+      <button class="btn w-full" data-variant="destructive" type="submit">Not a flight</button>
+    </form>
+  </footer>
+</div>
+{% endif %}
 
 <div class="card">
   <header>
     <h2 class="font-mono tracking-tight">{{ v.flight_number }}</h2>
-    <p>{{ day(v.scheduled_departure, v.origin_tz) }}</p>
+    <p>{{ day(v.scheduled_departure, v.origin_tz) }}
+      {%- if s and s.aircraft_type %} &middot; {{ s.aircraft_type }}{% endif -%}
+    </p>
     <div class="card-action">{{ m.badge(v.status) }}</div>
   </header>
   <section>
     {{ m.route(v, names=true) }}
-    {% if v.progress_percent is not none %}
-    <p class="mt-3 text-center text-xs text-muted-foreground">{{ v.progress_percent }}% flown</p>
+    {% if v.cancelled %}
+    <p class="mt-3 text-sm text-stop">{{ cancelled_notice }}</p>
     {% endif %}
   </section>
   <section class="grid grid-cols-3 gap-3 border-t pt-4">
-    {{ m.stat("Gate", dash(v.gate), "text-plan") }}
+    {{ m.stat("Gate", dash(v.gate), "text-plan" if v.gate else "") }}
     {{ m.stat("Terminal", dash(v.terminal)) }}
     {{ m.stat("Seat", dash(v.booking.seat)) }}
   </section>
@@ -35,8 +59,6 @@
   <header><h3>Departure &middot; {{ v.booking.origin_iata }}</h3></header>
   <section>
     <div class="item-group -mx-2.5">
-      {{ m.fact("Airport", dash(v.origin.name if v.origin else none)) }}
-      {{ m.fact("Timezone", v.origin_tz) }}
       {{ m.fact("Terminal", dash(s.terminal_origin if s else none), mono=true) }}
       {{ m.fact("Gate", dash(s.gate_origin if s else none), mono=true) }}
       {{ m.when("Departs", v.departs, v.origin_tz) }}
@@ -49,8 +71,6 @@
   <header><h3>Arrival &middot; {{ v.booking.dest_iata }}</h3></header>
   <section>
     <div class="item-group -mx-2.5">
-      {{ m.fact("Airport", dash(v.dest.name if v.dest else none)) }}
-      {{ m.fact("Timezone", v.dest_tz) }}
       {{ m.fact("Terminal", dash(s.terminal_destination if s else none), mono=true) }}
       {{ m.fact("Gate", dash(s.gate_destination if s else none), mono=true) }}
       {{ m.fact("Baggage", dash(s.baggage_claim if s else none), mono=true) }}
@@ -61,31 +81,10 @@
 </div>
 
 <div class="card mt-3" data-size="sm">
-  <header><h3>Aircraft</h3></header>
-  <section>
-    <div class="item-group -mx-2.5">
-      {{ m.fact("Type", dash(s.aircraft_type if s else none), mono=true) }}
-      {{ m.fact("Registration", dash(s.registration if s else none), mono=true) }}
-      {{ m.fact("Filed route", dash(v.raw('route')), mono=true) }}
-      {{ m.fact("Filed altitude", altitude(v.raw('filed_altitude')), mono=true) }}
-      {{ m.fact("Distance", distance(v.raw('route_distance')), mono=true) }}
-      {{ m.fact("Seats, first", dash(v.raw('seats_cabin_first')), mono=true) }}
-      {{ m.fact("Seats, business", dash(v.raw('seats_cabin_business')), mono=true) }}
-      {{ m.fact("Seats, economy", dash(v.raw('seats_cabin_coach')), mono=true) }}
-    </div>
-  </section>
-</div>
-
-<div class="card mt-3" data-size="sm">
   <header><h3>Booking</h3></header>
   <section>
     <div class="item-group -mx-2.5">
       {{ m.fact("Confirmation", dash(v.booking.confirmation_code), mono=true) }}
-      {{ m.fact("Seat", dash(v.booking.seat), mono=true) }}
-      {{ m.fact("Operated as", dash(v.operating_flight), mono=true) }}
-      {{ m.fact("Tracked as", dash(v.booking.aeroapi_ident), mono=true) }}
-      {{ m.fact("Added", "from email" if v.booking.source == 'email' else "by hand") }}
-      {{ m.fact("Last checked", at(s.observed_at if s else none, v.origin_tz, with_date=true), mono=true) }}
       {% if v.booking.notes %}{{ m.fact("Notes", v.booking.notes) }}{% endif %}
       {% if v.calendar_link %}
       <div class="item" data-size="xs">
@@ -104,20 +103,21 @@
   <header><h3>What has changed</h3></header>
   <section>
     {% if events %}
-    <div class="item-group -mx-2.5">
-      {% for e in events %}
-      <div class="item" data-size="xs">
-        <section>
-          <h4>{{ e.kind.replace('_', ' ')|capitalize }}</h4>
-          <p class="font-mono">{{ at(e.occurred_at, v.origin_tz, with_date=true) }}</p>
-        </section>
-        <aside class="font-mono">
-          <span class="text-muted-foreground line-through">{{ dash(e.old_value) }}</span>
-          <span class="font-semibold">{{ dash(e.new_value) }}</span>
-        </aside>
-      </div>
-      {% endfor %}
+    {{ m.change(events[0], v.origin_tz) }}
+    {% if events|length > 1 %}
+    <div class="accordion mt-1">
+      <details>
+        <summary>
+          Earlier changes
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m6 9 6 6 6-6"/>
+          </svg>
+        </summary>
+        {% for e in events[1:] %}{{ m.change(e, v.origin_tz) }}{% endfor %}
+      </details>
     </div>
+    {% endif %}
     {% else %}
     <p class="text-sm text-muted-foreground">Nothing has changed yet.</p>
     {% endif %}
@@ -125,7 +125,7 @@
 </div>
 
 {% set stop_footer %}
-<form method="post" action="/f/{{ v.booking.id }}/delete">
+<form method="post" action="/f/{{ id }}/delete">
   <button class="btn" data-variant="destructive" type="submit">Stop tracking</button>
 </form>
 <button class="btn" data-variant="outline" type="button"
@@ -134,12 +134,12 @@
 {{ bc.dialog(
      id='stop-tracking',
      title='Stop tracking ' ~ v.flight_number ~ '?',
-     description='It comes off the list and out of your calendar.',
+     description='It comes off the board and out of your calendar.',
      footer=stop_footer,
      close_button=false) }}
 
 <div class="action-bar flex gap-2">
-  <a class="btn flex-1" data-size="lg" href="/f/{{ v.booking.id }}/edit">Edit</a>
+  <a class="btn flex-1" data-size="lg" href="/f/{{ id }}/edit">Edit</a>
   <button class="btn" data-variant="ghost" data-size="lg" type="button"
           onclick="document.getElementById('stop-tracking').showModal()">Stop tracking</button>
 </div>

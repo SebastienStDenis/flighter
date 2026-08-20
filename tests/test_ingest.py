@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Any
 import pytest
 
 from flighter import ingest
+from flighter.airports import UnknownAirport
 from flighter.config import Settings
 from flighter.extract import Extraction, Segment
 from flighter.mail import Marked, Message, parse_message
@@ -23,7 +25,7 @@ def message(name: str) -> Message:
     return parse_message((FIXTURES / name).read_bytes(), name)
 
 
-def extraction(*, confidence: float = 0.99, tz_hint: str | None = None) -> Extraction:
+def extraction(*, confidence: float = 0.99) -> Extraction:
     return Extraction(
         is_flight_confirmation=True,
         confidence=confidence,
@@ -36,7 +38,6 @@ def extraction(*, confidence: float = 0.99, tz_hint: str | None = None) -> Extra
                 origin_iata="YYC",
                 dest_iata="YVR",
                 departure_local="2026-11-17T06:30:00",
-                departure_tz_hint=tz_hint,
                 arrival_local="2026-11-17T07:12:00",
                 confirmation_code="8HTGRX",
                 seat="12A",
@@ -52,6 +53,9 @@ class FakeSession:
         self.log: dict[str, IngestLog] = {}
         self.bookings: dict[int, Any] = {}
         self.rolled_back = False
+        # How many scopes are open on it right now; the pipeline promises zero during a
+        # model call.
+        self.in_use = 0
 
     async def get(self, model: type, pk: Any) -> Any:
         return self.log.get(pk) if model is IngestLog else self.bookings.get(pk)
@@ -103,6 +107,23 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     return rec
 
 
+@pytest.fixture
+def one_session(monkeypatch: pytest.MonkeyPatch) -> FakeSession:
+    """One session behind every scope the pipeline opens, so the log survives between them."""
+    session = FakeSession()
+
+    @contextlib.asynccontextmanager
+    async def scope() -> AsyncIterator[FakeSession]:
+        session.in_use += 1
+        try:
+            yield session
+        finally:
+            session.in_use -= 1
+
+    monkeypatch.setattr(ingest, "session_scope", scope)
+    return session
+
+
 def use_model(monkeypatch: pytest.MonkeyPatch, result: Extraction | None) -> None:
     async def fake(message: Message, **kwargs: Any) -> Extraction | None:
         return result
@@ -114,16 +135,12 @@ def use_model(monkeypatch: pytest.MonkeyPatch, result: Extraction | None) -> Non
 
 
 async def test_structured_confirmation_becomes_an_active_booking(
-    settings: Settings, recorder: Recorder
+    settings: Settings, recorder: Recorder, one_session: FakeSession
 ) -> None:
-    session = FakeSession()
-    result = await ingest.process_message(
-        session,  # type: ignore[arg-type]
-        message("flight_jsonld.eml"),
-        settings=settings,
-    )
+    result = await ingest.process_message(message("flight_jsonld.eml"), settings=settings)
 
     assert result.outcome == "created"
+    assert result.settled
     (created,) = recorder.created
     assert created["status"] == "active"
     assert created["marketing_carrier"] == "DL"
@@ -131,181 +148,207 @@ async def test_structured_confirmation_becomes_an_active_booking(
     assert created["source"] == "email"
     assert created["source_message_id"] == "flight_jsonld.eml"
 
-    logged = session.log["flight_jsonld.eml"]
+    logged = one_session.log["flight_jsonld.eml"]
     assert logged.outcome == "created"
     assert logged.raw_extraction is not None
     assert logged.raw_extraction["segments"][0]["confirmation_code"] == "K7QX2M"
 
 
 async def test_multi_segment_itinerary_books_every_leg(
-    settings: Settings, recorder: Recorder
+    settings: Settings, recorder: Recorder, one_session: FakeSession
 ) -> None:
-    session = FakeSession()
-    result = await ingest.process_message(
-        session,  # type: ignore[arg-type]
-        message("flight_package_jsonld.eml"),
-        settings=settings,
-    )
+    result = await ingest.process_message(message("flight_package_jsonld.eml"), settings=settings)
 
     assert result.outcome == "created"
     assert [(c["marketing_number"], c["origin_iata"]) for c in recorder.created] == [
         ("8830", "YUL"),
         ("856", "YYZ"),
     ]
-    assert session.log["flight_package_jsonld.eml"].outcome == "created"
+    assert one_session.log["flight_package_jsonld.eml"].outcome == "created"
 
 
 async def test_marketing_email_never_reaches_an_extractor(
-    settings: Settings, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
 ) -> None:
     def explode(_: Message, **kwargs: Any) -> None:
         raise AssertionError("the prefilter should have stopped this")
 
     monkeypatch.setattr(ingest, "from_model", explode)
-    session = FakeSession()
 
-    result = await ingest.process_message(
-        session,  # type: ignore[arg-type]
-        message("airline_promo.eml"),
-        settings=settings,
-    )
+    result = await ingest.process_message(message("airline_promo.eml"), settings=settings)
 
     assert result.outcome == "no_flight"
-    assert session.log["airline_promo.eml"].raw_extraction is None
+    assert one_session.log["airline_promo.eml"].raw_extraction is None
     assert recorder.created == []
 
 
 async def test_the_model_path_runs_when_there_is_no_structured_data(
-    settings: Settings, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
 ) -> None:
     use_model(monkeypatch, extraction())
-    session = FakeSession()
 
-    result = await ingest.process_message(
-        session,  # type: ignore[arg-type]
-        message("flight_plain.eml"),
-        settings=settings,
-    )
+    result = await ingest.process_message(message("flight_plain.eml"), settings=settings)
 
     assert result.outcome == "created"
     assert recorder.created[0]["marketing_carrier"] == "WS"
 
 
-async def test_the_stated_timezone_hint_is_discarded(
-    settings: Settings, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+async def test_no_transaction_is_open_while_the_model_reads(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
 ) -> None:
-    """The airline said Asia/Tokyo for a flight out of Calgary. It is not consulted."""
-    use_model(monkeypatch, extraction(tz_hint="Asia/Tokyo"))
-    session = FakeSession()
+    """Every transaction takes the write lock, and a model call can take most of a minute."""
 
-    await ingest.process_message(
-        session,  # type: ignore[arg-type]
-        message("flight_plain.eml"),
-        settings=settings,
-    )
+    async def slow_model(message: Message, **kwargs: Any) -> Extraction:
+        assert one_session.in_use == 0, "a session was held across the model call"
+        return extraction()
+
+    monkeypatch.setattr(ingest, "from_model", slow_model)
+
+    result = await ingest.process_message(message("flight_plain.eml"), settings=settings)
+
+    assert result.outcome == "created"
+    assert one_session.in_use == 0
+
+
+async def test_the_departure_zone_comes_from_the_airport_not_the_email(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    """Whatever zone the airline printed, the wall clock is read in the origin's own zone."""
+    use_model(monkeypatch, extraction())
+
+    await ingest.process_message(message("flight_plain.eml"), settings=settings)
 
     (created,) = recorder.created
     assert created["departure_local"] == datetime(2026, 11, 17, 6, 30)
     assert created["departure_local"].tzinfo is None
-    assert "departure_tz_hint" not in created
     # The only zone anybody asked about came from the airports table.
     assert recorder.zones_asked == ["YYC"]
 
 
 async def test_low_confidence_goes_to_review(
-    settings: Settings, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
 ) -> None:
-    use_model(monkeypatch, extraction(confidence=0.4))
-    session = FakeSession()
+    use_model(monkeypatch, extraction(confidence=ingest.CONFIDENCE_THRESHOLD - 0.01))
 
-    result = await ingest.process_message(
-        session,  # type: ignore[arg-type]
-        message("flight_plain.eml"),
-        settings=settings,
-    )
+    result = await ingest.process_message(message("flight_plain.eml"), settings=settings)
 
     assert result.outcome == "review"
     assert recorder.created[0]["status"] == "pending_review"
-    assert recorder.created[0]["extraction_confidence"] == pytest.approx(0.4)
+    assert recorder.created[0]["extraction_confidence"] == pytest.approx(
+        ingest.CONFIDENCE_THRESHOLD - 0.01
+    )
 
 
 async def test_a_flight_we_already_have_is_not_booked_twice(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, one_session: FakeSession
 ) -> None:
     rec = Recorder(duplicate=True)
     monkeypatch.setattr(ingest, "airport_tz", rec.airport_tz)
     monkeypatch.setattr(ingest, "find_duplicate", rec.find_duplicate)
     monkeypatch.setattr(ingest, "create_booking", rec.create_booking)
-    session = FakeSession()
 
-    result = await ingest.process_message(
-        session,  # type: ignore[arg-type]
-        message("flight_jsonld.eml"),
-        settings=settings,
-    )
+    result = await ingest.process_message(message("flight_jsonld.eml"), settings=settings)
 
     assert result.outcome == "duplicate"
     assert rec.created == []
 
 
-async def test_the_same_message_delivered_twice_is_a_no_op(
-    settings: Settings, recorder: Recorder
-) -> None:
-    session = FakeSession()
-    first = await ingest.process_message(
-        session,  # type: ignore[arg-type]
-        message("flight_jsonld.eml"),
-        settings=settings,
-    )
-    second = await ingest.process_message(
-        session,  # type: ignore[arg-type]
-        message("flight_jsonld.eml"),
-        settings=settings,
-    )
-
-    assert (first.outcome, second.outcome) == ("created", "created")
-    assert len(recorder.created) == 1
-
-
 async def test_a_failing_extraction_is_logged_and_swallowed(
-    settings: Settings, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
 ) -> None:
     async def boom(message: Message, **kwargs: Any) -> Extraction:
         raise RuntimeError("model output did not match the extraction schema")
 
     monkeypatch.setattr(ingest, "from_model", boom)
-    session = FakeSession()
 
-    result = await ingest.process_message(
-        session,  # type: ignore[arg-type]
-        message("flight_plain.eml"),
-        settings=settings,
-    )
+    result = await ingest.process_message(message("flight_plain.eml"), settings=settings)
 
     assert result.outcome == "error"
-    logged = session.log["flight_plain.eml"]
+    assert not result.settled
+    logged = one_session.log["flight_plain.eml"]
     assert logged.error is not None and "RuntimeError" in logged.error
-    assert session.rolled_back
+    assert recorder.created == []
+
+
+async def test_a_failing_booking_is_rolled_back_and_logged(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    """Half an itinerary is worse than none, and the log row still has to be written."""
+
+    async def refuse(session: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(ingest, "create_booking", refuse)
+
+    result = await ingest.process_message(message("flight_package_jsonld.eml"), settings=settings)
+
+    assert result.outcome == "error"
+    assert one_session.rolled_back
+    logged = one_session.log["flight_package_jsonld.eml"]
+    assert logged.error is not None and "database is locked" in logged.error
+    assert logged.raw_extraction is not None
+
+
+async def test_an_airport_we_do_not_know_is_never_retried(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    """Reading the same email again reads the same code, so the retries would buy nothing."""
+
+    async def unknown(session: Any, iata: str) -> str:
+        raise UnknownAirport(iata)
+
+    monkeypatch.setattr(ingest, "airport_tz", unknown)
+
+    result = await ingest.process_message(message("flight_jsonld.eml"), settings=settings)
+
+    assert result.outcome == "error"
+    assert result.settled
+    logged = one_session.log["flight_jsonld.eml"]
+    assert ingest.set_aside(logged)
+    assert logged.error is not None and "JFK is not an airport" in logged.error
+    assert recorder.created == []
 
 
 async def test_an_extraction_that_is_not_a_confirmation_is_no_flight(
-    settings: Settings, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
 ) -> None:
     use_model(
         monkeypatch,
         Extraction(is_flight_confirmation=False, confidence=0.1, segments=[]),
     )
-    session = FakeSession()
 
-    result = await ingest.process_message(
-        session,  # type: ignore[arg-type]
-        message("flight_plain.eml"),
-        settings=settings,
-    )
+    result = await ingest.process_message(message("flight_plain.eml"), settings=settings)
 
     assert result.outcome == "no_flight"
     # The raw answer is still kept: it is the evidence for why nothing was booked.
-    assert session.log["flight_plain.eml"].raw_extraction is not None
+    assert one_session.log["flight_plain.eml"].raw_extraction is not None
     assert recorder.created == []
 
 
@@ -325,8 +368,8 @@ class FakeMailbox:
         ]
         self.cleared: list[tuple[str, int]] = []
 
-    async def poll(self) -> list[Marked]:
-        return list(self.marked)
+    async def poll(self) -> AsyncIterator[list[Marked]]:
+        yield list(self.marked)
 
     async def clear_mark(self, marked: Marked) -> None:
         self.cleared.append((marked.mailbox, marked.uid))
@@ -345,19 +388,6 @@ class FakeNotifier:
 
     async def mail_failed(self, *, message_id: str, subject: str, reason: str) -> None:
         self.failed.append((message_id, subject, reason))
-
-
-@pytest.fixture
-def one_session(monkeypatch: pytest.MonkeyPatch) -> FakeSession:
-    """One session behind every scope the sweep opens, so the log survives between passes."""
-    session = FakeSession()
-
-    @contextlib.asynccontextmanager
-    async def scope() -> AsyncIterator[FakeSession]:
-        yield session
-
-    monkeypatch.setattr(ingest, "session_scope", scope)
-    return session
 
 
 async def sweep(mailbox: FakeMailbox, notifier: FakeNotifier, settings: Settings) -> list[str]:
@@ -386,6 +416,21 @@ async def test_a_message_is_unflagged_where_it_was_found(
 
     assert await sweep(mailbox, notifier, settings) == ["created"]
     assert mailbox.cleared == [("Travel", 1)]
+
+
+async def test_the_same_message_delivered_twice_is_booked_once(
+    settings: Settings, recorder: Recorder, one_session: FakeSession
+) -> None:
+    """A crash between writing the row and clearing the flag replays the message, safely."""
+    notifier = FakeNotifier()
+
+    assert await sweep(FakeMailbox(message("flight_jsonld.eml")), notifier, settings) == ["created"]
+    again = FakeMailbox(message("flight_jsonld.eml"))
+    assert await sweep(again, notifier, settings) == ["created"]
+
+    assert len(recorder.created) == 1
+    assert again.cleared == [("INBOX", 1)]
+    assert len(notifier.imported) == 1
 
 
 def fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -484,6 +529,24 @@ async def test_a_message_that_keeps_failing_is_set_aside_and_reported_once(
     assert mailbox.cleared == []
 
 
+async def test_three_failed_extractions_make_exactly_one_push(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    """Not one per attempt, and not one per sweep that finds the email still flagged."""
+    fails(monkeypatch)
+    mailbox, notifier = FakeMailbox(message("flight_plain.eml")), FakeNotifier()
+
+    await sweep_until_set_aside(mailbox, notifier, settings, one_session)
+    for _ in range(3):
+        await sweep(mailbox, notifier, settings)
+
+    assert len(notifier.failed) == 1
+    assert notifier.imported == []
+
+
 async def test_a_message_that_was_set_aside_is_not_looked_at_again(
     settings: Settings,
     recorder: Recorder,
@@ -569,3 +632,53 @@ async def test_a_message_that_will_not_unmark_is_not_reported_twice(
             await sweep(mailbox, notifier, settings)
 
     assert len(notifier.imported) == 1
+
+
+async def test_a_push_that_fails_does_not_hold_the_email(
+    settings: Settings,
+    recorder: Recorder,
+    one_session: FakeSession,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The row is committed and the flight is on the board; the flag comes off regardless."""
+
+    class Unreachable(FakeNotifier):
+        async def mail_imported(self, bookings: Any, *, outcome: str) -> None:
+            raise RuntimeError("Pushover is down")
+
+    mailbox = FakeMailbox(message("flight_jsonld.eml"))
+
+    with caplog.at_level(logging.WARNING, logger="flighter.ingest"):
+        assert await sweep(mailbox, Unreachable(), settings) == ["created"]
+
+    assert mailbox.cleared == [("INBOX", 1)]
+    assert one_session.log["flight_jsonld.eml"].outcome == "created"
+    # A warning rather than an error, and it names the email a person would recognise.
+    (record,) = [entry for entry in caplog.records if entry.name == "flighter.ingest"]
+    assert record.levelno == logging.WARNING
+    assert "Your trip is confirmed" in record.getMessage()
+
+
+async def test_a_flagged_email_naming_an_unknown_airport_is_set_aside_at_once(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    """One push naming the code, and no second look at an email that cannot come right."""
+
+    async def unknown(session: Any, iata: str) -> str:
+        raise UnknownAirport(iata)
+
+    monkeypatch.setattr(ingest, "airport_tz", unknown)
+    mailbox, notifier = FakeMailbox(message("flight_jsonld.eml")), FakeNotifier()
+
+    assert await sweep(mailbox, notifier, settings) == ["error"]
+    assert await sweep(mailbox, notifier, settings) == []
+
+    (_, _, reason) = notifier.failed[0]
+    assert len(notifier.failed) == 1
+    assert "JFK is not an airport we know" in reason
+    assert "set aside" in reason
+    # The flag is still on, so the email is where the person left it.
+    assert mailbox.cleared == []

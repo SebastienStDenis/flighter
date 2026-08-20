@@ -19,6 +19,13 @@ import sys
 source, destination = sys.argv[1], sys.argv[2]
 with sqlite3.connect(f"file:{source}?mode=ro", uri=True) as connection:
     connection.execute("VACUUM INTO ?", (destination,))
+
+# A copy nobody has read is a hope rather than a backup, and the one moment it is worth
+# reading is now, while the database it came from is still there to take another.
+with sqlite3.connect(f"file:{destination}?mode=ro", uri=True) as copy:
+    verdict = copy.execute("PRAGMA integrity_check").fetchone()[0]
+if verdict != "ok":
+    sys.exit(f"backup {destination} is corrupt: {verdict}")
 PY
 
 # Keep two weeks. A personal flight history is small; the point is to survive a bad

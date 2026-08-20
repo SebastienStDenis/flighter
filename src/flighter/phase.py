@@ -10,12 +10,18 @@ boarding phase because no upstream source reports boarding, and the lead time va
 carrier and airframe from about twenty-five minutes to an hour, so any single guess is
 wrong for most flights. A countdown to a departure time is true at every instant and
 tells the reader more than a word standing where the numbers were.
+
+The "best known time" ladders live here for the same reason. Departure, gate arrival
+and landing each have one answer, and the calendar, the pushes, the page and the widget
+all read it from here rather than keeping a ladder of their own.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Final, Literal, Protocol
+
+from .timezones import ensure_utc
 
 Phase = Literal["upcoming", "day_of", "taxiing", "airborne", "landed", "cancelled", "diverted"]
 
@@ -28,6 +34,19 @@ CANCELLED: Final = "cancelled"
 DIVERTED: Final = "diverted"
 
 DAY_OF_LEAD: Final = timedelta(hours=24)
+
+# The industry calls anything under a quarter hour on time, and so does its own on-time
+# statistic. Below this a change is noise: airlines nudge an estimate by a minute or two
+# on every update, and nobody wants a push or a red badge for each wobble. Arrival keeps
+# its own name because an arrival estimate moves all flight long and may one day earn a
+# wider band than departure.
+DEPARTURE_DELAY_THRESHOLD: Final = timedelta(minutes=15)
+ARRIVAL_DELAY_THRESHOLD: Final = timedelta(minutes=15)
+
+# AeroAPI's `cancelled` means the flight is no longer tracked by FlightAware, which is
+# usually but not always an airline cancellation, so every surface says who said it
+# rather than asserting the flight is off.
+CANCELLED_NOTICE: Final = "Marked cancelled by FlightAware - confirm with the airline"
 
 
 class BookingLike(Protocol):
@@ -61,7 +80,7 @@ def compute_phase(booking: BookingLike, snapshot: SnapshotLike | None, now: date
     not under way just because its scheduled time has passed. Diverted outranks landed
     for the same reason, since where it landed is the whole point.
     """
-    moment = _utc(now)
+    moment = ensure_utc(now)
     if snapshot is not None:
         if snapshot.cancelled:
             return CANCELLED
@@ -84,12 +103,16 @@ def compute_phase(booking: BookingLike, snapshot: SnapshotLike | None, now: date
 
 
 def departure_estimate(booking: BookingLike, snapshot: SnapshotLike | None) -> datetime:
-    """Best known departure. Always answers: the booking's schedule is the floor."""
+    """Best known gate departure. Always answers: the booking's schedule is the floor.
+
+    What happened beats what is expected, which beats what was planned, which beats
+    what the ticket said.
+    """
     if snapshot is not None:
-        for candidate in (snapshot.estimated_out, snapshot.scheduled_out):
+        for candidate in (snapshot.actual_out, snapshot.estimated_out, snapshot.scheduled_out):
             if candidate is not None:
-                return _utc(candidate)
-    return _utc(booking.scheduled_departure_utc)
+                return ensure_utc(candidate)
+    return ensure_utc(booking.scheduled_departure_utc)
 
 
 def arrival_estimate(booking: BookingLike, snapshot: SnapshotLike | None) -> datetime | None:
@@ -101,9 +124,9 @@ def arrival_estimate(booking: BookingLike, snapshot: SnapshotLike | None) -> dat
     if snapshot is not None:
         for candidate in (snapshot.actual_in, snapshot.estimated_in, snapshot.scheduled_in):
             if candidate is not None:
-                return _utc(candidate)
+                return ensure_utc(candidate)
     if booking.scheduled_arrival_utc is not None:
-        return _utc(booking.scheduled_arrival_utc)
+        return ensure_utc(booking.scheduled_arrival_utc)
     return None
 
 
@@ -119,12 +142,5 @@ def landing_estimate(booking: BookingLike, snapshot: SnapshotLike | None) -> dat
     if snapshot is not None:
         for candidate in (snapshot.actual_on, snapshot.estimated_on, snapshot.scheduled_on):
             if candidate is not None:
-                return _utc(candidate)
+                return ensure_utc(candidate)
     return arrival_estimate(booking, snapshot)
-
-
-def _utc(value: datetime) -> datetime:
-    """A naive datetime here can only have come from a store that dropped the zone."""
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
