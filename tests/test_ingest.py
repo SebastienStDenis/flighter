@@ -180,7 +180,7 @@ async def test_marketing_email_never_reaches_an_extractor(
 
     result = await ingest.process_message(message("airline_promo.eml"), settings=settings)
 
-    assert result.outcome == "no_flight"
+    assert result.outcome == "error"
     assert one_session.log["airline_promo.eml"].raw_extraction is None
     assert recorder.created == []
 
@@ -333,7 +333,7 @@ async def test_an_airport_we_do_not_know_is_never_retried(
     assert recorder.created == []
 
 
-async def test_an_extraction_that_is_not_a_confirmation_is_no_flight(
+async def test_an_extraction_that_is_not_a_confirmation_is_set_aside(
     settings: Settings,
     recorder: Recorder,
     monkeypatch: pytest.MonkeyPatch,
@@ -346,7 +346,9 @@ async def test_an_extraction_that_is_not_a_confirmation_is_no_flight(
 
     result = await ingest.process_message(message("flight_plain.eml"), settings=settings)
 
-    assert result.outcome == "no_flight"
+    assert result.outcome == "error"
+    # Set aside rather than queued for a retry: the same read gets the same answer.
+    assert ingest.set_aside(one_session.log["flight_plain.eml"])
     # The raw answer is still kept: it is the evidence for why nothing was booked.
     assert one_session.log["flight_plain.eml"].raw_extraction is not None
     assert recorder.created == []
@@ -600,18 +602,23 @@ async def test_a_retry_that_works_is_imported_and_reported(
     assert (logged.error, logged.attempts, logged.retry_at) == (None, 0, None)
 
 
-async def test_a_marked_email_with_no_flight_is_reported_and_unmarked(
+async def test_a_marked_email_with_no_flight_is_reported_and_left_flagged(
     settings: Settings, recorder: Recorder, one_session: FakeSession
 ) -> None:
-    """Retrying it forever would never find a flight, so it is answered and let go."""
+    """Asking again would get the same answer, but the flag is the person's to take off."""
     mailbox = FakeMailbox(message("airline_promo.eml"))
     notifier = FakeNotifier()
 
-    assert await sweep(mailbox, notifier, settings) == ["no_flight"]
-    assert mailbox.cleared == [("INBOX", 1)]
+    assert await sweep(mailbox, notifier, settings) == ["error"]
+    # Set aside on the first pass, so the second one does not read it again.
+    assert await sweep(mailbox, notifier, settings) == []
+
+    assert mailbox.cleared == []
     (message_id, _, reason) = notifier.failed[0]
+    assert len(notifier.failed) == 1
     assert message_id == "airline_promo.eml"
     assert "no flight" in reason
+    assert "set aside" in reason
     assert notifier.imported == []
 
 
