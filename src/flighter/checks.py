@@ -126,21 +126,30 @@ async def _check_mail(settings: Settings) -> CheckResult:
 
 
 async def _check_calendar(settings: Settings) -> CheckResult:
-    """Signs in over CalDAV and walks discovery, which is everything a sync does but the PUT."""
-    if not settings.icloud_configured:
-        return CheckResult(
-            "calendar", False, "ICLOUD_EMAIL and ICLOUD_APP_PASSWORD are not set in .env"
-        )
-    name = prefs.current().icloud_calendar_name
-    if not name:
-        return CheckResult("calendar", False, "no calendar named on the settings page")
-    try:
-        from .caldav import CalendarClient
+    """Signs in over CalDAV and lists the account's calendars, then looks for ours in it.
 
-        url = await CalendarClient(settings).describe_calendar()
+    That is the one thing a sync cannot tell you on its own: writes go straight to a
+    stored URL, so a calendar deleted in the Calendar app is a 404 on the next flight
+    rather than something anybody was told about.
+    """
+    from .caldav import CalendarClient
+
+    chosen = prefs.current().icloud_calendar_url
+    if not chosen:
+        return CheckResult("calendar", False, "no calendar picked on the settings page")
+    try:
+        offered = await CalendarClient(settings).calendars()
     except Exception as exc:
         return CheckResult("calendar", False, str(exc))
-    return CheckResult("calendar", True, f"writing to {name} at {url}")
+    found = next((collection for collection in offered if collection.url == chosen), None)
+    if found is None:
+        return CheckResult(
+            "calendar",
+            False,
+            f"the calendar that was picked is no longer on this account. It offers: "
+            f"{', '.join(sorted(collection.name for collection in offered)) or 'nothing'}.",
+        )
+    return CheckResult("calendar", True, f"writing to {found.name} at {found.url}")
 
 
 async def run_checks(settings: Settings) -> list[CheckResult]:

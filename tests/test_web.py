@@ -14,16 +14,21 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import inspect
 
 from flighter import prefs, web
 from flighter.aeroapi import BudgetStatus
+from flighter.caldav import CalendarUnavailable, Collection
 from flighter.config import Settings
 from flighter.db import get_session
-from flighter.models import Airport, Booking, FlightEvent, FlightSnapshot
+from flighter.models import Airport, Booking, FlightEvent, FlightSnapshot, IngestLog
 
 NOW = datetime.now(UTC)
 DEPARTURE = NOW + timedelta(days=2)
 ARRIVAL = DEPARTURE + timedelta(hours=7)
+
+CALDAV_HOME = "https://p34-caldav.icloud.com/12345/calendars/"
+FLIGHTS_CALENDAR = f"{CALDAV_HOME}6c1f4f0e-flights/"
 
 AIRPORTS = {
     "YUL": Airport(
@@ -56,8 +61,11 @@ SETTINGS_FORM = {
     "extraction_confidence_threshold": "0.85",
     "imap_flag_colour": "grey",
     "imap_idle_seconds": "300",
-    "icloud_calendar_name": "Flights",
+    "icloud_calendar_url": FLIGHTS_CALENDAR,
 }
+
+# What discovery answers with, so the settings page has a picker to render.
+CALENDARS = [Collection("Flights", FLIGHTS_CALENDAR), Collection("Home", f"{CALDAV_HOME}1b-home/")]
 
 CLEAR_BUDGET = BudgetStatus(
     spend_usd=Decimal("0.42"), cap_usd=Decimal("4.00"), tripped=False, month="2026-08"
@@ -142,8 +150,9 @@ class FakeSession:
         return None
 
     async def get(self, model: type, pk: Any) -> Any:
+        (key,) = inspect(model).primary_key
         for row in self.rows.get(model.__name__, []):
-            if row.id == pk:
+            if getattr(row, key.name) == pk:
                 return row
         return None
 
@@ -177,9 +186,13 @@ def build_client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> TestCli
     async def no_bookings(_session: Any, **_kwargs: Any) -> list[Booking]:
         return []
 
+    async def fake_calendars(self: Any) -> list[Collection]:
+        return list(CALENDARS)
+
     monkeypatch.setattr(web, "get_airport", fake_get_airport)
     monkeypatch.setattr(web, "budget_status", fake_budget)
     monkeypatch.setattr(web.booking_repo, "list_bookings", no_bookings)
+    monkeypatch.setattr(web.CalendarClient, "calendars", fake_calendars)
 
     app = web.create_app(settings)
     app.dependency_overrides[get_session] = lambda: session
@@ -307,6 +320,21 @@ def test_the_add_form_asks_only_about_the_flight(client: TestClient) -> None:
     assert 'type="datetime-local"' in page.text
 
 
+def test_a_flight_on_the_calendar_offers_a_way_into_the_calendar_app(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The push about an import goes on pointing here; this is the link the other way."""
+    show(monkeypatch, booking(calendar_event_uid="flighter-1@flighter.invalid"), None)
+    assert "calshow:" in client.get("/f/1").text
+
+
+def test_a_flight_that_is_not_on_the_calendar_offers_no_link(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    show(monkeypatch, booking(), None)
+    assert "calshow:" not in client.get("/f/1").text
+
+
 def test_the_edit_form_shows_local_wall_clock_not_utc(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -350,6 +378,56 @@ def test_htmx_gets_an_empty_body_so_the_row_just_goes(
     page = client.post("/f/1/delete", headers={"HX-Request": "true"})
     assert page.status_code == 200
     assert page.text == ""
+
+
+# --- Health --------------------------------------------------------------------------
+
+
+def set_aside_row() -> IngestLog:
+    return IngestLog(
+        message_id="<abc@icloud.invalid>",
+        processed_at=NOW,
+        outcome="error",
+        subject="Your booking is confirmed",
+        error="RuntimeError: the model timed out",
+        attempts=3,
+        retry_at=None,
+    )
+
+
+def test_the_health_page_lists_what_was_set_aside(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client.session.rows["IngestLog"] = [set_aside_row()]  # type: ignore[attr-defined]
+
+    body = client.get("/health").text
+
+    assert "Your booking is confirmed" in body
+    assert "the model timed out" in body
+    assert "Try again" in body
+
+
+def test_trying_a_set_aside_message_again_puts_it_back_in_the_queue(
+    client: TestClient,
+) -> None:
+    row = set_aside_row()
+    client.session.rows["IngestLog"] = [row]  # type: ignore[attr-defined]
+
+    response = client.post(
+        "/health/retry", data={"message_id": row.message_id}, follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    # The email never lost its flag, so clearing the give-up is all it takes.
+    assert row.attempts == 0
+    assert row.retry_at is not None
+
+
+def test_trying_a_message_that_is_not_set_aside_is_a_404(client: TestClient) -> None:
+    assert (
+        client.post("/health/retry", data={"message_id": "<nope@icloud.invalid>"}).status_code
+        == 404
+    )
 
 
 def test_healthz_is_liveness_only(client: TestClient) -> None:
@@ -400,10 +478,34 @@ def test_a_flag_colour_the_app_cannot_watch_for_is_refused(client: TestClient) -
     assert "imap flag colour" in response.text
 
 
-def test_naming_the_calendar_turns_the_sync_on(client: TestClient) -> None:
-    client.post("/settings", data=SETTINGS_FORM | {"icloud_calendar_name": ""})
+def test_picking_a_calendar_turns_the_sync_on(client: TestClient) -> None:
+    client.post("/settings", data=SETTINGS_FORM | {"icloud_calendar_url": ""})
     assert not prefs.current().calendar_configured
 
-    client.post("/settings", data=SETTINGS_FORM | {"icloud_calendar_name": "Trips"})
-    assert prefs.current().icloud_calendar_name == "Trips"
+    client.post("/settings", data=SETTINGS_FORM | {"icloud_calendar_url": CALENDARS[1].url})
+    assert prefs.current().icloud_calendar_url == CALENDARS[1].url
     assert prefs.current().calendar_configured
+
+
+def test_the_settings_page_offers_the_calendars_the_account_has(client: TestClient) -> None:
+    body = client.get("/settings").text
+    for calendar in CALENDARS:
+        assert f'value="{calendar.url}"' in body
+        assert f">{calendar.name}<" in body
+
+
+def test_the_settings_page_still_opens_when_icloud_cannot_be_reached(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every other preference on the page is still editable, and the reason is on it."""
+
+    async def unreachable(self: Any) -> list[Collection]:
+        raise CalendarUnavailable("cannot reach caldav.icloud.com")
+
+    monkeypatch.setattr(web.CalendarClient, "calendars", unreachable)
+
+    page = client.get("/settings")
+    assert page.status_code == 200
+    assert "cannot reach caldav.icloud.com" in page.text
+    # The calendar that was picked keeps being written to rather than being cleared.
+    assert f'value="{FLIGHTS_CALENDAR}"' in page.text

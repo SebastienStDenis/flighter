@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -388,6 +388,28 @@ async def test_a_message_is_unflagged_where_it_was_found(
     assert mailbox.cleared == [("Travel", 1)]
 
 
+def fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def boom(message: Message, **kwargs: Any) -> Extraction:
+        raise RuntimeError("the model timed out")
+
+    monkeypatch.setattr(ingest, "from_model", boom)
+
+
+def due_now(session: FakeSession, name: str = "flight_plain.eml") -> None:
+    """Bring the next attempt forward, the way waiting out the delay would."""
+    session.log[name].retry_at = datetime.now(UTC)
+
+
+async def sweep_until_set_aside(
+    mailbox: FakeMailbox, notifier: FakeNotifier, settings: Settings, session: FakeSession
+) -> None:
+    """Every attempt a failing message gets, with the waits between them skipped."""
+    for attempt in range(len(ingest.RETRY_DELAYS) + 1):
+        if attempt:
+            due_now(session)
+        await sweep(mailbox, notifier, settings)
+
+
 async def test_a_failure_keeps_its_mark(
     settings: Settings,
     recorder: Recorder,
@@ -395,41 +417,103 @@ async def test_a_failure_keeps_its_mark(
     one_session: FakeSession,
 ) -> None:
     """The mark is the retry queue, so it must survive exactly the case that needs retrying."""
-
-    async def boom(message: Message, **kwargs: Any) -> Extraction:
-        raise RuntimeError("the model timed out")
-
-    monkeypatch.setattr(ingest, "from_model", boom)
+    fails(monkeypatch)
     mailbox = FakeMailbox(message("flight_plain.eml"))
-    notifier = FakeNotifier()
 
-    assert await sweep(mailbox, notifier, settings) == ["error"]
+    assert await sweep(mailbox, FakeNotifier(), settings) == ["error"]
     assert mailbox.cleared == []
-    assert [subject for _, subject, _ in notifier.failed] == ["Your booking is confirmed - WS 1502"]
-    assert "the model timed out" in notifier.failed[0][2]
+    logged = one_session.log["flight_plain.eml"]
+    assert logged.attempts == 1
+    assert logged.retry_at is not None
 
 
-async def test_the_same_failure_is_only_reported_once(
+async def test_a_failure_that_will_be_tried_again_is_not_pushed(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    """A model that timed out once is usually a model that answers the next time."""
+    fails(monkeypatch)
+    mailbox, notifier = FakeMailbox(message("flight_plain.eml")), FakeNotifier()
+
+    for _ in ingest.RETRY_DELAYS:
+        await sweep(mailbox, notifier, settings)
+        assert notifier.failed == []
+        due_now(one_session)
+
+
+async def test_a_message_waiting_for_its_retry_is_left_alone(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    """Retrying every sweep would put the same email through the model every few minutes."""
+    fails(monkeypatch)
+    mailbox, notifier = FakeMailbox(message("flight_plain.eml")), FakeNotifier()
+    await sweep(mailbox, notifier, settings)
+
+    def explode(_: Message, **kwargs: Any) -> None:
+        raise AssertionError("a message that is not due should not be looked at")
+
+    monkeypatch.setattr(ingest, "from_model", explode)
+    assert await sweep(mailbox, notifier, settings) == []
+    assert one_session.log["flight_plain.eml"].attempts == 1
+
+
+async def test_a_message_that_keeps_failing_is_set_aside_and_reported_once(
     settings: Settings,
     recorder: Recorder,
     monkeypatch: pytest.MonkeyPatch,
     one_session: FakeSession,
 ) -> None:
     """Every sweep sees the same broken email; a push every sweep is worse than the bug."""
+    fails(monkeypatch)
+    mailbox, notifier = FakeMailbox(message("flight_plain.eml")), FakeNotifier()
 
-    async def boom(message: Message, **kwargs: Any) -> Extraction:
-        raise RuntimeError("the model timed out")
+    await sweep_until_set_aside(mailbox, notifier, settings, one_session)
 
-    monkeypatch.setattr(ingest, "from_model", boom)
-    mailbox = FakeMailbox(message("flight_plain.eml"))
-    notifier = FakeNotifier()
-
-    await sweep(mailbox, notifier, settings)
-    await sweep(mailbox, notifier, settings)
-    await sweep(mailbox, notifier, settings)
-
-    assert len(notifier.failed) == 1
+    logged = one_session.log["flight_plain.eml"]
+    assert ingest.set_aside(logged)
+    assert logged.attempts == len(ingest.RETRY_DELAYS) + 1
+    assert [subject for _, subject, _ in notifier.failed] == ["Your booking is confirmed - WS 1502"]
+    assert "the model timed out" in notifier.failed[0][2]
+    assert "set aside" in notifier.failed[0][2]
+    # And the flag is still on, so the email is where the person left it.
     assert mailbox.cleared == []
+
+
+async def test_a_message_that_was_set_aside_is_not_looked_at_again(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    fails(monkeypatch)
+    mailbox, notifier = FakeMailbox(message("flight_plain.eml")), FakeNotifier()
+    await sweep_until_set_aside(mailbox, notifier, settings, one_session)
+
+    use_model(monkeypatch, extraction())
+    assert await sweep(mailbox, notifier, settings) == []
+    assert recorder.created == []
+
+
+async def test_asking_for_a_set_aside_message_puts_it_back_in_the_queue(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    fails(monkeypatch)
+    mailbox, notifier = FakeMailbox(message("flight_plain.eml")), FakeNotifier()
+    await sweep_until_set_aside(mailbox, notifier, settings, one_session)
+
+    assert await ingest.retry(one_session, "flight_plain.eml") is not None  # type: ignore[arg-type]
+    use_model(monkeypatch, extraction())
+
+    assert await sweep(mailbox, notifier, settings) == ["created"]
+    assert mailbox.cleared == [("INBOX", 1)]
 
 
 async def test_a_retry_that_works_is_imported_and_reported(
@@ -438,20 +522,19 @@ async def test_a_retry_that_works_is_imported_and_reported(
     monkeypatch: pytest.MonkeyPatch,
     one_session: FakeSession,
 ) -> None:
-    async def boom(message: Message, **kwargs: Any) -> Extraction:
-        raise RuntimeError("the model timed out")
-
-    monkeypatch.setattr(ingest, "from_model", boom)
+    fails(monkeypatch)
     mailbox = FakeMailbox(message("flight_plain.eml"))
     notifier = FakeNotifier()
     await sweep(mailbox, notifier, settings)
+    due_now(one_session)
 
     use_model(monkeypatch, extraction())
     assert await sweep(mailbox, notifier, settings) == ["created"]
 
     assert mailbox.cleared == [("INBOX", 1)]
     assert [outcome for outcome, _ in notifier.imported] == ["created"]
-    assert one_session.log["flight_plain.eml"].error is None
+    logged = one_session.log["flight_plain.eml"]
+    assert (logged.error, logged.attempts, logged.retry_at) == (None, 0, None)
 
 
 async def test_a_marked_email_with_no_flight_is_reported_and_unmarked(

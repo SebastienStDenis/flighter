@@ -35,7 +35,7 @@ def preferences(monkeypatch: pytest.MonkeyPatch) -> Prefs:
     """
     configured = Prefs(
         public_base_url="https://flights.example.com",
-        icloud_calendar_name="Flights",
+        icloud_calendar_url="https://p34-caldav.icloud.com/12345/calendars/6c1f4f0e-flights/",
     )
     monkeypatch.setattr(prefs, "_current", configured)
     return configured

@@ -14,7 +14,14 @@ import httpx
 import pytest
 
 from flighter import prefs
-from flighter.caldav import CalendarClient, CalendarUnavailable, event_body, event_uid
+from flighter.caldav import (
+    CalendarClient,
+    CalendarUnavailable,
+    Collection,
+    calendar_link,
+    event_body,
+    event_uid,
+)
 from flighter.config import Settings
 from flighter.models import Airport, Booking, FlightSnapshot
 from flighter.prefs import Prefs
@@ -24,6 +31,7 @@ BASE_URL = "https://flights.example.com"
 PRINCIPAL = "/12345/principal/"
 HOME = "https://p34-caldav.icloud.com:443/12345/calendars/"
 FLIGHTS = "/12345/calendars/6c1f4f0e-flights/"
+FLIGHTS_URL = f"https://p34-caldav.icloud.com{FLIGHTS}"
 
 AIRPORTS = {
     "JFK": Airport(
@@ -276,10 +284,13 @@ def calendar(settings: Settings, icloud: FakeICloud) -> CalendarClient:
     return CalendarClient(settings, AIRPORTS, transport=icloud.transport)
 
 
-async def test_discovery_walks_from_the_root_to_the_named_calendar(
+async def test_discovery_walks_from_the_root_to_every_calendar(
     calendar: CalendarClient, icloud: FakeICloud
 ) -> None:
-    assert await calendar.describe_calendar() == f"https://p34-caldav.icloud.com{FLIGHTS}"
+    assert await calendar.calendars() == [
+        Collection("Flights", FLIGHTS_URL),
+        Collection("Home", "https://p34-caldav.icloud.com/12345/calendars/1b-home/"),
+    ]
     # The principal href came back as a path and the home as a URL on another host; both
     # are resolved against the address they arrived from rather than assumed.
     assert [str(request.url) for request in icloud.requests] == [
@@ -289,34 +300,58 @@ async def test_discovery_walks_from_the_root_to_the_named_calendar(
     ]
 
 
-async def test_discovery_is_done_once(calendar: CalendarClient, icloud: FakeICloud) -> None:
+async def test_a_sync_writes_without_discovering_anything(
+    calendar: CalendarClient, icloud: FakeICloud
+) -> None:
+    """The URL was resolved once, when the calendar was picked. A flight costs one PUT."""
     await calendar.upsert(booking(), None)
     await calendar.upsert(booking(), None)
-    assert [request.method for request in icloud.requests].count("PROPFIND") == 3
+    assert [request.method for request in icloud.requests] == ["PUT", "PUT"]
 
 
-async def test_a_reminders_list_of_the_same_name_is_not_the_calendar(
+async def test_a_reminders_list_is_never_offered_as_a_calendar(
     calendar: CalendarClient,
 ) -> None:
     """Both are calendar collections on iCloud, and a person can name them alike."""
-    assert (await calendar.describe_calendar()).endswith(FLIGHTS)
+    assert [collection.name for collection in await calendar.calendars()] == ["Flights", "Home"]
 
 
-async def test_a_calendar_that_does_not_exist_says_what_does(
-    calendar: CalendarClient, monkeypatch: pytest.MonkeyPatch
+async def test_a_calendar_that_is_gone_is_not_among_the_ones_offered(
+    calendar: CalendarClient,
 ) -> None:
-    monkeypatch.setattr(prefs, "_current", Prefs(icloud_calendar_name="Voyages"))
-    with pytest.raises(CalendarUnavailable) as raised:
-        await calendar.describe_calendar()
-    assert "Voyages" in str(raised.value)
-    assert "Flights, Home" in str(raised.value)
+    offered = {collection.url for collection in await calendar.calendars()}
+    assert "https://p34-caldav.icloud.com/12345/calendars/6c1f4f0e-voyages/" not in offered
 
 
 async def test_a_rejected_password_says_why(settings: Settings) -> None:
     transport = httpx.MockTransport(lambda request: httpx.Response(401))
     with pytest.raises(CalendarUnavailable) as raised:
-        await CalendarClient(settings, AIRPORTS, transport=transport).describe_calendar()
+        await CalendarClient(settings, AIRPORTS, transport=transport).calendars()
     assert "app-specific password" in str(raised.value)
+
+
+async def test_an_account_without_credentials_never_reaches_icloud() -> None:
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"nothing should reach iCloud, but {request.method} did")
+
+    client = CalendarClient(Settings(), AIRPORTS, transport=httpx.MockTransport(refuse))
+    with pytest.raises(CalendarUnavailable) as raised:
+        await client.calendars()
+    assert "ICLOUD_EMAIL" in str(raised.value)
+
+
+def test_the_calendar_link_aims_at_noon_where_the_flight_leaves() -> None:
+    """`calshow:` renders its instant wherever the phone is, so it is aimed at the middle
+    of the departure day rather than at the flight, and the date survives the trip."""
+    # 15:00 in New York; the link is 12:00 there, counted from Apple's 2001 epoch.
+    link = calendar_link(datetime(2026, 9, 12, 19, 0, tzinfo=UTC), "America/New_York")
+    assert link == "calshow:810921600"
+
+
+def test_the_calendar_link_takes_the_day_from_the_airport_not_from_utc() -> None:
+    """A 23:30 departure in New York is already tomorrow in UTC, and the entry is not."""
+    link = calendar_link(datetime(2026, 9, 12, 3, 30, tzinfo=UTC), "America/New_York")
+    assert link == "calshow:810835200"
 
 
 async def test_the_event_lands_under_the_calendar(
@@ -357,7 +392,7 @@ async def test_an_event_already_gone_is_not_an_error(
     assert [request.method for request in icloud.requests][-1] == "DELETE"
 
 
-async def test_an_unnamed_calendar_is_a_quiet_no_op(
+async def test_an_unpicked_calendar_is_a_quiet_no_op(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(prefs, "_current", Prefs())

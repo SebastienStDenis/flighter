@@ -5,10 +5,11 @@ that row is both the record of what we decided and the thing that stops a re-del
 being processed twice. One bad email is never allowed to stop the loop.
 
 The flag is the queue, so the row is also the retry state. A message that failed keeps
-its flag and is swept again a few minutes later; a message that got as far as a decision
-is unflagged where it stands and never comes back. Either way the phone is told once, and
-only once, which is why the outcome already on file is read before the new one is
-written.
+its flag and is swept again a couple of times, minutes apart; if it still fails it is set
+aside, and only a person asking for it on the health page brings it back. A message that
+got as far as a decision is unflagged where it stands and never comes back. Either way
+the phone is told once, when there is nothing left to try, which is why the state already
+on file is read before the new one is written.
 """
 
 from __future__ import annotations
@@ -16,8 +17,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import prefs
@@ -43,10 +46,21 @@ _OUTCOME_PRECEDENCE = ("review", "created", "duplicate")
 # minutes, for as long as the service runs.
 ERROR = "error"
 
+# How long to wait before each retry of a message that failed. One failure more than
+# there are delays here and the message is set aside: whatever is wrong with it is not
+# the kind of wrong that fixes itself, and a sweep that keeps re-running a model against
+# the same broken email costs money and says nothing new. The flag stays on so the email
+# is still where the person left it, and the health page offers it back.
+RETRY_DELAYS = (timedelta(minutes=2), timedelta(minutes=10))
+
 # Outcomes the user is told about as a failure rather than as a flight.
 _FAILURES = frozenset({ERROR, "no_flight"})
 
 _NO_FLIGHT_REASON = "There was no flight in it, so nothing was added."
+
+# Said only about a message that kept its flag: it is still in Mail, and it will sit
+# there until it is either unflagged or handed back to the service.
+_SET_ASIDE_REASON = "It has been set aside. Try it again from the health page."
 
 
 class Ingested(NamedTuple):
@@ -173,17 +187,63 @@ async def _record(
     """Write the ingest_log row. Every path through the pipeline ends here.
 
     A retried message overwrites the row it failed under instead of adding a second one:
-    there is one row per email, and it says how that email stands now.
+    there is one row per email, and it says how that email stands now - including when it
+    is due to be tried next, and whether there is any next at all.
     """
     row = await session.get(IngestLog, message.id)
     if row is None:
         row = IngestLog(message_id=message.id)
         session.add(row)
     row.outcome = result.outcome
+    row.subject = message.subject
     row.raw_extraction = extraction.model_dump(mode="json") if extraction else None
     row.error = result.error
+    row.attempts = (row.attempts or 0) + 1 if result.outcome == ERROR else 0
+    row.retry_at = _next_attempt(row.attempts) if result.outcome == ERROR else None
     await session.flush()
     return result
+
+
+def _next_attempt(attempts: int) -> datetime | None:
+    """When a message that has failed this many times may be tried again, if ever."""
+    if attempts > len(RETRY_DELAYS):
+        return None
+    return datetime.now(UTC) + RETRY_DELAYS[attempts - 1]
+
+
+def set_aside(row: IngestLog) -> bool:
+    """Whether this message has been given up on and is waiting to be asked for again."""
+    return row.outcome == ERROR and row.retry_at is None
+
+
+def _due(row: IngestLog) -> bool:
+    """Whether a message that failed before is ready for another go."""
+    return row.retry_at is not None and row.retry_at <= datetime.now(UTC)
+
+
+async def list_set_aside(session: AsyncSession) -> list[IngestLog]:
+    """Every message the service has stopped trying, newest first."""
+    rows = await session.execute(
+        select(IngestLog)
+        .where(IngestLog.outcome == ERROR, IngestLog.retry_at.is_(None))
+        .order_by(IngestLog.processed_at.desc())
+    )
+    return list(rows.scalars())
+
+
+async def retry(session: AsyncSession, message_id: str) -> IngestLog | None:
+    """Put a set-aside message back at the front of the queue.
+
+    The flag never came off, so the next sweep finds it exactly as it did the first time;
+    all this clears is the record of having given up.
+    """
+    row = await session.get(IngestLog, message_id)
+    if row is None or not set_aside(row):
+        return None
+    row.attempts = 0
+    row.retry_at = datetime.now(UTC)
+    await session.flush()
+    return row
 
 
 # -- the loop ------------------------------------------------------------------------
@@ -233,7 +293,9 @@ async def ingest_once(mailbox: Mailbox, settings: Settings, notifier: Notifier) 
     """
     outcomes = []
     for marked in await mailbox.poll():
-        outcomes.append(await _import(mailbox, marked, settings, notifier))
+        outcome = await _import(mailbox, marked, settings, notifier)
+        if outcome is not None:
+            outcomes.append(outcome)
     if outcomes:
         log.info("imported %d message(s): %s", len(outcomes), _tally(outcomes))
     return outcomes
@@ -258,20 +320,29 @@ async def import_flagged(*, settings: Settings | None = None) -> list[str]:
         await mailbox.close()
 
 
-async def _import(mailbox: Mailbox, marked: Marked, settings: Settings, notifier: Notifier) -> str:
-    """One flagged message: through the pipeline, onto the phone, and unflagged."""
+async def _import(
+    mailbox: Mailbox, marked: Marked, settings: Settings, notifier: Notifier
+) -> str | None:
+    """One flagged message: through the pipeline, onto the phone, and unflagged.
+
+    Returns None for a message this sweep deliberately left where it was, which is not
+    the same as one that was looked at and came to nothing.
+    """
     message = marked.message
     async with session_scope() as session:
-        # Read as a string rather than kept as a row: the pipeline is about to rewrite
-        # that very row, and the identity map would hand back the new outcome.
         logged = await session.get(IngestLog, message.id)
-        reported = logged.outcome if logged is not None else None
+        if logged is not None and logged.outcome == ERROR and not _due(logged):
+            log.debug("%s is not due to be tried again yet", message.id)
+            return None
+        # Copied out rather than kept as a row: the pipeline is about to rewrite that
+        # very row, and the identity map would hand back the state it has just written.
+        was = _state(logged)
         result = await process_message(session, message, settings=settings)
-        # A message that fails keeps its flag and is swept again in a few minutes, so
-        # repeating the push would mean a notification every cycle for as long as the
-        # email stays broken. Only a decision that differs from the one already on file
-        # is news, which also covers the case where the flag itself would not clear.
-        if reported != result.outcome:
+        # The phone hears once, and only when there is nothing left for the service to
+        # do: a failure that is going to be retried in two minutes is not news, and a
+        # decision already on file was reported the first time it was reached.
+        row = await session.get(IngestLog, message.id)
+        if row is not None and row.retry_at is None and _state(row) != was:
             await _announce(session, notifier, message, result)
 
     if result.outcome != ERROR:
@@ -279,15 +350,21 @@ async def _import(mailbox: Mailbox, marked: Marked, settings: Settings, notifier
     return result.outcome
 
 
+def _state(row: IngestLog | None) -> tuple[str, bool] | None:
+    """What has already been said about a message: its outcome, and whether that was final."""
+    return None if row is None else (row.outcome, row.retry_at is None)
+
+
 async def _announce(
     session: AsyncSession, notifier: Notifier, message: Message, result: Ingested
 ) -> None:
     """Tell the phone what became of a flagged email, whichever way it went."""
     if result.outcome in _FAILURES:
+        reason = result.error or _NO_FLIGHT_REASON
         await notifier.mail_failed(
             message_id=message.id,
             subject=message.subject,
-            reason=result.error or _NO_FLIGHT_REASON,
+            reason=f"{reason}\n{_SET_ASIDE_REASON}" if result.outcome == ERROR else reason,
         )
         return
 

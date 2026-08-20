@@ -619,9 +619,17 @@ dropped from the path (<https://developer.apple.com/forums/thread/110878>). That
 unverified forum comment, not a specification, and the resulting collection's placement is not
 described.
 
-**Conclusion for this service: do not try.** The setup step is "make a calendar called Flights in
-the Calendar app", and the app finds it by display name. That is one manual action, once, against
-an undocumented write that could stop working silently.
+**Conclusion for this service: do not try.** The setup step is "make a calendar in the Calendar
+app", and the app lists what the account has so it can be picked from the settings page. That is
+one manual action, once, against an undocumented write that could stop working silently.
+
+What is stored afterwards is the collection URL rather than the display name. `DAV:displayname` is
+mutable - renaming a calendar in the Calendar app changes it, and a client keyed on it would fail
+on the next write with no warning - while the collection URL is a uuid minted when the calendar was
+created and is not editable from any Apple UI. The URL is only opaque while nobody has to read it,
+which is exactly what the picker guarantees: it is chosen from a list of display names and never
+typed. The trade is that deleting and recreating a calendar of the same name needs it picked again,
+which is a visible action rather than a silent break.
 
 ### 5.4 What a valid event looks like
 
@@ -732,13 +740,29 @@ means walking transitions that `zoneinfo` does not expose. `icalendar` does all 
 generates the VTIMEZONE directly
 (<https://github.com/collective/icalendar/blob/main/src/icalendar/cal/timezone.py>).
 
-### 5.8 Not verified
+### 5.8 `calshow:` - opening the Calendar app on a day
+
+There is no URL scheme for one calendar event. `calshow:` is the only documented-by-usage way in,
+and it takes one argument: an instant counted in seconds from **2001-01-01 00:00:00 UTC**, Apple's
+own epoch, which is 978307200 seconds after the Unix one. The Calendar app opens on the day that
+instant falls on **in whatever zone the device is currently set to**, which is the whole
+difficulty: a link built from the flight's own departure instant lands on the wrong day whenever
+the phone is far enough from the airport, and a passenger reading it is by definition somewhere
+between the two. Aiming at local noon at the departure airport puts twelve hours of slack either
+side, which covers every real offset.
+
+Apple documents neither the scheme nor the epoch. Both are long-standing and widely used, and the
+epoch is the same one `NSDate`'s `timeIntervalSinceReferenceDate` counts from, but nothing here has
+been run against a real device.
+
+### 5.9 Not verified
 
 Everything in §5.2 through §5.5 about iCloud specifically rests on third-party captures rather
 than an Apple specification, and none of it has been run against a real account here. In
-particular: whether iCloud accepts a `PUT` from a non-Apple `User-Agent` without complaint,
-whether it enforces the `VTIMEZONE` precondition strictly, and whether a display name is a stable
-enough key across renames in the Calendar app.
+particular: whether iCloud accepts a `PUT` from a non-Apple `User-Agent` without complaint, and
+whether it enforces the `VTIMEZONE` precondition strictly. Keying on the collection URL rather than
+on `DAV:displayname` takes one open question off this list - a display name is not stable across a
+rename, and nothing now depends on it being so.
 
 ---
 

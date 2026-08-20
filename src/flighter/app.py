@@ -113,7 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if not settings.icloud_configured:
         log.warning("iCloud is not configured; bookings must be added by hand")
     elif not prefs.current().calendar_configured:
-        log.warning("no iCloud calendar is named; nothing will reach the calendar")
+        log.warning("no iCloud calendar is picked; nothing will reach the calendar")
 
     app.state.background_tasks = tasks
     try:

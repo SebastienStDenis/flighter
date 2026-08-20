@@ -31,9 +31,9 @@
            ('iCloud', settings.icloud_configured,
             settings.icloud_email if settings.icloud_configured
             else 'Add ICLOUD_EMAIL and ICLOUD_APP_PASSWORD to .env'),
-           ('Calendar', prefs.icloud_calendar_name,
-            prefs.icloud_calendar_name
-            or 'Name an iCloud calendar under Preferences'),
+           ('Calendar', prefs.calendar_configured,
+            calendar_name or calendar_error
+            or 'Pick an iCloud calendar under Preferences'),
            ('Pushover', settings.pushover_configured,
             'Ready' if settings.pushover_configured
             else 'Add PUSHOVER_TOKEN and PUSHOVER_USER_KEY to .env')] %}
@@ -137,10 +137,10 @@
             On the iPhone: <strong>open the email, tap the More button, tap Flag</strong>, then
             pick the colour. On the Mac: select the email and <strong>choose the colour from the
             flag button in the toolbar</strong>. Once it is imported the flag comes off and the
-            email stays exactly where it was; anything that failed keeps its flag and is tried
-            again, and your phone is told either way. Rename the flag to <em>flighter</em> in Mail
-            on the Mac if you like - that name is only a label on that Mac, and the colour is what
-            this watches for. <strong>Red is not on the list</strong>: it is the one colour Apple
+            email stays exactly where it was. Anything that failed keeps its flag, is tried twice
+            more and is then set aside on the health page for you to hand back; your phone is told
+            either way. Rename the flag to <em>flighter</em> in Mail on the Mac if you like - that
+            name is only a label on that Mac, and the colour is what this watches for. <strong>Red is not on the list</strong>: it is the one colour Apple
             sends with no marker at all, so it cannot be told apart from an ordinary flag.</p>
         </div>
         <div class="grid grid-cols-3 gap-3">
@@ -173,10 +173,34 @@
     </header>
     <section>
       <div role="group" class="field">
-        <label for="icloud_calendar_name">Calendar name</label>
-        <input type="text" id="icloud_calendar_name" name="icloud_calendar_name"
-               class="font-mono" placeholder="Flights"
-               value="{{ posted['icloud_calendar_name'] }}">
+        <label for="icloud_calendar_url">Calendar</label>
+        {% if calendar_error %}
+        <input type="hidden" name="icloud_calendar_url"
+               value="{{ posted['icloud_calendar_url'] }}">
+        <p class="text-sm text-destructive">{{ calendar_error }}</p>
+        <p id="calendar-help">The calendar cannot be listed, so it cannot be changed here
+          right now. Whichever one was picked before is still being written to. Fix the
+          connection and reload this page.</p>
+        {% else %}
+        <select id="icloud_calendar_url" name="icloud_calendar_url"
+                aria-describedby="calendar-help">
+          <option value=""{{ ' selected' if not posted['icloud_calendar_url'] }}>
+            Do not write to a calendar</option>
+          {% for calendar in calendars %}
+          <option value="{{ calendar.url }}"
+                  {{- ' selected' if calendar.url == posted['icloud_calendar_url'] }}>
+            {{- calendar.name -}}</option>
+          {% endfor %}
+          {% if posted['icloud_calendar_url'] and not calendar_name %}
+          <option value="{{ posted['icloud_calendar_url'] }}" selected>
+            The calendar that was picked, which is no longer on this account</option>
+          {% endif %}
+        </select>
+        <p id="calendar-help">Every calendar on the account that can hold events. Give
+          flights one of their own and a bad sync is undone by deleting one calendar
+          rather than hunting among appointments. Renaming it in the Calendar app is
+          safe: what is stored is the calendar itself, not what it is called.</p>
+        {% endif %}
       </div>
     </section>
   </div>

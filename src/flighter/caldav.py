@@ -5,10 +5,11 @@ newest snapshot, and a cancellation is marked `STATUS:CANCELLED` rather than del
 the entry stays where the trip was planned and the history survives.
 
 Nothing here hard-codes a collection URL. iCloud serves each account from its own cluster
-under a numeric principal id, so the calendar is found the way RFC 4791 says to find it:
-ask the root who the current user is, ask that principal where its calendars live, then
-look through them for the one named on the settings page. A URL with somebody else's
-principal id baked into it is a URL that works exactly once.
+under a numeric principal id, so the account's calendars are found the way RFC 4791 says
+to find them: ask the root who the current user is, ask that principal where its
+calendars live, then list them. That is what fills the picker on the settings page, and
+the URL picked there is what every write goes to afterwards - so the sync itself is one
+request, and renaming the calendar in the Calendar app does not break it.
 
 Authentication is HTTP Basic with the Apple ID and the same app-specific password the
 mailbox uses; iCloud refuses the account password on CalDAV as flatly as it does on IMAP.
@@ -20,6 +21,7 @@ import logging
 import xml.etree.ElementTree as ElementTree
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta
+from typing import NamedTuple
 from urllib.parse import quote, urljoin
 
 import httpx
@@ -40,6 +42,13 @@ DAV = "DAV:"
 CALDAV = "urn:ietf:params:xml:ns:caldav"
 
 TIMEOUT_SECONDS = 30
+
+# Discovery runs while somebody is waiting on a page, so it gives up long before a write
+# would: a settings page that says iCloud is unreachable beats one that hangs.
+DISCOVERY_TIMEOUT_SECONDS = 10
+
+# Apple counts time from 2001-01-01 UTC, which is the instant a `calshow:` link carries.
+APPLE_EPOCH_OFFSET = 978307200
 
 # Long enough to still be at home when it fires for an airport run.
 REMINDER_MINUTES = 180
@@ -79,6 +88,13 @@ class CalendarUnavailable(RuntimeError):
     """The calendar cannot be reached or cannot be found, and only a human can fix it."""
 
 
+class Collection(NamedTuple):
+    """One calendar the account offers: what it is called, and where it lives."""
+
+    name: str
+    url: str
+
+
 def configured(settings: Settings) -> bool:
     """An Apple ID to sign in with, and a calendar of our own to write into."""
     return settings.icloud_configured and prefs.current().calendar_configured
@@ -92,6 +108,18 @@ def event_uid(booking: Booking) -> str:
     entry deleted by hand comes back on the next sync rather than being lost.
     """
     return f"flighter-{booking.id}@flighter.invalid"
+
+
+def calendar_link(departure: datetime, tz: str) -> str:
+    """A link that opens the Calendar app on the day the flight leaves.
+
+    Apple publishes no scheme for one event, only `calshow:`, which takes an instant -
+    counted from Apple's own 2001 epoch - and renders it in whatever zone the phone is
+    standing in. Aiming at noon at the departure airport keeps the date right even when
+    the phone is most of a day away from it.
+    """
+    noon = to_local(departure, tz).replace(hour=12, minute=0, second=0, microsecond=0)
+    return f"calshow:{int(noon.timestamp()) - APPLE_EPOCH_OFFSET}"
 
 
 def _zone(airports: Mapping[str, Airport], iata: str) -> str:
@@ -199,8 +227,9 @@ def event_body(
 class CalendarClient:
     """Best-effort calendar mirroring; a no-op that logs until iCloud is configured.
 
-    Discovery costs three round trips, so the collection URL is remembered against the
-    name it was found under and only looked up again when that name changes.
+    A sync writes straight to the collection URL held in the preferences, because that
+    URL was resolved once on the settings page when the calendar was picked. Discovery
+    happens only when somebody asks what the account offers.
     """
 
     def __init__(
@@ -212,7 +241,6 @@ class CalendarClient:
         self._settings = settings
         self._airports = airports if airports is not None else {}
         self._transport = transport
-        self._found: tuple[str, str] | None = None
 
     async def upsert(self, booking: Booking, snapshot: FlightSnapshot | None) -> str | None:
         """Create or update this booking's event; returns the uid to store on the booking."""
@@ -224,12 +252,11 @@ class CalendarClient:
         )
         uid = event_uid(booking)
         async with self._client() as client:
-            url = await self._calendar(client)
             # No If-Match: this restates the whole flight from the newest snapshot, so
             # there is no edit of ours to lose and an entry someone changed by hand is
             # meant to be corrected back.
             response = await client.put(
-                _event_url(url, uid),
+                _event_url(prefs.current().icloud_calendar_url, uid),
                 content=body.to_ical(),
                 headers={"Content-Type": "text/calendar; charset=utf-8"},
             )
@@ -240,43 +267,36 @@ class CalendarClient:
         if not configured(self._settings) or not booking.calendar_event_uid:
             return
         async with self._client() as client:
-            url = await self._calendar(client)
-            response = await client.delete(_event_url(url, booking.calendar_event_uid))
+            response = await client.delete(
+                _event_url(prefs.current().icloud_calendar_url, booking.calendar_event_uid)
+            )
         if response.status_code == 404:
             log.info("calendar event %s was already gone", booking.calendar_event_uid)
             return
         _written(response)
 
-    async def describe_calendar(self) -> str:
-        """The URL discovery lands on, which is a signed-in round trip's worth of proof.
+    async def calendars(self) -> list[Collection]:
+        """Every calendar on the account that can hold events, in the order iCloud lists them.
 
-        Unlike the rest of the class this raises, because it exists for the `check`
-        command whose whole job is to put the failure text in front of a person.
+        Unlike the rest of the class this raises, because both its callers - the settings
+        page and the `check` command - exist to put the failure text in front of a person.
         """
-        if not configured(self._settings):
-            raise CalendarUnavailable("iCloud Calendar is not configured")
-        async with self._client() as client:
-            return await self._calendar(client)
+        if not self._settings.icloud_configured:
+            raise CalendarUnavailable("ICLOUD_EMAIL and ICLOUD_APP_PASSWORD are not set in .env")
+        async with self._client(timeout=DISCOVERY_TIMEOUT_SECONDS) as client:
+            principal = await _href(
+                client, f"{CALDAV_ROOT}/", _PROPFIND_PRINCIPAL, f"{{{DAV}}}current-user-principal"
+            )
+            home = await _href(client, principal, _PROPFIND_HOME, f"{{{CALDAV}}}calendar-home-set")
+            return await _collections(client, home)
 
-    def _client(self) -> httpx.AsyncClient:
+    def _client(self, timeout: float = TIMEOUT_SECONDS) -> httpx.AsyncClient:
         return httpx.AsyncClient(
             auth=(self._settings.icloud_email, self._settings.icloud_app_password),
             transport=self._transport,
-            timeout=TIMEOUT_SECONDS,
+            timeout=timeout,
             follow_redirects=True,
         )
-
-    async def _calendar(self, client: httpx.AsyncClient) -> str:
-        name = prefs.current().icloud_calendar_name
-        if self._found is not None and self._found[0] == name:
-            return self._found[1]
-        principal = await _href(
-            client, f"{CALDAV_ROOT}/", _PROPFIND_PRINCIPAL, f"{{{DAV}}}current-user-principal"
-        )
-        home = await _href(client, principal, _PROPFIND_HOME, f"{{{CALDAV}}}calendar-home-set")
-        url = await _named_calendar(client, home, name)
-        self._found = (name, url)
-        return url
 
 
 # -- the protocol --------------------------------------------------------------------
@@ -299,30 +319,25 @@ async def _href(client: httpx.AsyncClient, url: str, body: str, tag: str) -> str
     raise CalendarUnavailable(f"iCloud returned no {tag.rsplit('}', 1)[-1]} for {url}")
 
 
-async def _named_calendar(client: httpx.AsyncClient, home: str, name: str) -> str:
-    """The calendar in the home collection whose display name is `name`.
+async def _collections(client: httpx.AsyncClient, home: str) -> list[Collection]:
+    """Every event-holding calendar in the home collection, named and addressed.
 
-    Matched by name because iCloud will not let a client create one: the collection has
-    to exist already, made in the Calendar app, and its URL is a random uuid nobody
-    should have to copy out of a PROPFIND.
+    A calendar is offered rather than created: iCloud will not let a client make one, so
+    the collection has to exist already, made in the Calendar app. Its URL is a random
+    uuid, which is exactly why nobody is asked to type it - it is picked from this list.
     """
     response = await client.request(
         "PROPFIND", home, content=_PROPFIND_CALENDARS, headers={"Depth": "1", **_XML_HEADERS}
     )
-    wanted = name.casefold()
-    offered = []
+    found = []
     for entry in _multistatus(response):
         href = entry.findtext(f"{{{DAV}}}href")
         if not href or not _holds_events(entry):
             continue
-        display = next((prop.text or "" for prop in _ok_props(entry, f"{{{DAV}}}displayname")), "")
-        offered.append(display)
-        if display.casefold() == wanted:
-            return urljoin(str(response.url), href.strip())
-    raise CalendarUnavailable(
-        f"iCloud has no calendar called {name!r}. It offers: "
-        f"{', '.join(sorted(offered)) or 'nothing'}."
-    )
+        name = next((prop.text or "" for prop in _ok_props(entry, f"{{{DAV}}}displayname")), "")
+        if name:
+            found.append(Collection(name, urljoin(str(response.url), href.strip())))
+    return found
 
 
 def _holds_events(entry: ElementTree.Element) -> bool:

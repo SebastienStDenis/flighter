@@ -132,6 +132,11 @@ be read out of it you get a push saying so, with a link that opens the email in 
 the flag stays on so the next pass tries again - except when there was simply no flight in
 it, which is an answer that will not change, so that one is unflagged too.
 
+Something that fails for a passing reason - the model, iCloud, the network - is tried
+again after two minutes and again after ten. If it still fails, your phone is told once
+and the email is set aside: it keeps its flag, so it is still where you left it in Mail,
+and it is listed on `/health` with a **Try again** button. Unflagging it in Mail drops it.
+
 Rename the flag to `flighter` in Mail on the Mac if you want your own word for it -
 **click the flag name in the sidebar, click it again, and type**. That name is a label on
 that Mac and never leaves it; the colour is the whole of what travels, and the colour is
@@ -146,12 +151,13 @@ what this watches for.
 > View has no such restriction. The mapping, the sources and the disagreement are in
 > [`docs/api-research.md`](docs/api-research.md) §6.
 
-### A calendar called Flights
+### A calendar of its own
 
-Open the Calendar app on any of your devices and make a new iCloud calendar. Call it
-`Flights`, or anything else, and type that name into `/settings`. The app finds it by
-name - it never guesses a URL, because iCloud serves every account from a different
-cluster under a different numeric principal.
+Open the Calendar app on any of your devices and make a new iCloud calendar - call it
+`Flights`, or anything else - then pick it from the list on `/settings`. The list comes
+from your account over CalDAV, so there is no name to type and nothing to spell wrong,
+and renaming the calendar later does not break anything: what is stored is the calendar
+itself rather than what it is called.
 
 It has to be made by hand: iCloud does not let a CalDAV client create a calendar, and
 writing flights into your main calendar would mean undoing a bad sync one event at a

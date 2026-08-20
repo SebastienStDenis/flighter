@@ -28,10 +28,12 @@ from . import bookings as booking_repo
 from . import prefs
 from .aeroapi import budget_status
 from .airports import airport_tz, get_airport
-from .caldav import CalendarClient
+from .caldav import CalendarClient, CalendarUnavailable, Collection, calendar_link
 from .checks import run_checks
 from .config import Settings
 from .db import get_session
+from .ingest import list_set_aside
+from .ingest import retry as retry_ingest
 from .mail import FLAG_COLOURS
 from .models import KV, Airport, Booking, FlightEvent, FlightSnapshot
 from .phase import (
@@ -227,6 +229,18 @@ class FlightView:
         if label is None or target is None:
             return None
         return Countdown(label, target)
+
+    @property
+    def calendar_link(self) -> str | None:
+        """A way into the Calendar app, once this flight has an entry there.
+
+        Offered here rather than on the push about the import, which goes on pointing at
+        this page: the calendar entry is a copy of what was known when it was written,
+        and this page is where the gate and the delay are live.
+        """
+        if not self.booking.calendar_event_uid:
+            return None
+        return calendar_link(self.scheduled_departure, self.origin_tz)
 
     @property
     def gate(self) -> str | None:
@@ -722,18 +736,39 @@ def create_app(settings: Settings) -> FastAPI:
 
     async def settings_context(request: Request) -> dict[str, Any]:
         current = prefs.current()
+        calendars, calendar_error = await offered_calendars()
         return {
             "prefs": current,
             "posted": current.model_dump(mode="json"),
             "settings": settings,
             "log_levels": LOG_LEVELS,
             "flag_colours": tuple(FLAG_COLOURS),
+            "calendars": calendars,
+            "calendar_error": calendar_error,
+            "calendar_name": next(
+                (c.name for c in calendars if c.url == current.icloud_calendar_url), ""
+            ),
             # What the browser is talking to right now, offered as the public base URL
             # because on a first visit it is almost always the right answer.
             "this_origin": str(request.base_url).rstrip("/"),
             "saved": "saved" in request.query_params,
             "error": None,
         }
+
+    async def offered_calendars() -> tuple[list[Collection], str | None]:
+        """The account's calendars for the picker, or why there are none to offer.
+
+        Discovery is a network call on a page render, so it is allowed to fail: a
+        settings page that says iCloud cannot be reached is worth far more than one that
+        will not open, and every other preference on it is still editable.
+        """
+        try:
+            return await CalendarClient(settings).calendars(), None
+        except CalendarUnavailable as exc:
+            return [], str(exc)
+        except Exception as exc:
+            log.warning("could not list the iCloud calendars", exc_info=True)
+            return [], f"{type(exc).__name__}: {exc}"
 
     @app.get("/settings")
     async def settings_page(request: Request, pending: ReviewDep) -> Response:
@@ -751,7 +786,7 @@ def create_app(settings: Settings) -> FastAPI:
         extraction_confidence_threshold: Annotated[str, Form()],
         imap_flag_colour: Annotated[str, Form()],
         imap_idle_seconds: Annotated[str, Form()],
-        icloud_calendar_name: Annotated[str, Form()] = "",
+        icloud_calendar_url: Annotated[str, Form()] = "",
     ) -> Response:
         posted = {
             "public_base_url": public_base_url.strip(),
@@ -762,7 +797,7 @@ def create_app(settings: Settings) -> FastAPI:
             "extraction_confidence_threshold": extraction_confidence_threshold.strip(),
             "imap_flag_colour": imap_flag_colour.strip(),
             "imap_idle_seconds": imap_idle_seconds.strip(),
-            "icloud_calendar_name": icloud_calendar_name.strip(),
+            "icloud_calendar_url": icloud_calendar_url.strip(),
         }
         try:
             await prefs.save(session, posted)
@@ -797,10 +832,22 @@ def create_app(settings: Settings) -> FastAPI:
                     (row.key, json.dumps(row.value, indent=2, default=str))
                     for row in state.scalars()
                 ],
+                "set_aside": await list_set_aside(session),
                 "settings": settings,
                 "prefs": prefs.current(),
             },
         )
+
+    @app.post("/health/retry")
+    async def retry_message(session: SessionDep, message_id: Annotated[str, Form()]) -> Response:
+        """Hand one set-aside email back to the mail watcher.
+
+        Nothing is reprocessed here: the message is still flagged in Mail, so all this
+        does is clear the record of having given up and let the next sweep find it.
+        """
+        if await retry_ingest(session, message_id) is None:
+            raise HTTPException(status_code=404, detail="That email is not set aside.")
+        return RedirectResponse("/health", status_code=303)
 
     # A service worker may only control paths below its own, so this one is served from
     # the root even though it lives with the rest of the static files.

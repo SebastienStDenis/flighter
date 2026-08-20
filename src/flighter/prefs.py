@@ -50,10 +50,11 @@ class Prefs(BaseModel):
     # NAT table both drop, and five minutes is well inside what either tolerates.
     imap_flag_colour: str = "grey"
     imap_idle_seconds: int = 300
-    # The display name of the iCloud calendar flights are written to, found by name
-    # because iCloud will not let a client create one. A calendar of its own, so a bad
-    # sync is undone by deleting one calendar rather than hunting among appointments.
-    icloud_calendar_name: str = ""
+    # The collection URL of the iCloud calendar flights are written to, picked from the
+    # ones the account offers on the settings page. The URL rather than the display name
+    # because a calendar renamed in the Calendar app is still the same collection, and
+    # because a stored URL is a sync that costs one request instead of four.
+    icloud_calendar_url: str = ""
 
     @field_validator("public_base_url")
     @classmethod
@@ -72,7 +73,7 @@ class Prefs(BaseModel):
 
     @property
     def calendar_configured(self) -> bool:
-        return bool(self.icloud_calendar_name)
+        return bool(self.icloud_calendar_url)
 
 
 _current = Prefs()

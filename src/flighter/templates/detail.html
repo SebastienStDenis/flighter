@@ -87,6 +87,15 @@
       {{ m.fact("Added", "from email" if v.booking.source == 'email' else "by hand") }}
       {{ m.fact("Last checked", at(s.observed_at if s else none, v.origin_tz, with_date=true), mono=true) }}
       {% if v.booking.notes %}{{ m.fact("Notes", v.booking.notes) }}{% endif %}
+      {% if v.calendar_link %}
+      <div class="item" data-size="xs">
+        <section><p>Calendar</p></section>
+        <aside>
+          <a class="btn" data-variant="link" data-size="xs" href="{{ v.calendar_link }}">
+            Open in Calendar</a>
+        </aside>
+      </div>
+      {% endif %}
     </div>
   </section>
 </div>

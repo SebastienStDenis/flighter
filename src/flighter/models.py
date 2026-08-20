@@ -196,8 +196,10 @@ class IngestLog(Base):
     same confirmation, filed by hand in two places, look like two different emails.
 
     It is also the retry state. An `error` row keeps its message flagged and is tried
-    again on the next sweep; every other outcome is final, and having one already on file
-    is what stops a second push going out about the same email.
+    again once `retry_at` has passed; a null `retry_at` means the message has either been
+    decided or been set aside, and nothing will pick it up again without being asked.
+    Having an outcome already on file is what stops a second push going out about the
+    same email.
     """
 
     __tablename__ = "ingest_log"
@@ -205,8 +207,13 @@ class IngestLog(Base):
     message_id: Mapped[str] = mapped_column(Text, primary_key=True)
     processed_at: Mapped[datetime] = _created_at()
     outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    # Kept because a Message-ID names nothing a person recognises, and the set-aside list
+    # on the health page has to say which email it is talking about.
+    subject: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     raw_extraction: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     error: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ApiUsage(Base):
