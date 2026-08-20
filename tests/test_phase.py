@@ -4,19 +4,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-import pytest
-
 from flighter.models import Booking, FlightSnapshot
 from flighter.phase import (
     AIRBORNE,
-    BOARDING,
     CANCELLED,
     DAY_OF,
     DIVERTED,
     LANDED,
+    TAXIING,
     UPCOMING,
     arrival_estimate,
-    boarding_time,
     compute_phase,
     departure_estimate,
     landing_estimate,
@@ -63,21 +60,25 @@ def test_just_over_24h_out_is_upcoming() -> None:
     assert compute_phase(booking(), None, DEPARTURE - timedelta(hours=24, seconds=1)) == UPCOMING
 
 
-def test_boarding_starts_exactly_30_minutes_before_departure() -> None:
-    assert compute_phase(booking(), None, DEPARTURE - timedelta(minutes=30)) == BOARDING
-    assert compute_phase(booking(), None, DEPARTURE - timedelta(minutes=30, seconds=1)) == DAY_OF
+def test_the_last_half_hour_is_still_counting_down_to_departure() -> None:
+    """Nothing upstream reports boarding, so the run-up to departure stays day_of and
+    keeps its countdown rather than being replaced by a word."""
+    assert compute_phase(booking(), None, DEPARTURE - timedelta(minutes=30)) == DAY_OF
+    assert compute_phase(booking(), None, DEPARTURE - timedelta(minutes=2)) == DAY_OF
 
 
-def test_boarding_follows_the_estimate_not_the_schedule() -> None:
-    """An hour-late flight must not claim to be boarding on the original schedule."""
-    delayed = snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(hours=1))
-    assert compute_phase(booking(), delayed, DEPARTURE - timedelta(minutes=20)) == DAY_OF
-    assert compute_phase(booking(), delayed, DEPARTURE + timedelta(minutes=40)) == BOARDING
-
-
-def test_pushback_is_boarding_until_wheels_up() -> None:
+def test_pushback_is_taxiing_until_wheels_up() -> None:
     pushed = snapshot(scheduled_out=DEPARTURE, actual_out=DEPARTURE + timedelta(minutes=4))
-    assert compute_phase(booking(), pushed, DEPARTURE + timedelta(minutes=6)) == BOARDING
+    assert compute_phase(booking(), pushed, DEPARTURE + timedelta(minutes=6)) == TAXIING
+
+
+def test_wheels_up_beats_pushback() -> None:
+    off = snapshot(
+        scheduled_out=DEPARTURE,
+        actual_out=DEPARTURE + timedelta(minutes=4),
+        actual_off=DEPARTURE + timedelta(minutes=18),
+    )
+    assert compute_phase(booking(), off, DEPARTURE + timedelta(minutes=20)) == AIRBORNE
 
 
 def test_wheels_up_is_airborne() -> None:
@@ -120,23 +121,6 @@ def test_diverted_beats_landed() -> None:
 def test_naive_datetimes_are_read_as_utc() -> None:
     naive_now = DEPARTURE.replace(tzinfo=None) - timedelta(hours=2)
     assert compute_phase(booking(), None, naive_now) == DAY_OF
-
-
-@pytest.mark.parametrize(
-    ("snap", "expected"),
-    [
-        (None, None),
-        (snapshot(), None),
-        (snapshot(scheduled_out=DEPARTURE), DEPARTURE - timedelta(minutes=30)),
-        (
-            snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(hours=1)),
-            DEPARTURE + timedelta(minutes=30),
-        ),
-        (snapshot(scheduled_out=DEPARTURE, actual_out=DEPARTURE), DEPARTURE),
-    ],
-)
-def test_boarding_time(snap: FlightSnapshot | None, expected: datetime | None) -> None:
-    assert boarding_time(snap) == expected
 
 
 def test_departure_estimate_falls_back_to_the_booking() -> None:

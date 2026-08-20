@@ -11,7 +11,7 @@
 // and iOS reloads widgets when it feels like it rather than when we ask.
 //
 // The matching trap: a timer whose date has passed counts *up*, with no sign and no
-// marker, so "2:32" reads identically as "boards in 2m32s" and "boarded 2m32s ago".
+// marker, so "2:32" reads identically as "departs in 2m32s" and "departed 2m32s ago".
 // Every timer here is gated on its date still being in the future.
 
 const API = "https://flights.example.com"; // your own hostname, no trailing slash
@@ -30,7 +30,7 @@ const TRACK = new Color("#ffffff", 0.18);
 const PHASE_COLOR = {
   upcoming: new Color("#7aa2f7"),
   day_of: new Color("#7aa2f7"),
-  boarding: new Color("#ffb454"),
+  taxiing: new Color("#ffb454"),
   airborne: new Color("#4ec9b0"),
   landed: new Color("#8a94a6"),
   cancelled: new Color("#ff6b6b"),
@@ -41,7 +41,7 @@ const PHASE_COLOR = {
 const PHASE_TEXT = {
   upcoming: "Upcoming",
   day_of: "Today",
-  boarding: "Boarding",
+  taxiing: "Taxiing",
   airborne: "In the air",
   landed: "Landed",
   cancelled: "Cancelled",
@@ -53,7 +53,6 @@ const PHASE_TEXT = {
 const OVERDUE_TEXT = {
   upcoming: "Departing",
   day_of: "Departing",
-  boarding: "Boarding",
   airborne: "Landing",
 };
 

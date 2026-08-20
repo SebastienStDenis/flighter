@@ -2,8 +2,14 @@
 
 Deliberately a pure function over plain attributes: the phase drives the countdown, the
 subtitle, the sort order and the notification copy, and three implementations of it that
-disagree at the boundaries is how a widget ends up saying "Boards in" to someone already
-in the air.
+disagree at the boundaries is how a widget ends up naming the wrong one to someone
+already in the air.
+
+Every phase here is something a snapshot observed or the clock can prove. There is no
+boarding phase because no upstream source reports boarding, and the lead time varies by
+carrier and airframe from about twenty-five minutes to an hour, so any single guess is
+wrong for most flights. A countdown to a departure time is true at every instant and
+tells the reader more than a word standing where the numbers were.
 """
 
 from __future__ import annotations
@@ -11,29 +17,16 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Final, Literal, Protocol
 
-Phase = Literal["upcoming", "day_of", "boarding", "airborne", "landed", "cancelled", "diverted"]
+Phase = Literal["upcoming", "day_of", "taxiing", "airborne", "landed", "cancelled", "diverted"]
 
 UPCOMING: Final = "upcoming"
 DAY_OF: Final = "day_of"
-BOARDING: Final = "boarding"
+TAXIING: Final = "taxiing"
 AIRBORNE: Final = "airborne"
 LANDED: Final = "landed"
 CANCELLED: Final = "cancelled"
 DIVERTED: Final = "diverted"
 
-PHASES: Final[tuple[Phase, ...]] = (
-    UPCOMING,
-    DAY_OF,
-    BOARDING,
-    AIRBORNE,
-    LANDED,
-    CANCELLED,
-    DIVERTED,
-)
-
-# Boarding opens roughly half an hour out on a narrowbody. It is the moment the flight
-# stops being something you are travelling towards and starts being something you are in.
-BOARDING_LEAD: Final = timedelta(minutes=30)
 DAY_OF_LEAD: Final = timedelta(hours=24)
 
 
@@ -65,7 +58,7 @@ def compute_phase(booking: BookingLike, snapshot: SnapshotLike | None, now: date
     """The flight's phase at `now`, from the newest snapshot and the booking's schedule.
 
     Order matters. Cancelled outranks everything: a cancelled flight that never left is
-    not "boarding" just because its scheduled time has passed. Diverted outranks landed
+    not under way just because its scheduled time has passed. Diverted outranks landed
     for the same reason, since where it landed is the whole point.
     """
     moment = _utc(now)
@@ -79,30 +72,15 @@ def compute_phase(booking: BookingLike, snapshot: SnapshotLike | None, now: date
             return LANDED
         if snapshot.actual_off is not None:
             return AIRBORNE
+        # Pushback is observed, so it is the one thing that can be said about a flight
+        # that has left the gate but is not yet off the ground.
+        if snapshot.actual_out is not None:
+            return TAXIING
 
     departure = departure_estimate(booking, snapshot)
-    boards_at = boarding_time(snapshot) or departure - BOARDING_LEAD
-    if moment >= boards_at:
-        return BOARDING
     if departure - moment <= DAY_OF_LEAD:
         return DAY_OF
     return UPCOMING
-
-
-def boarding_time(snapshot: SnapshotLike | None) -> datetime | None:
-    """When boarding began: pushback if it happened, else the lead before departure.
-
-    Returns None when the snapshot carries no departure time at all, so callers that
-    have a booking to fall back on can supply their own estimate.
-    """
-    if snapshot is None:
-        return None
-    if snapshot.actual_out is not None:
-        return _utc(snapshot.actual_out)
-    departure = snapshot.estimated_out or snapshot.scheduled_out
-    if departure is None:
-        return None
-    return _utc(departure) - BOARDING_LEAD
 
 
 def departure_estimate(booking: BookingLike, snapshot: SnapshotLike | None) -> datetime:

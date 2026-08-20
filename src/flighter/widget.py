@@ -31,14 +31,12 @@ from .db import get_session
 from .models import Booking, FlightSnapshot
 from .phase import (
     AIRBORNE,
-    BOARDING,
-    BOARDING_LEAD,
     CANCELLED,
     DAY_OF,
     DIVERTED,
     LANDED,
+    TAXIING,
     Phase,
-    boarding_time,
     compute_phase,
     departure_estimate,
     landing_estimate,
@@ -60,18 +58,22 @@ CANDIDATE_LIMIT: Final = 12
 # landed sticks around long enough to tell you which carousel to walk to.
 LANDED_GRACE: Final = timedelta(hours=2)
 
+# How far past its ticketed arrival a flight is still fetched. The schedule is all the
+# query has to filter on, so this has to cover the delay as well as the grace period.
+LATE_ARRIVAL_ALLOWANCE: Final = timedelta(hours=14)
+
 REFRESH_IDLE_SECONDS: Final = 900
 REFRESH_ACTIVE_SECONDS: Final = 600
 
 # Feeds restate scheduled times with a minute of jitter; below this a "delay" is noise.
-DELAY_THRESHOLD: Final = timedelta(minutes=5)
+DELAY_THRESHOLD: Final = timedelta(minutes=15)
 
 # The poller runs a close flight every 10 minutes and a same-day one every 30, so a
 # snapshot this old means polling has stopped rather than that nothing has changed.
 POLL_STALE_AFTER: Final = timedelta(minutes=45)
 
-PHASES_IN_PROGRESS: Final = frozenset({BOARDING, AIRBORNE, DIVERTED})
-PHASES_IMMINENT: Final = frozenset({DAY_OF, BOARDING, AIRBORNE, DIVERTED})
+PHASES_IN_PROGRESS: Final = frozenset({TAXIING, AIRBORNE, DIVERTED})
+PHASES_IMMINENT: Final = frozenset({DAY_OF, TAXIING, AIRBORNE, DIVERTED})
 
 
 def _iso_z(value: datetime) -> str:
@@ -150,11 +152,14 @@ async def load_flight_rows(session: AsyncSession, now: datetime) -> list[FlightR
             select(Booking)
             .where(
                 Booking.status == "active",
+                # Measured against the schedule plus the longest delay worth still
+                # showing, so a flight running hours late stays on the widget until it
+                # has actually landed rather than vanishing while it is still in the air.
                 or_(
-                    Booking.scheduled_arrival_utc >= now - LANDED_GRACE,
+                    Booking.scheduled_arrival_utc >= now - LATE_ARRIVAL_ALLOWANCE,
                     and_(
                         Booking.scheduled_arrival_utc.is_(None),
-                        Booking.scheduled_departure_utc >= now - LANDED_GRACE,
+                        Booking.scheduled_departure_utc >= now - LATE_ARRIVAL_ALLOWANCE,
                     ),
                 ),
             )
@@ -200,7 +205,7 @@ def build_payload(
     observed: list[datetime] = []
     for booking, snapshot in rows:
         flight = _flight(booking, snapshot, settings=settings, now=now)
-        ranked.append((_rank(flight.phase), departure_estimate(booking, snapshot), flight))
+        ranked.append((phase_rank(flight.phase), departure_estimate(booking, snapshot), flight))
         if flight.phase in PHASES_IMMINENT and snapshot is not None and snapshot.observed_at:
             observed.append(snapshot.observed_at)
     ranked.sort(key=lambda row: (row[0], row[1]))
@@ -220,7 +225,7 @@ def _flight(
     booking: Booking, snapshot: FlightSnapshot | None, *, settings: Settings, now: datetime
 ) -> WidgetFlight:
     phase = compute_phase(booking, snapshot, now)
-    label, countdown_to = _countdown(phase, booking, snapshot)
+    label, countdown_to = countdown(phase, booking, snapshot)
     return WidgetFlight(
         id=booking.id,
         detail_url=f"{prefs.current().public_base_url}/f/{booking.id}",
@@ -239,20 +244,21 @@ def _flight(
     )
 
 
-def _countdown(
+def countdown(
     phase: Phase, booking: Booking, snapshot: FlightSnapshot | None
 ) -> tuple[str | None, datetime | None]:
-    """The one instant the phone counts to, and what to call it."""
-    if phase == BOARDING:
-        return "Boards in", boarding_time(snapshot) or (
-            departure_estimate(booking, snapshot) - BOARDING_LEAD
-        )
+    """The one instant to count to, and what to call it.
+
+    The lock screen and the flight page count to the same moment, so this lives here
+    once rather than being decided twice.
+    """
     if phase in (AIRBORNE, DIVERTED):
         # Wheels down, not the gate: this is the number someone stares at from a seat,
         # and taxiing is not part of what they are counting.
         landing = landing_estimate(booking, snapshot)
         return ("Lands in", landing) if landing is not None else (None, None)
-    if phase in (LANDED, CANCELLED):
+    # Nothing upstream predicts how long a taxi takes, so the honest answer is no number.
+    if phase in (TAXIING, LANDED, CANCELLED):
         return None, None
     return "Departs in", departure_estimate(booking, snapshot)
 
@@ -279,6 +285,10 @@ def _subtitle(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -
             parts.append(f"Terminal {snapshot.terminal_destination}")
         return " · ".join(parts) if parts else None
 
+    # The aircraft has left the origin gate, so naming it would send someone backwards.
+    if phase == TAXIING:
+        return None
+
     if snapshot and snapshot.gate_origin:
         parts.append(f"Gate {snapshot.gate_origin}")
     if snapshot and snapshot.terminal_origin:
@@ -291,21 +301,23 @@ def _subtitle(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -
 def _delayed(snapshot: FlightSnapshot | None) -> bool:
     if snapshot is None:
         return False
-    pairs = (
-        (snapshot.estimated_out or snapshot.actual_out, snapshot.scheduled_out),
-        (snapshot.estimated_in or snapshot.actual_in, snapshot.scheduled_in),
-    )
+    arrival = (snapshot.estimated_in or snapshot.actual_in, snapshot.scheduled_in)
+    departure = (snapshot.estimated_out or snapshot.actual_out, snapshot.scheduled_out)
+    # Once the aircraft is off the ground a late pushback is history, and the only
+    # question left is whether it still arrives late.
+    pairs = (arrival,) if snapshot.actual_off is not None else (departure, arrival)
     return any(
         expected is not None and scheduled is not None and expected - scheduled >= DELAY_THRESHOLD
         for expected, scheduled in pairs
     )
 
 
-def _rank(phase: Phase) -> int:
+def phase_rank(phase: Phase) -> int:
     """In progress first, then what is still coming, then what has already landed.
 
     Departure time breaks the tie in every band, including for a cancelled flight, which
-    still belongs on the day it was supposed to leave.
+    still belongs on the day it was supposed to leave. The web list leads with the same
+    flight the widget does, because it asks this the same question.
     """
     if phase in PHASES_IN_PROGRESS:
         return 0

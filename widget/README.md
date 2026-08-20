@@ -60,7 +60,7 @@ reloads: `refreshAfterDate` is a hint it can and does ignore, and it budgets rel
 across all widgets on the device. Expect roughly quarter-hourly in practice.
 
 A timer whose instant has passed counts *up*, with no minus sign, so the script switches
-to a word ("Departing", "Boarding", "Landing") once the countdown expires rather than
+to a word ("Departing", "Taxiing", "Landing") once the countdown expires rather than
 showing a number that reads like a countdown but is not one.
 
 The last good response is cached to the Scriptable documents folder. If the server is

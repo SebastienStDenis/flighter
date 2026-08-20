@@ -89,12 +89,29 @@ def test_upcoming_falls_back_to_the_seat(settings: Settings) -> None:
     assert flight["subtitle"] == "Seat 14A"
 
 
-def test_boarding_counts_down_to_boarding(settings: Settings) -> None:
-    boarding = snapshot(scheduled_out=NOW + timedelta(minutes=20), gate_origin="B22")
-    flight = payload([(booking(), boarding)], settings)["flights"][0]
-    assert flight["phase"] == "boarding"
-    assert flight["countdown_label"] == "Boards in"
-    assert flight["countdown_to"] == "2026-09-12T17:50:00Z"
+def test_the_run_up_to_departure_keeps_a_live_countdown(settings: Settings) -> None:
+    """The half hour before departure is when the number matters most, so it must not be
+    traded for a word about boarding that no feed reports."""
+    imminent = snapshot(scheduled_out=NOW + timedelta(minutes=20), gate_origin="B22")
+    flight = payload([(booking(), imminent)], settings)["flights"][0]
+    assert flight["phase"] == "day_of"
+    assert flight["countdown_label"] == "Departs in"
+    assert flight["countdown_to"] == "2026-09-12T18:20:00Z"
+
+
+def test_taxiing_has_no_countdown_and_does_not_name_the_gate_it_left(
+    settings: Settings,
+) -> None:
+    taxiing = snapshot(
+        scheduled_out=NOW - timedelta(minutes=5),
+        actual_out=NOW - timedelta(minutes=2),
+        gate_origin="B22",
+    )
+    flight = payload([(booking(), taxiing)], settings)["flights"][0]
+    assert flight["phase"] == "taxiing"
+    assert flight["countdown_to"] is None
+    assert flight["countdown_label"] is None
+    assert flight["subtitle"] is None
 
 
 def test_airborne_counts_down_to_landing_and_shows_progress(settings: Settings) -> None:
@@ -103,7 +120,7 @@ def test_airborne_counts_down_to_landing_and_shows_progress(settings: Settings) 
         actual_out=DEPARTURE - timedelta(hours=2),
         actual_off=DEPARTURE - timedelta(hours=2),
         scheduled_in=ARRIVAL,
-        estimated_in=ARRIVAL + timedelta(minutes=6),
+        estimated_in=ARRIVAL + timedelta(minutes=25),
         gate_destination="12",
         terminal_destination="B",
         progress_percent=64,
@@ -111,7 +128,7 @@ def test_airborne_counts_down_to_landing_and_shows_progress(settings: Settings) 
     flight = payload([(booking(), flying)], settings)["flights"][0]
     assert flight["phase"] == "airborne"
     assert flight["countdown_label"] == "Lands in"
-    assert flight["countdown_to"] == "2026-09-12T22:21:00Z"
+    assert flight["countdown_to"] == "2026-09-12T22:40:00Z"
     assert flight["progress_percent"] == 64
     assert flight["subtitle"] == "Gate 12 · Terminal B"
     assert flight["delayed"] is True
@@ -209,7 +226,7 @@ def test_in_progress_first_then_soonest_capped_at_three(settings: Settings) -> N
         (booking(id=5, scheduled_departure_utc=NOW + timedelta(minutes=10)), None),
     ]
     body = payload(rows, settings)
-    # Airborne, then boarding in ten minutes, then tomorrow. The landed flight and the
+    # Airborne, then departing in ten minutes, then tomorrow. The landed flight and the
     # one three days out lose their seats.
     assert [flight["id"] for flight in body["flights"]] == [3, 5, 1]
 
@@ -394,3 +411,19 @@ def test_airborne_countdown_targets_touchdown_not_the_gate(settings: Settings) -
     flight = payload([(booking(), flying)], settings)["flights"][0]
     assert flight["countdown_label"] == "Lands in"
     assert flight["countdown_to"] == "2026-09-12T22:04:00Z"
+
+
+def test_a_late_pushback_stops_counting_once_the_flight_is_off_the_ground(
+    settings: Settings,
+) -> None:
+    """A flight that left the gate late but is landing on time is not delayed, and saying
+    so for the rest of the cruise makes the flag mean nothing."""
+    recovered = snapshot(
+        scheduled_out=DEPARTURE,
+        actual_out=DEPARTURE + timedelta(minutes=40),
+        actual_off=DEPARTURE + timedelta(minutes=52),
+        scheduled_in=ARRIVAL,
+        estimated_in=ARRIVAL,
+    )
+    flight = payload([(booking(), recovered)], settings)["flights"][0]
+    assert flight["delayed"] is False
