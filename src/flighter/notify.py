@@ -8,6 +8,7 @@ from decimal import Decimal
 
 import httpx
 
+from . import prefs
 from .config import Settings
 from .events import (
     ARRIVAL_TIME_CHANGED,
@@ -170,7 +171,7 @@ class Notifier:
             message=event_message(event, origin_tz=origin_tz, dest_tz=dest_tz),
             priority=priority,
             tags=_TAGS.get(event.kind, "airplane"),
-            click=f"{self._settings.public_base_url}/f/{booking.id}",
+            click=f"{prefs.current().public_base_url}/f/{booking.id}",
         )
 
     async def budget_tripped(self, spend: Decimal, cap: Decimal) -> None:
@@ -183,7 +184,7 @@ class Notifier:
             ),
             priority=PRIORITY_HIGH,
             tags="money_with_wings",
-            click=self._settings.public_base_url,
+            click=prefs.current().public_base_url,
         )
 
     async def _send(
@@ -196,7 +197,8 @@ class Notifier:
         click: str | None = None,
     ) -> None:
         settings = self._settings
-        if not settings.ntfy_configured:
+        channel = prefs.current()
+        if not channel.ntfy_configured:
             return
         headers = {TITLE_HEADER: title, PRIORITY_HEADER: priority, TAGS_HEADER: tags}
         if click:
@@ -206,7 +208,7 @@ class Notifier:
         try:
             async with httpx.AsyncClient(transport=self._transport, timeout=10) as client:
                 response = await client.post(
-                    f"{settings.ntfy_url}/{settings.ntfy_topic}",
+                    f"{channel.ntfy_url}/{channel.ntfy_topic}",
                     content=message[:MAX_MESSAGE_LENGTH].encode(),
                     headers=headers,
                 )

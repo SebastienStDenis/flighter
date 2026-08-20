@@ -15,7 +15,8 @@ from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
 
-from .config import Settings
+from . import prefs
+from .config import Settings, ensure_widget_token
 from .db import dispose_engine, init_engine, session_scope
 
 log = logging.getLogger(__name__)
@@ -68,9 +69,24 @@ async def _supervise(name: str, coro: object) -> None:
         log.exception("background task %s stopped", name)
 
 
+def migrate() -> None:
+    """Bring the schema up to head.
+
+    Run on every boot rather than left to the operator: a container serving against a
+    schema it cannot read is a worse failure than a few seconds of startup, and the
+    upgrade is a no-op once there is nothing left to apply. `alembic/env.py` reads the
+    database URL from the environment, so there is nothing to pass in here.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    command.upgrade(Config("alembic.ini"), "head")
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
+    await asyncio.to_thread(migrate)
     init_engine(settings)
 
     from .airports import seed_airports
@@ -79,7 +95,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     async with session_scope() as session:
         count = await seed_airports(session)
+        await prefs.ensure_defaults(session)
     log.info("airports seeded: %d", count)
+    # Logging was configured before the database existed, so the stored level is only
+    # applied once there is a row to read it from.
+    logging.getLogger().setLevel(prefs.current().log_level.upper())
+    ensure_widget_token()
 
     stopping = asyncio.Event()
     tasks = [
@@ -87,13 +108,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         asyncio.create_task(
             _supervise("dispatch", _dispatch_loop(settings, stopping)), name="dispatch"
         ),
+        asyncio.create_task(_supervise("ingest", run_ingest_loop(stopping)), name="ingest"),
     ]
-    if settings.gmail_configured:
-        tasks.append(
-            asyncio.create_task(_supervise("ingest", run_ingest_loop(stopping)), name="ingest")
-        )
-    else:
-        log.warning("Gmail is not configured; bookings must be added by hand")
+    if not settings.google_connected:
+        log.warning("Google is not connected; bookings must be added by hand")
 
     app.state.background_tasks = tasks
     try:

@@ -50,9 +50,36 @@ so it ticks continuously, offline, without the widget refreshing. A countdown re
 a pre-computed string is wrong within a minute of being drawn, which is worse than
 useless in an airport.
 
+**Credentials and preferences live in different places, and never both.** A credential is
+set once by hand in `.env`, is never handed back out by the UI, and the app never writes
+it. Everything else - the public URL, the spend cap, the poll interval, the ntfy topic,
+the calendar - is a preference: it has a working default, it is edited at `/settings`,
+and the database is the only place it lives. No value has two homes, so there is never a
+question of which one wins.
+
+The one file the app writes for itself is `data/secrets.env`, holding the credentials it
+mints rather than asks for: the Google refresh token from the consent flow, and the
+widget token generated on first boot. Those keys never appear in `.env` either.
+
 ## Prerequisites
 
-Four credentials. Have them before you start.
+Three accounts, and only two of them involve a form.
+
+### Tailscale
+
+The widget fetches from your phone, and you open flight pages from wherever you happen to
+be standing. Both need the service reachable from outside the house, and neither should
+mean opening a port on the router or publishing a hostname to the internet.
+
+Create an auth key at
+[login.tailscale.com/admin/settings/keys](https://login.tailscale.com/admin/settings/keys)
+and put it in `TS_AUTHKEY`. The stack joins your tailnet as `flighter`, and every device
+signed in reaches it at `https://flighter.<your-tailnet>.ts.net` over a real certificate.
+Nothing is exposed to anyone else, which is the reason there is no login page in front of
+this app.
+
+Your phone therefore needs the Tailscale app connected. It stays up in the background; if
+it drops, the widget shows the last data it had rather than failing loudly.
 
 ### FlightAware AeroAPI key
 
@@ -63,19 +90,23 @@ licensed for personal use only.
 
 > Read the pricing page before you enable anything beyond this service. The tier above
 > Personal has a $100/month minimum with no free allowance, and FlightAware provides no
-> cap of its own. `AEROAPI_MONTHLY_CAP_USD` defaults to `4.00` and stops all polling when
-> month-to-date estimated spend passes it. `/health` shows the running total.
+> cap of its own. The monthly cap on the settings page defaults to `$4.00` and stops all
+> polling when month-to-date estimated spend passes it. `/health` shows the running total.
 
 ### Google OAuth client (Gmail + Calendar)
 
-One project, one client, both APIs. A five-minute setup you do once.
+One project, one client, both APIs. A five-minute setup you do once, and the only Google
+value you ever paste is the client id and secret - the refresh token is minted by the
+app.
 
 1. At [console.cloud.google.com](https://console.cloud.google.com), create a project.
 2. **APIs & Services → Library** → enable the **Gmail API** and the **Google Calendar API**.
 3. **APIs & Services → OAuth consent screen**: set it up for **External** users, then set
    the publishing status to **In production**.
-4. **APIs & Services → Credentials → Create Credentials → OAuth client ID → Desktop app**.
-   Copy the client id and secret.
+4. **APIs & Services → Credentials → Create Credentials → OAuth client ID → Web
+   application**. Add `https://flighter.<your-tailnet>.ts.net/settings/google/callback`
+   as an authorised redirect URI - the settings page prints the exact string. Copy the
+   client id and secret into `.env`.
 
 Step 3 is not optional. An app left in **Testing** issues refresh tokens that expire after
 **7 days**, and the service will silently stop working every week. Publishing does not
@@ -93,14 +124,6 @@ email carrying schema.org `FlightReservation` JSON-LD is parsed exactly and for 
 most airlines embed it because Gmail and Outlook read it. The model is for the ones that
 do not.
 
-### A Cloudflare Tunnel
-
-The widget fetches from your phone on cellular, and you open flight detail pages from
-wherever you happen to be standing. Both need the service reachable from outside your
-house, and neither should require opening a port on your router. Create a tunnel in the
-Cloudflare Zero Trust dashboard, point a hostname at `http://app:8000`, and put the token
-in `TUNNEL_TOKEN`.
-
 ## Run it
 
 ```sh
@@ -110,10 +133,22 @@ cp .env.example .env
 $EDITOR .env
 docker compose pull          # fetch the published image instead of compiling it here
 docker compose up -d
-docker compose exec app flighter migrate
-docker compose exec app flighter seed-airports
-docker compose exec app flighter check
 ```
+
+That is the whole install. On first boot the app runs its own migrations, seeds the
+airport table with its timezones, generates a widget token and an ntfy topic, and starts
+serving.
+
+Open `https://flighter.<your-tailnet>.ts.net/settings` and finish there:
+
+1. Set the **public base URL** - the page offers the address you opened it on.
+2. **Connect Google**, once. Sign in, accept both scopes, and the app stores the refresh
+   token and creates a calendar called *Flights* to write into.
+3. **Run checks**. It exercises Postgres, AeroAPI, Gmail, Calendar and ntfy in turn and
+   names the broken one, which is the question you will actually have.
+
+Then add a passenger for yourself on the **People** page, and either add a flight by hand
+or let the mail loop find one.
 
 Pushing to `main` publishes a `linux/amd64` + `linux/arm64` image to
 `ghcr.io/sebastienstdenis/flighter:latest`, so updating the home stack is:
@@ -128,12 +163,6 @@ and tests, so a commit that fails CI never ships as `:latest`.
 
 To build locally instead of pulling, `docker compose build` still works from a checkout.
 
-`check` exercises Postgres, AeroAPI, Gmail, Google Calendar and ntfy in turn and tells you
-which one is broken, which is the question you will actually have.
-
-Then open the hostname your tunnel publishes. Add a passenger for yourself, and either add
-a flight by hand or let the mail loop find one.
-
 To pick up flights already sitting in your mailbox:
 
 ```sh
@@ -144,17 +173,19 @@ docker compose exec app flighter backfill --days 30
 
 ```sh
 uv sync --all-groups
-uv run flighter migrate
 uv run flighter serve
 ```
+
+`serve` migrates and seeds on the way up, so a fresh database needs nothing else. It
+writes its minted credentials to `./data/secrets.env` rather than the container volume.
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
 | `flighter serve` | The API, the poll worker and the mail loop |
-| `flighter migrate` | Apply database migrations |
-| `flighter seed-airports` | Load the airport table and its IANA timezones |
+| `flighter migrate` | Apply database migrations; `serve` already does this on boot |
+| `flighter seed-airports` | Load the airport table and its IANA timezones; likewise |
 | `flighter backfill --days 30` | Ingest recent mail once |
 | `flighter poll` | One polling pass, then exit |
 | `flighter check` | Exercise every external dependency |
@@ -162,8 +193,8 @@ uv run flighter serve
 ## The widget
 
 See [`widget/README.md`](widget/README.md). Short version: install Scriptable, copy in
-`widget/flights-widget.js`, run it once in the app to store your `WIDGET_TOKEN` in the
-Keychain, then add it to your home and lock screens.
+`widget/flights-widget.js`, run it once in the app to store the widget token from
+`/settings` in the Keychain, then add it to your home and lock screens.
 
 ## Development
 

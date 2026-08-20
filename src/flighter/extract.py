@@ -20,6 +20,7 @@ from bs4 import BeautifulSoup
 from bs4.element import Tag
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from . import prefs
 from .config import Settings, get_settings
 from .gmail import Message
 
@@ -401,7 +402,7 @@ async def from_model(
         client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     response = await client.messages.create(
-        model=settings.anthropic_model,
+        model=prefs.current().anthropic_model,
         max_tokens=MAX_TOKENS,
         system=SYSTEM_PROMPT,
         # A closed JSON schema rather than a "reply with JSON" instruction: the response

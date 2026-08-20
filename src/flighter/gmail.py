@@ -17,8 +17,6 @@ from email import message_from_bytes, policy
 from email.utils import parsedate_to_datetime
 from typing import Any
 
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from pydantic import BaseModel
@@ -27,12 +25,10 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import Settings, get_settings
+from .google_auth import credentials
 from .models import KV, IngestLog
 
 log = logging.getLogger(__name__)
-
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 HISTORY_KEY = "gmail_history_id"
 # Gmail keeps roughly a week of history. Past that `startHistoryId` is refused outright
@@ -60,45 +56,6 @@ class Message(BaseModel):
 # -- credentials ---------------------------------------------------------------------
 
 
-def client_config(settings: Settings) -> dict[str, Any]:
-    """The installed-app OAuth client, assembled from the two configured strings."""
-    return {
-        "installed": {
-            "client_id": settings.gmail_client_id,
-            "client_secret": settings.gmail_client_secret,
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": TOKEN_URI,
-            "redirect_uris": ["http://localhost"],
-        }
-    }
-
-
-def run_consent_flow(settings: Settings, *, port: int = 0) -> str:
-    """Run the desktop consent flow once and return a refresh token to put in the env.
-
-    Nothing is written to disk: the refresh token is configuration like every other
-    secret, and a token file would be a second place to lose it from.
-    """
-    flow = InstalledAppFlow.from_client_config(client_config(settings), SCOPES)
-    creds = flow.run_local_server(port=port, prompt="consent")
-    token = getattr(creds, "refresh_token", None)
-    if not token:
-        raise RuntimeError("Google returned no refresh token; re-run with prompt=consent")
-    return str(token)
-
-
-def credentials(settings: Settings) -> Credentials:
-    """Credentials from the stored refresh token; the access token is minted on demand."""
-    return Credentials(
-        token=None,
-        refresh_token=settings.gmail_refresh_token,
-        token_uri=TOKEN_URI,
-        client_id=settings.gmail_client_id,
-        client_secret=settings.gmail_client_secret,
-        scopes=SCOPES,
-    )
-
-
 _service: Any = None
 
 
@@ -108,6 +65,12 @@ def service(settings: Settings) -> Any:
     if _service is None:
         _service = build("gmail", "v1", credentials=credentials(settings), cache_discovery=False)
     return _service
+
+
+def reset_service() -> None:
+    """Drop the cached handle so a freshly authorised token is picked up in place."""
+    global _service
+    _service = None
 
 
 # -- message parsing -----------------------------------------------------------------
@@ -188,7 +151,7 @@ async def poll_history(session: AsyncSession, *, settings: Settings | None = Non
     """
     global _pending_history_id
     settings = settings or get_settings()
-    if not settings.gmail_configured:
+    if not settings.google_connected:
         log.debug("Gmail is not configured; skipping poll")
         return []
 
@@ -223,7 +186,7 @@ async def backfill(
     live poller's position, forwards or backwards.
     """
     settings = settings or get_settings()
-    if not settings.gmail_configured:
+    if not settings.google_connected:
         log.warning("Gmail is not configured; nothing to backfill")
         return []
     ids, _ = await asyncio.to_thread(_scan_recent, service(settings), days)

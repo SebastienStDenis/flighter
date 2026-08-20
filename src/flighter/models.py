@@ -229,6 +229,24 @@ class ApiUsage(Base):
     est_cost_usd: Mapped[float] = mapped_column(Numeric(10, 6), nullable=False)
 
 
+class Preferences(Base):
+    """The settings page, as one row.
+
+    One deployment means one row, and the JSONB blob means a new knob costs a field on
+    `Prefs` rather than a migration. Credentials are deliberately absent: they live in
+    the environment and the app never writes them here.
+    """
+
+    __tablename__ = "preferences"
+    __table_args__ = (CheckConstraint("id = 1", name="preferences_singleton"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    values: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class KV(Base):
     """Small singleton state: the Gmail history cursor, breaker latches, and the like."""
 

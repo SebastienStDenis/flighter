@@ -55,7 +55,7 @@ files = ["src"]
 
 # The Google client libraries ship no type information, so calls into them are untyped.
 [[tool.mypy.overrides]]
-module = ["flighter.gcal", "flighter.gmail"]
+module = ["flighter.gcal", "flighter.gmail", "flighter.google_auth"]
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]

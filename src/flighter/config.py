@@ -1,90 +1,70 @@
-"""Runtime configuration, entirely from the environment.
+"""Credentials, and nothing else.
 
-Single user, single deployment: there is no settings UI and nothing to configure at
-runtime, so every knob is an environment variable read once at startup. Secrets come
-from the compose file's env or a Docker secret; nothing sensitive is ever written to
-the database.
+Configuration here splits in two, and no value lives in both halves. A *credential* is
+set once by hand, is never handed back out by the UI, and is read from the environment.
+Everything else is a *preference*: it has a working default, it is edited on the
+settings page, and the database is the only place it lives - see `prefs`.
+
+The app writes exactly one file: `data/secrets.env`, holding the credentials it mints
+itself rather than asking a person for - the Google refresh token the consent flow
+returns, and the widget token generated on first boot. Those keys never appear in
+`.env`, so there is still one home per value and never a precedence question.
 """
 
 from __future__ import annotations
 
-from decimal import Decimal
+import os
+import secrets
+import stat
 from functools import lru_cache
+from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Relative on purpose: the image's WORKDIR is /app and the volume is mounted at
+# /app/data, so the same default is the volume in Docker and ./data in a checkout.
+DATA_DIR = Path(os.environ.get("DATA_DIR", "data"))
+SECRETS_FILE = DATA_DIR / "secrets.env"
+
+# The app-written file is listed last because pydantic-settings lets the last file win,
+# and a token the app minted is newer than anything a hand-edited file knows.
+ENV_FILES = (".env", SECRETS_FILE)
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
-
-    # --- Deployment -----------------------------------------------------------------
-    # Absolute, publicly reachable base for links we hand to other systems: the widget's
-    # tap target, the Click header on a push, the URL in a calendar description. Those
-    # are read on a phone that is not on the home network, so a LAN address is useless.
-    public_base_url: str = "http://localhost:8000"
-    log_level: str = "INFO"
+    model_config = SettingsConfigDict(env_file=ENV_FILES, env_file_encoding="utf-8", extra="ignore")
 
     database_url: str = "postgresql+asyncpg://flights:flights@db:5432/flights"
 
-    # --- AeroAPI --------------------------------------------------------------------
-    aeroapi_key: str = ""
-    aeroapi_base_url: str = "https://aeroapi.flightaware.com/aeroapi"
-    # The Personal tier has no monthly minimum but the next tier up costs $100/month, so
-    # the breaker stops polling well short of anything that could trigger an upgrade.
-    aeroapi_monthly_cap_usd: Decimal = Decimal("4.00")
-    # Documented limit is 10 result sets/minute; leave headroom for retries.
-    aeroapi_rate_limit_per_minute: int = 8
+    # --- FlightAware -----------------------------------------------------------------
+    aeroapi_key: str = Field(default="", repr=False)
 
-    # --- Anthropic (extraction fallback) --------------------------------------------
-    anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-5"
-    # Below this an extraction lands in the review queue instead of the tracked list.
-    extraction_confidence_threshold: float = 0.85
+    # --- Anthropic, the extraction fallback ------------------------------------------
+    anthropic_api_key: str = Field(default="", repr=False)
 
-    # --- Gmail ----------------------------------------------------------------------
-    gmail_client_id: str = ""
-    gmail_client_secret: str = ""
-    gmail_refresh_token: str = ""
-    gmail_poll_seconds: int = 180
-
-    # --- Google Calendar ------------------------------------------------------------
-    gcal_client_id: str = ""
-    gcal_client_secret: str = ""
-    gcal_refresh_token: str = ""
-    # A calendar of its own, so a bad sync can be cleared by deleting one calendar.
-    gcal_calendar_id: str = ""
+    # --- Google, one client for Gmail and Calendar alike -----------------------------
+    # Both APIs sit in one Cloud project behind one consent screen, so asking for two
+    # clients only ever bought two ways to paste the wrong string.
+    google_client_id: str = ""
+    google_client_secret: str = Field(default="", repr=False)
+    # Minted by the consent flow at /settings/google/connect, not typed by anyone.
+    google_refresh_token: str = Field(default="", repr=False)
 
     # --- ntfy -------------------------------------------------------------------------
-    ntfy_url: str = "http://ntfy:80"
-    ntfy_topic: str = ""
-    ntfy_token: str = ""
+    ntfy_token: str = Field(default="", repr=False)
 
     # --- Widget -----------------------------------------------------------------------
-    # Shared bearer token; the only authentication in the system.
+    # Generated on first boot. The only authentication in front of the flight data.
     widget_token: str = Field(default="", repr=False)
 
-    @field_validator("public_base_url", "aeroapi_base_url", "ntfy_url")
-    @classmethod
-    def _strip_trailing_slash(cls, value: str) -> str:
-        return value.rstrip("/")
+    @property
+    def google_configured(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret)
 
     @property
-    def gmail_configured(self) -> bool:
-        return bool(self.gmail_client_id and self.gmail_client_secret and self.gmail_refresh_token)
-
-    @property
-    def gcal_configured(self) -> bool:
-        return bool(
-            self.gcal_client_id
-            and self.gcal_client_secret
-            and self.gcal_refresh_token
-            and self.gcal_calendar_id
-        )
-
-    @property
-    def ntfy_configured(self) -> bool:
-        return bool(self.ntfy_topic)
+    def google_connected(self) -> bool:
+        return bool(self.google_configured and self.google_refresh_token)
 
     @property
     def aeroapi_configured(self) -> bool:
@@ -94,3 +74,43 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def write_secret(key: str, value: str) -> Settings:
+    """Persist one app-minted credential and make it live in this process.
+
+    Written whole rather than appended so re-authorising replaces the dead token instead
+    of leaving two lines and letting the parser pick.
+    """
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    lines = {}
+    if SECRETS_FILE.exists():
+        for line in SECRETS_FILE.read_text().splitlines():
+            name, _, existing = line.partition("=")
+            if name.strip():
+                lines[name.strip()] = existing
+    lines[key.upper()] = value
+    SECRETS_FILE.write_text("".join(f"{name}={val}\n" for name, val in sorted(lines.items())))
+    SECRETS_FILE.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    return reload_settings()
+
+
+def ensure_widget_token() -> Settings:
+    """Mint the widget token on first boot so nobody has to run `openssl rand`."""
+    settings = get_settings()
+    if settings.widget_token:
+        return settings
+    return write_secret("WIDGET_TOKEN", secrets.token_hex(32))
+
+
+def reload_settings() -> Settings:
+    """Re-read the environment into the object every caller is already holding.
+
+    The alternative, returning a fresh instance, leaves the poller and the mail loop
+    talking to Google with the token that was live when they started.
+    """
+    current = get_settings()
+    fresh = Settings()
+    for name in Settings.model_fields:
+        setattr(current, name, getattr(fresh, name))
+    return current

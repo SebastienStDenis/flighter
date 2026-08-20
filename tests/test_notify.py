@@ -8,6 +8,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
+from flighter import prefs
 from flighter.config import Settings
 from flighter.events import (
     BAGGAGE_CLAIM_ASSIGNED,
@@ -21,6 +22,7 @@ from flighter.events import (
 )
 from flighter.models import Booking, FlightEvent
 from flighter.notify import Notifier
+from flighter.prefs import Prefs
 
 ORIGIN_TZ = "America/New_York"
 DEST_TZ = "America/Los_Angeles"
@@ -121,9 +123,11 @@ async def test_bearer_token_is_sent_when_configured(settings: Settings) -> None:
     assert recorder.only.headers["Authorization"] == "Bearer tk_secret"
 
 
-async def test_no_topic_means_no_request(settings: Settings) -> None:
-    silent = settings.model_copy(update={"ntfy_topic": ""})
-    recorder = await push(silent, event(GATE_ASSIGNED, new="B22"))
+async def test_no_topic_means_no_request(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(prefs, "_current", Prefs(ntfy_topic=""))
+    recorder = await push(settings, event(GATE_ASSIGNED, new="B22"))
     assert recorder.requests == []
 
 

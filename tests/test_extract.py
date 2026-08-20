@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from flighter import prefs
 from flighter.config import Settings
 from flighter.extract import (
     Extraction,
@@ -206,7 +207,7 @@ async def test_model_request_pins_the_schema_and_the_configured_model(
         client=client,  # type: ignore[arg-type]
     )
     (request,) = client.messages.calls
-    assert request["model"] == settings.anthropic_model
+    assert request["model"] == prefs.current().anthropic_model
     schema = request["output_config"]["format"]["schema"]
     assert schema["properties"].keys() >= {"is_flight_confirmation", "confidence", "segments"}
 

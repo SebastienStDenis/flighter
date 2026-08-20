@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, fields
 from datetime import UTC, datetime, timedelta
@@ -19,13 +20,16 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import bookings as booking_repo
+from . import gcal, gmail, google_auth, prefs
 from .aeroapi import budget_status
 from .airports import airport_tz, get_airport
+from .checks import run_checks
 from .config import Settings
 from .db import get_session
 from .gcal import CalendarClient
@@ -56,7 +60,19 @@ DELAY_THRESHOLD = timedelta(minutes=15)
 # not, which is the split a person means by "trip".
 TRIP_GAP = timedelta(hours=24)
 
+# Where the consent flow parks its one-time state between the redirect out and back.
+OAUTH_STATE_KEY = "google_oauth_state"
+
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+def _first_validation_message(exc: ValidationError) -> str:
+    """One field, one sentence. A wall of pydantic is not an error message."""
+    error = exc.errors()[0]
+    field = ".".join(str(part) for part in error["loc"]) or "value"
+    return f"{field.replace('_', ' ')}: {error['msg']}"
 
 
 class Status(NamedTuple):
@@ -483,6 +499,14 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(status_code=404, detail="No such flight.")
         return (await build_views(session, [booking]))[0]
 
+    def base_url() -> str:
+        """Where this deployment answers, for a link that leaves the browser.
+
+        The stored value wins because a push notification is opened long after the
+        request that would have implied one.
+        """
+        return prefs.current().public_base_url
+
     @app.get("/")
     async def index(request: Request, session: SessionDep) -> Response:
         views = await build_views(
@@ -500,7 +524,7 @@ def create_app(settings: Settings) -> FastAPI:
                 "trips": group_into_trips(upcoming),
                 "past": past,
                 "pending": len(pending),
-                "budget": await budget_status(session, settings),
+                "budget": await budget_status(session),
             },
         )
 
@@ -687,6 +711,97 @@ def create_app(settings: Settings) -> FastAPI:
             return Response(status_code=200)
         return RedirectResponse("/passengers", status_code=303)
 
+    async def settings_context(request: Request) -> dict[str, Any]:
+        current = prefs.current()
+        return {
+            "prefs": current,
+            "posted": current.model_dump(mode="json"),
+            "settings": settings,
+            "log_levels": LOG_LEVELS,
+            "callback_url": google_auth.callback_url(base_url()),
+            # What the browser is talking to right now, offered as the public base URL
+            # because on a first visit it is almost always the right answer.
+            "this_origin": str(request.base_url).rstrip("/"),
+            "saved": "saved" in request.query_params,
+            "connected": "connected" in request.query_params,
+            "error": None,
+        }
+
+    @app.get("/settings")
+    async def settings_page(request: Request) -> Response:
+        return page(request, "settings.html", await settings_context(request))
+
+    @app.post("/settings")
+    async def save_settings(
+        request: Request,
+        session: SessionDep,
+        public_base_url: Annotated[str, Form()],
+        log_level: Annotated[str, Form()],
+        aeroapi_monthly_cap_usd: Annotated[str, Form()],
+        aeroapi_rate_limit_per_minute: Annotated[str, Form()],
+        anthropic_model: Annotated[str, Form()],
+        extraction_confidence_threshold: Annotated[str, Form()],
+        gmail_poll_seconds: Annotated[str, Form()],
+        ntfy_url: Annotated[str, Form()],
+        ntfy_topic: Annotated[str, Form()],
+        gcal_calendar_id: Annotated[str, Form()] = "",
+    ) -> Response:
+        posted = {
+            "public_base_url": public_base_url.strip(),
+            "log_level": log_level.strip().upper(),
+            "aeroapi_monthly_cap_usd": aeroapi_monthly_cap_usd.strip(),
+            "aeroapi_rate_limit_per_minute": aeroapi_rate_limit_per_minute.strip(),
+            "anthropic_model": anthropic_model.strip(),
+            "extraction_confidence_threshold": extraction_confidence_threshold.strip(),
+            "gmail_poll_seconds": gmail_poll_seconds.strip(),
+            "ntfy_url": ntfy_url.strip(),
+            "ntfy_topic": ntfy_topic.strip(),
+            "gcal_calendar_id": gcal_calendar_id.strip(),
+        }
+        try:
+            await prefs.save(session, posted)
+        except ValidationError as exc:
+            context = await settings_context(request)
+            context["error"] = _first_validation_message(exc)
+            context["posted"] = posted
+            return page(request, "settings.html", context, status_code=400)
+        return RedirectResponse("/settings?saved=1", status_code=303)
+
+    @app.get("/settings/google/connect")
+    async def google_connect(session: SessionDep) -> Response:
+        if not settings.google_configured:
+            raise HTTPException(
+                status_code=400,
+                detail="Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env first.",
+            )
+        url, state = google_auth.consent_url(settings, google_auth.callback_url(base_url()))
+        await session.merge(KV(key=OAUTH_STATE_KEY, value={"state": state}))
+        return RedirectResponse(url, status_code=303)
+
+    @app.get("/settings/google/callback")
+    async def google_callback(
+        request: Request, session: SessionDep, state: str = "", code: str = "", error: str = ""
+    ) -> Response:
+        if error:
+            raise HTTPException(status_code=400, detail=f"Google refused: {error}")
+        stored = await session.get(KV, OAUTH_STATE_KEY)
+        if stored is None or not secrets.compare_digest(state, str(stored.value.get("state", ""))):
+            raise HTTPException(status_code=400, detail="That sign-in did not start here.")
+        await session.delete(stored)
+        authorised = await google_auth.exchange_code(
+            settings, google_auth.callback_url(base_url()), state, code
+        )
+        # The mail loop holds a client built from the dead token; drop it so the next
+        # pass builds one with the token that was just granted.
+        gmail.reset_service()
+        if not prefs.current().calendar_configured:
+            await prefs.save(session, {"gcal_calendar_id": await gcal.create_calendar(authorised)})
+        return RedirectResponse("/settings?connected=1", status_code=303)
+
+    @app.post("/settings/checks")
+    async def run_checks_now(request: Request) -> Response:
+        return page(request, "checks.html", {"results": await run_checks(settings)})
+
     @app.get("/health")
     async def health(request: Request, session: SessionDep) -> Response:
         counts = await session.execute(
@@ -700,7 +815,7 @@ def create_app(settings: Settings) -> FastAPI:
             {
                 "counts": {status: count for status, count in counts.all()},
                 "last_snapshot": last_snapshot,
-                "budget": await budget_status(session, settings),
+                "budget": await budget_status(session),
                 # The poller and the Gmail sync each own their own keys in here, so the
                 # page reports what is in the table rather than asserting a shape.
                 "state": [
@@ -708,6 +823,7 @@ def create_app(settings: Settings) -> FastAPI:
                     for row in state.scalars()
                 ],
                 "settings": settings,
+                "prefs": prefs.current(),
             },
         )
 

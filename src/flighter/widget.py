@@ -25,6 +25,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from . import prefs
 from .aeroapi import budget_status
 from .config import Settings, get_settings
 from .db import get_session
@@ -226,7 +227,7 @@ def _flight(
     label, countdown_to = _countdown(phase, booking, snapshot)
     return WidgetFlight(
         id=booking.id,
-        detail_url=f"{settings.public_base_url}/f/{booking.id}",
+        detail_url=f"{prefs.current().public_base_url}/f/{booking.id}",
         phase=phase,
         title=(
             f"{booking.marketing_carrier}{booking.marketing_number}"

@@ -14,20 +14,21 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from google.auth.exceptions import RefreshError
-from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from sqlalchemy import inspect as sa_inspect
 
+from . import prefs
 from .config import Settings
+from .google_auth import credentials
 from .models import Airport, Booking, FlightSnapshot
 from .notify import flight_label
 from .timezones import FALLBACK_TZ, to_local
 
 log = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
-TOKEN_URI = "https://oauth2.googleapis.com/token"
+# The name given to the calendar the consent flow creates.
+CALENDAR_SUMMARY = "Flights"
 
 # Long enough to still be at home when it fires for an airport run.
 REMINDER_MINUTES = 180
@@ -46,17 +47,22 @@ class CredentialsExpired(RuntimeError):
     """The refresh token is dead and only a human can fix it."""
 
 
-def load_credentials(settings: Settings) -> Credentials:
-    """Credentials from the stored refresh token alone; the library mints the access
-    token on first use."""
-    return Credentials(
-        token=None,
-        refresh_token=settings.gcal_refresh_token,
-        client_id=settings.gcal_client_id,
-        client_secret=settings.gcal_client_secret,
-        token_uri=TOKEN_URI,
-        scopes=SCOPES,
+def configured(settings: Settings) -> bool:
+    """Google authorised, and a calendar of our own to write into."""
+    return settings.google_connected and prefs.current().calendar_configured
+
+
+async def create_calendar(settings: Settings) -> str:
+    """Make the dedicated calendar and return its id.
+
+    Its own calendar rather than the primary one, so undoing a bad sync is deleting one
+    calendar instead of hunting events among real appointments.
+    """
+    service = build("calendar", "v3", credentials=credentials(settings), cache_discovery=False)
+    created = await asyncio.to_thread(
+        service.calendars().insert(body={"summary": CALENDAR_SUMMARY}).execute
     )
+    return str(created["id"])
 
 
 def _zone(airports: Mapping[str, Airport], iata: str) -> str:
@@ -177,16 +183,16 @@ class CalendarClient:
 
     async def upsert(self, booking: Booking, snapshot: FlightSnapshot | None) -> str | None:
         """Create or update this booking's event; returns the id to store on the booking."""
-        if not self._settings.gcal_configured:
+        if not configured(self._settings):
             log.debug("Google Calendar is not configured; skipping booking %s", booking.id)
             return None
         body = event_body(
-            booking, snapshot, self._airports, base_url=self._settings.public_base_url
+            booking, snapshot, self._airports, base_url=prefs.current().public_base_url
         )
         return await asyncio.to_thread(self._upsert_blocking, booking.gcal_event_id, body)
 
     async def delete(self, booking: Booking) -> None:
-        if not self._settings.gcal_configured or not booking.gcal_event_id:
+        if not configured(self._settings) or not booking.gcal_event_id:
             return
         await asyncio.to_thread(self._delete_blocking, booking.gcal_event_id)
 
@@ -196,7 +202,7 @@ class CalendarClient:
         Unlike the rest of the class this raises, because it exists for the `check`
         command whose whole job is to put the failure text in front of a person.
         """
-        if not self._settings.gcal_configured:
+        if not configured(self._settings):
             raise CredentialsExpired("Google Calendar is not configured")
         return await asyncio.to_thread(self._describe_blocking)
 
@@ -206,7 +212,7 @@ class CalendarClient:
             self._service = build(
                 "calendar",
                 "v3",
-                credentials=load_credentials(self._settings),
+                credentials=credentials(self._settings),
                 cache_discovery=False,
             )
         return self._service
@@ -223,7 +229,7 @@ class CalendarClient:
         return result
 
     def _upsert_blocking(self, event_id: str | None, body: dict[str, Any]) -> str:
-        calendar_id = self._settings.gcal_calendar_id
+        calendar_id = prefs.current().gcal_calendar_id
         events = self._client().events()
         if event_id:
             try:
@@ -244,7 +250,7 @@ class CalendarClient:
             self._execute(
                 self._client()
                 .events()
-                .delete(calendarId=self._settings.gcal_calendar_id, eventId=event_id)
+                .delete(calendarId=prefs.current().gcal_calendar_id, eventId=event_id)
             )
         except HttpError as exc:
             if exc.resp.status not in _GONE:
@@ -252,7 +258,7 @@ class CalendarClient:
             log.info("calendar event %s was already gone", event_id)
 
     def _describe_blocking(self) -> str:
-        calendar_id = self._settings.gcal_calendar_id
+        calendar_id = prefs.current().gcal_calendar_id
         calendar = self._execute(self._client().calendars().get(calendarId=calendar_id))
         summary = calendar.get("summary")
         return str(summary) if summary else calendar_id

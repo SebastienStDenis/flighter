@@ -15,13 +15,15 @@ script only changes when the layout changes.
 3. Edit the first line of configuration:
 
    ```js
-   const API = "https://flights.example.com"; // your own hostname, no trailing slash
+   const API = "https://flighter.your-tailnet.ts.net"; // no trailing slash
    ```
 
-   Use the same value as `PUBLIC_BASE_URL` on the server. It has to be reachable from
-   the phone on cellular, so a `192.168.x.x` address will not do.
+   Use the same value as the public base URL on the server's settings page. The phone
+   reaches it over Tailscale, so the Tailscale app has to be connected for the widget to
+   refresh.
 4. Run the script once inside the Scriptable app. It prompts for the widget token, which
-   is the server's `WIDGET_TOKEN`, and stores it in the iOS Keychain. The token is never
+   is printed at the bottom of the server's settings page, and stores it in the iOS
+   Keychain. The token is never
    written into the script and never leaves the Keychain.
    After saving it, the same run renders a preview, which is how you check the hostname
    is right.

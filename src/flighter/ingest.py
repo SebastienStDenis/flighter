@@ -16,6 +16,7 @@ from difflib import SequenceMatcher
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from . import prefs
 from .airports import airport_tz
 from .bookings import create_booking, find_duplicate
 from .config import Settings, get_settings
@@ -77,7 +78,7 @@ async def _book(
     session: AsyncSession, message: Message, extraction: Extraction, settings: Settings
 ) -> str:
     passenger, matched = await resolve_passenger(session, extraction.passenger_names)
-    confident = extraction.confidence >= settings.extraction_confidence_threshold
+    confident = extraction.confidence >= prefs.current().extraction_confidence_threshold
     # An unmatched name is as much a reason for a human to look as a shaky extraction:
     # the booking is attributed to the only self passenger so the row can exist at all,
     # and the review queue is where that guess gets confirmed.
@@ -255,17 +256,17 @@ async def run_ingest_loop(stopping: asyncio.Event, *, settings: Settings | None 
     batch is in the log.
     """
     settings = settings or get_settings()
-    if not settings.gmail_configured:
-        log.warning("Gmail is not configured; the ingest loop will not run")
-        return
 
     while not stopping.is_set():
         try:
-            await ingest_once(settings)
+            # Checked every pass rather than once: Google is connected from the settings
+            # page, and a loop that gave up at boot would need a restart to notice.
+            if settings.google_connected:
+                await ingest_once(settings)
         except Exception:
             log.exception("ingest poll failed; retrying at the next interval")
         with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(stopping.wait(), timeout=settings.gmail_poll_seconds)
+            await asyncio.wait_for(stopping.wait(), timeout=prefs.current().gmail_poll_seconds)
 
 
 async def ingest_once(settings: Settings) -> list[str]:

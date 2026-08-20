@@ -12,6 +12,8 @@ from dataclasses import dataclass
 import httpx
 from sqlalchemy import func, select
 
+from . import prefs
+from .aeroapi import BASE_URL
 from .config import Settings
 from .db import session_scope
 from .models import Airport
@@ -41,10 +43,10 @@ async def _check_database() -> CheckResult:
 
 async def _check_aeroapi(settings: Settings) -> CheckResult:
     if not settings.aeroapi_configured:
-        return CheckResult("aeroapi", False, "AEROAPI_KEY is not set")
+        return CheckResult("aeroapi", False, "AEROAPI_KEY is not set in .env")
     # A known-good ident on a carrier that always has flights in the window. This spends
     # one result set, which is the point: an unspent key proves nothing.
-    url = f"{settings.aeroapi_base_url}/flights/UAL4"
+    url = f"{BASE_URL}/flights/UAL4"
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
             response = await client.get(
@@ -63,15 +65,16 @@ async def _check_aeroapi(settings: Settings) -> CheckResult:
 
 
 async def _check_ntfy(settings: Settings) -> CheckResult:
-    if not settings.ntfy_configured:
-        return CheckResult("ntfy", False, "NTFY_TOPIC is not set")
+    channel = prefs.current()
+    if not channel.ntfy_configured:
+        return CheckResult("ntfy", False, "no ntfy topic")
     headers = {"Title": "Flight tracker", "Priority": "low", "Tags": "white_check_mark"}
     if settings.ntfy_token:
         headers["Authorization"] = f"Bearer {settings.ntfy_token}"
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
             response = await client.post(
-                f"{settings.ntfy_url}/{settings.ntfy_topic}",
+                f"{channel.ntfy_url}/{channel.ntfy_topic}",
                 content=b"Checks ran and this arrived.",
                 headers=headers,
             )
@@ -82,8 +85,8 @@ async def _check_ntfy(settings: Settings) -> CheckResult:
 
 
 async def _check_gmail(settings: Settings) -> CheckResult:
-    if not settings.gmail_configured:
-        return CheckResult("gmail", False, "GMAIL_* credentials are not set")
+    if not settings.google_connected:
+        return CheckResult("gmail", False, "Google is not connected")
     try:
         from .gmail import profile
 
@@ -94,8 +97,10 @@ async def _check_gmail(settings: Settings) -> CheckResult:
 
 
 async def _check_calendar(settings: Settings) -> CheckResult:
-    if not settings.gcal_configured:
-        return CheckResult("calendar", False, "GCAL_* credentials are not set")
+    if not settings.google_connected:
+        return CheckResult("calendar", False, "Google is not connected")
+    if not prefs.current().calendar_configured:
+        return CheckResult("calendar", False, "no calendar chosen")
     try:
         from .gcal import CalendarClient
 

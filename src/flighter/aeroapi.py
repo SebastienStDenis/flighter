@@ -18,11 +18,15 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from . import prefs
 from .airlines import to_icao
 from .config import Settings, get_settings
 from .models import KV, ApiUsage, Booking, FlightSnapshot
 
 log = logging.getLogger(__name__)
+
+# The vendor's one endpoint. Not configurable: there is no second AeroAPI to point at.
+BASE_URL = "https://aeroapi.flightaware.com/aeroapi"
 
 FLIGHT_INFO_ENDPOINT = "/flights/{ident}"
 
@@ -115,7 +119,7 @@ def shared_limiter(rate_per_minute: int | None = None) -> TokenBucket:
     """One bucket for the process: the quota is per account, not per caller."""
     global _limiter
     if _limiter is None:
-        rate = rate_per_minute or get_settings().aeroapi_rate_limit_per_minute
+        rate = rate_per_minute or prefs.current().aeroapi_rate_limit_per_minute
         _limiter = TokenBucket(rate)
     return _limiter
 
@@ -146,21 +150,21 @@ async def spend_month_to_date(session: AsyncSession) -> Decimal:
     return Decimal(str(total or 0))
 
 
-async def budget_status(session: AsyncSession, settings: Settings | None = None) -> BudgetStatus:
+async def budget_status(session: AsyncSession) -> BudgetStatus:
     """What the health page, the UI banner and the widget all read.
 
     The latch is scoped to the month it was written in, which is the whole of the reset
     logic: on the 1st the stored month stops matching and the breaker is simply not
     tripped any more.
     """
-    settings = settings or get_settings()
+    cap = prefs.current().aeroapi_monthly_cap_usd
     month = month_key(datetime.now(UTC))
     spend = await spend_month_to_date(session)
     latched = await _latched(session, month)
     return BudgetStatus(
         spend_usd=spend,
-        cap_usd=settings.aeroapi_monthly_cap_usd,
-        tripped=latched or spend >= settings.aeroapi_monthly_cap_usd,
+        cap_usd=cap,
+        tripped=latched or spend >= cap,
         month=month,
     )
 
@@ -190,9 +194,9 @@ async def _trip(session: AsyncSession, status: BudgetStatus) -> None:
     )
 
 
-async def ensure_budget(session: AsyncSession, settings: Settings | None = None) -> None:
+async def ensure_budget(session: AsyncSession) -> None:
     """Gate every call path. Latches on the way past so a restart stays stopped."""
-    status = await budget_status(session, settings)
+    status = await budget_status(session)
     if not status.tripped:
         return
     if not await _latched(session, status.month):
@@ -216,12 +220,12 @@ class AeroAPIClient:
     ) -> None:
         self._settings = settings or get_settings()
         self._http = httpx.AsyncClient(
-            base_url=self._settings.aeroapi_base_url,
+            base_url=BASE_URL,
             headers={"x-apikey": self._settings.aeroapi_key},
             timeout=httpx.Timeout(HTTP_TIMEOUT_SECONDS),
             transport=transport,
         )
-        self._limiter = limiter or shared_limiter(self._settings.aeroapi_rate_limit_per_minute)
+        self._limiter = limiter or shared_limiter()
 
     @property
     def settings(self) -> Settings:
@@ -242,7 +246,7 @@ class AeroAPIClient:
         if ident_type is not None:
             params["ident_type"] = ident_type
 
-        await ensure_budget(session, self._settings)
+        await ensure_budget(session)
         await self._limiter.acquire()
         response = await self._http.get(f"/flights/{quote(ident, safe='')}", params=params)
         response.raise_for_status()

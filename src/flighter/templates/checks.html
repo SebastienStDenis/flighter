@@ -1,0 +1,7 @@
+<dl class="facts">
+  {% for result in results %}
+  <dt>{{ result.name }}</dt>
+  <dd class="text{{ ' blank' if not result.ok }}">
+    {{ 'ok' if result.ok else 'failed' }} - {{ result.detail }}</dd>
+  {% endfor %}
+</dl>

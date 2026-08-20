@@ -11,11 +11,12 @@ from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
 
-from flighter import web
+from flighter import prefs, web
 from flighter.aeroapi import BudgetStatus
 from flighter.config import Settings
 from flighter.db import get_session
@@ -46,6 +47,20 @@ AIRPORTS = {
         longitude=-0.5,
         tz="Europe/London",
     ),
+}
+
+# Every field the settings form posts, so a test can change one of them.
+SETTINGS_FORM = {
+    "public_base_url": "https://flights.example.com",
+    "log_level": "INFO",
+    "aeroapi_monthly_cap_usd": "4.00",
+    "aeroapi_rate_limit_per_minute": "8",
+    "anthropic_model": "claude-sonnet-5",
+    "extraction_confidence_threshold": "0.85",
+    "gmail_poll_seconds": "180",
+    "ntfy_url": "http://ntfy:80",
+    "ntfy_topic": "flights",
+    "gcal_calendar_id": "cal-id",
 }
 
 CLEAR_BUDGET = BudgetStatus(
@@ -149,9 +164,13 @@ class FakeSession:
     async def delete(self, instance: Any) -> None:
         return None
 
+    async def merge(self, instance: Any) -> Any:
+        self.rows.setdefault(type(instance).__name__, [])
+        return instance
 
-@pytest.fixture
-def client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+
+def build_client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """The app with a faked data layer, ready for a request."""
     session = FakeSession(Passenger=[ALEX])
 
     async def fake_get_airport(_session: Any, iata: str) -> Airport | None:
@@ -169,8 +188,14 @@ def client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
 
     app = web.create_app(settings)
     app.dependency_overrides[get_session] = lambda: session
-    with TestClient(app) as test_client:
-        test_client.session = session  # type: ignore[attr-defined]
+    test_client = TestClient(app)
+    test_client.session = session  # type: ignore[attr-defined]
+    return test_client
+
+
+@pytest.fixture
+def client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    with build_client(settings, monkeypatch) as test_client:
         yield test_client
 
 
@@ -339,3 +364,56 @@ def test_healthz_is_liveness_only(client: TestClient) -> None:
     page = client.get("/healthz")
     assert page.status_code == 200
     assert page.json() == {"status": "ok"}
+
+
+# --- Settings ------------------------------------------------------------------------
+
+
+def test_the_settings_page_names_the_redirect_uri_google_needs(client: TestClient) -> None:
+    body = client.get("/settings").text
+    assert "https://flights.example.com/settings/google/callback" in body
+    # The token has to be readable: it is typed into Scriptable by hand.
+    assert "test-token" in body
+
+
+def test_saving_a_preference_redirects_and_takes_effect(client: TestClient) -> None:
+    response = client.post("/settings", data=SETTINGS_FORM | {"log_level": "DEBUG"})
+    assert response.status_code == 200
+    assert response.url.path == "/settings"
+    assert prefs.current().log_level == "DEBUG"
+
+
+def test_a_typo_in_the_cap_is_refused_with_the_field_named(client: TestClient) -> None:
+    response = client.post(
+        "/settings", data=SETTINGS_FORM | {"aeroapi_monthly_cap_usd": "four dollars"}
+    )
+    assert response.status_code == 400
+    assert "aeroapi monthly cap usd" in response.text
+    # And the typed-in value is still on the form rather than silently reverted.
+    assert "four dollars" in response.text
+
+
+def test_connecting_google_needs_the_client_from_the_env_first(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "google_client_id", "")
+    response = build_client(settings, monkeypatch).get(
+        "/settings/google/connect", follow_redirects=False
+    )
+    assert response.status_code == 400
+    assert "GOOGLE_CLIENT_ID" in response.text
+
+
+def test_connect_sends_the_browser_to_google_with_our_callback(client: TestClient) -> None:
+    response = client.get("/settings/google/connect", follow_redirects=False)
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location.startswith("https://accounts.google.com/")
+    assert quote("https://flights.example.com/settings/google/callback", safe="") in location
+    # Google only returns a refresh token on a fresh grant.
+    assert "prompt=consent" in location
+
+
+def test_a_callback_that_did_not_start_here_is_refused(client: TestClient) -> None:
+    response = client.get("/settings/google/callback?state=forged&code=abc")
+    assert response.status_code == 400

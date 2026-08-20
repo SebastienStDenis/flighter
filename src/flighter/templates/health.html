@@ -48,10 +48,10 @@
 <section class="panel">
   <span class="label">Connected services</span>
   <dl class="facts">
-    <dt>Gmail</dt><dd class="text">{{ 'configured' if settings.gmail_configured else 'not configured' }}</dd>
-    <dt>Google Calendar</dt><dd class="text">{{ 'configured' if settings.gcal_configured else 'not configured' }}</dd>
+    <dt>Google</dt><dd class="text">{{ 'connected' if settings.google_connected else 'not connected' }}</dd>
+    <dt>Google Calendar</dt><dd class="text">{{ 'configured' if prefs.calendar_configured else 'not configured' }}</dd>
     <dt>AeroAPI</dt><dd class="text">{{ 'configured' if settings.aeroapi_configured else 'not configured' }}</dd>
-    <dt>ntfy</dt><dd class="text">{{ 'configured' if settings.ntfy_configured else 'not configured' }}</dd>
+    <dt>ntfy</dt><dd class="text">{{ 'configured' if prefs.ntfy_configured else 'not configured' }}</dd>
   </dl>
 </section>
 

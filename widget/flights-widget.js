@@ -90,7 +90,7 @@ async function resolveToken() {
 async function promptForToken() {
   const alert = new Alert();
   alert.title = "Flight widget token";
-  alert.message = "Paste the value of WIDGET_TOKEN from your flight tracker server.";
+  alert.message = "Paste the widget token from your flight tracker's settings page.";
   alert.addSecureTextField("token", "");
   alert.addAction("Save");
   alert.addCancelAction("Cancel");
