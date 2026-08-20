@@ -32,6 +32,7 @@ from .caldav import CalendarClient
 from .checks import run_checks
 from .config import Settings
 from .db import get_session
+from .mail import FLAG_COLOURS
 from .models import KV, Airport, Booking, FlightEvent, FlightSnapshot
 from .phase import (
     AIRBORNE,
@@ -726,6 +727,7 @@ def create_app(settings: Settings) -> FastAPI:
             "posted": current.model_dump(mode="json"),
             "settings": settings,
             "log_levels": LOG_LEVELS,
+            "flag_colours": tuple(FLAG_COLOURS),
             # What the browser is talking to right now, offered as the public base URL
             # because on a first visit it is almost always the right answer.
             "this_origin": str(request.base_url).rstrip("/"),
@@ -747,7 +749,7 @@ def create_app(settings: Settings) -> FastAPI:
         aeroapi_rate_limit_per_minute: Annotated[str, Form()],
         anthropic_model: Annotated[str, Form()],
         extraction_confidence_threshold: Annotated[str, Form()],
-        imap_import_folder: Annotated[str, Form()],
+        imap_flag_colour: Annotated[str, Form()],
         imap_idle_seconds: Annotated[str, Form()],
         icloud_calendar_name: Annotated[str, Form()] = "",
     ) -> Response:
@@ -758,7 +760,7 @@ def create_app(settings: Settings) -> FastAPI:
             "aeroapi_rate_limit_per_minute": aeroapi_rate_limit_per_minute.strip(),
             "anthropic_model": anthropic_model.strip(),
             "extraction_confidence_threshold": extraction_confidence_threshold.strip(),
-            "imap_import_folder": imap_import_folder.strip(),
+            "imap_flag_colour": imap_flag_colour.strip(),
             "imap_idle_seconds": imap_idle_seconds.strip(),
             "icloud_calendar_name": icloud_calendar_name.strip(),
         }

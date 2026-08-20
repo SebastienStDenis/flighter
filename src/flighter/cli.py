@@ -77,12 +77,12 @@ def _cmd_seed_airports(settings: Settings, _args: argparse.Namespace) -> int:
 
 
 def _cmd_import(settings: Settings, _args: argparse.Namespace) -> int:
-    """Sweep the import folder now instead of waiting for the watcher's next pass."""
-    from .ingest import import_marked
+    """Sweep every mailbox now instead of waiting for the watcher's next pass."""
+    from .ingest import import_flagged
 
     async def run() -> int:
         async with _database(settings):
-            outcomes = await import_marked(settings=settings)
+            outcomes = await import_flagged(settings=settings)
         print(f"imported {len(outcomes)} message(s)")
         return 0
 
@@ -138,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     subparsers.add_parser("check", help="exercise every external dependency").set_defaults(
         func=_cmd_check
     )
-    subparsers.add_parser("import", help="import every marked email now").set_defaults(
+    subparsers.add_parser("import", help="import every flagged email now").set_defaults(
         func=_cmd_import
     )
 

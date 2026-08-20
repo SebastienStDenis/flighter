@@ -45,10 +45,10 @@ class Prefs(BaseModel):
     # Below this an extraction lands in the review queue instead of the tracked list.
     extraction_confidence_threshold: float = 0.85
 
-    # The mailbox you move a flight email into to have it imported, and how often the
-    # IDLE that watches it is re-issued. A silent connection is what an impatient server
-    # and a NAT table both drop, and five minutes is well inside what either tolerates.
-    imap_import_folder: str = "flighter"
+    # The Apple Mail flag colour that means "import this", and how often the IDLE that
+    # watches for it is re-issued. A silent connection is what an impatient server and a
+    # NAT table both drop, and five minutes is well inside what either tolerates.
+    imap_flag_colour: str = "grey"
     imap_idle_seconds: int = 300
     # The display name of the iCloud calendar flights are written to, found by name
     # because iCloud will not let a client create one. A calendar of its own, so a bad
@@ -59,6 +59,16 @@ class Prefs(BaseModel):
     @classmethod
     def _strip_trailing_slash(cls, value: str) -> str:
         return value.rstrip("/")
+
+    @field_validator("imap_flag_colour")
+    @classmethod
+    def _known_colour(cls, value: str) -> str:
+        # Imported here rather than at the top because mail.py reads these preferences.
+        from .mail import FLAG_COLOURS
+
+        if value not in FLAG_COLOURS:
+            raise ValueError(f"pick one of {', '.join(FLAG_COLOURS)}")
+        return value
 
     @property
     def calendar_configured(self) -> bool:

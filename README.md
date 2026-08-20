@@ -1,16 +1,15 @@
 # flighter
 
-A self-hosted replacement for Flighty. You move a booking email into a mailbox called
-`flighter`; it reads the flight out, tracks it on FlightAware, keeps an iCloud calendar
-honest, and puts a live countdown on your phone's lock screen. One user, one machine, no
-App Store.
+A self-hosted replacement for Flighty. You flag a booking email grey; it reads the flight
+out, tracks it on FlightAware, keeps an iCloud calendar honest, and puts a live countdown
+on your phone's lock screen. One user, one machine, no App Store.
 
 ```
 you mark an email  →  iCloud IMAP  →  extraction  →  bookings  →  AeroAPI polling  →  change detection
-move it to            IDLE + sweep    JSON-LD                     cadence tightens    diff last two
-`flighter`            done → Archive  Claude fallback             as departure        snapshots
-      │               failed → stays  review queue                approaches          dead band
-      ▼                                                                                   │
+flag it the           IDLE + sweep    JSON-LD                     cadence tightens    diff last two
+import colour         every mailbox   Claude fallback             as departure        snapshots
+      │               done → unflag   review queue                approaches          dead band
+      ▼               failed → stays                                                      │
 Pushover push                                                                 ┌───────────┴───────┐
 imported, or why not                                                          ▼                   ▼
                                                                         Pushover push     iCloud Calendar
@@ -30,21 +29,23 @@ corrected. Change detection is a diff of the newest two snapshots, so rewriting 
 would erase the very event it should have raised.
 
 **You say which emails are flights.** Nothing scans your inbox and nothing guesses. You
-move a booking email into a mailbox called `flighter` from whichever device is in your
-hand, and that message - only that message - is imported. Deciding it yourself is simpler
-and more predictable than a heuristic deciding for you, and it removes false positives as
-a category rather than tuning them down.
+give a booking email one colour of flag from whichever device is in your hand, and that
+message - only that message - is imported. Deciding it yourself is simpler and more
+predictable than a heuristic deciding for you, and it removes false positives as a
+category rather than tuning them down. A flag rather than a mailbox because the email
+never has to move: it stays filed wherever you already keep it, before and after.
 
-**The mark is the queue.** There is no cursor and no window to re-scan: whatever is in the
-folder is what is still to do. A message that imported is moved to Archive, which is what
-finishing means; a message that failed is left exactly where it is, which is what retrying
-means. Either way your phone is told - what was added, or what went wrong and a link
-straight back to the email - and a message that has already been reported as failed is
-never reported again, because a push every five minutes is worse than the bug it names.
+**The mark is the queue.** There is no cursor and no window to re-scan: whatever carries
+the flag is what is still to do. A message that imported has its flag taken off and is
+left exactly where it stands, which is what finishing means; a message that failed keeps
+its flag, which is what retrying means. Either way your phone is told - what was added, or
+what went wrong and a link straight back to the email - and a message that has already
+been reported as failed is never reported again, because a push every five minutes is
+worse than the bug it names.
 
 Bodies are read with `BODY.PEEK[]`, so no email is ever silently marked as read, and the
-ingest log is keyed on each email's `Message-ID` so moving a message around does not make
-it new again.
+ingest log is keyed on each email's `Message-ID` so re-filing a message does not make it
+new again.
 
 **Timezones are resolved from the airport, never from the email.** Airlines state offsets
 wrong often enough that trusting them is a bug waiting for a date-line flight. Every
@@ -68,7 +69,7 @@ useless in an airport.
 
 **Credentials and preferences live in different places, and never both.** A credential is
 set once by hand in `.env`, is never handed back out by the UI, and the app never writes
-it. Everything else - the public URL, the spend cap, the import mailbox, the calendar -
+it. Everything else - the public URL, the spend cap, the import flag, the calendar -
 is a preference: it has a working default, it is edited at `/settings`, and the database
 is the only place it lives. No value has two homes, so there is never a
 question of which one wins.
@@ -116,26 +117,34 @@ sign in with.
 Only one connection is ever held: iCloud allows about five per account, and your phone and
 your Mac are already using some of them.
 
-### A mailbox called flighter
+### A flag colour of its own
 
-Make one iCloud mailbox and the whole import story is done. On the iPhone: **Mailboxes →
-Edit → New Mailbox**, name it `flighter`, and set **Mailbox Location** to your iCloud
-account so it exists on the server rather than on the phone. On the Mac it is **Mailbox →
-New Mailbox** with the same location, and on [iCloud.com](https://www.icloud.com/mail) it
-is the **+** beside Folders.
+Pick one of Apple Mail's flag colours, give it to this app, and never use it for anything
+else. The default is **grey**, the last colour in the row and the one nobody reaches for
+by habit. There is nothing to create: the flag already exists on every device you are
+signed in on.
 
-To import a flight, move the email into it: swipe and tap **More → Move Message** on the
-phone, or drag it on the Mac. Within a few seconds you get a push naming the flight and
-linking to its page here, and the email lands in Archive. If nothing could be read out of
-it you get a push saying so, with a link that opens the email itself in Mail, and the
-message stays in `flighter` so the next pass tries again - except when there was simply no
-flight in it, which is an answer that will not change, so that one is archived too.
+To import a flight, flag the email: on the iPhone, **open it, tap the More button, tap
+Flag**, then pick the colour. On the Mac, select it and choose the colour from the **flag
+button in the toolbar**. Within a few seconds you get a push naming the flight and linking
+to its page here, and the flag comes off - the email itself does not move. If nothing could
+be read out of it you get a push saying so, with a link that opens the email in Mail, and
+the flag stays on so the next pass tries again - except when there was simply no flight in
+it, which is an answer that will not change, so that one is unflagged too.
 
-> An Apple Mail *flag* would have been fewer taps, but Apple's own documentation rules it
-> out: in the Mail categories view, "you cannot flag emails that have been categorized as
-> Promotions, Updates, or Transactions", and airline confirmations are Transactions. Moving
-> a message into a mailbox works in that view, and everywhere else. The reasoning and the
-> sources are in [`docs/api-research.md`](docs/api-research.md) §6.
+Rename the flag to `flighter` in Mail on the Mac if you want your own word for it -
+**click the flag name in the sidebar, click it again, and type**. That name is a label on
+that Mac and never leaves it; the colour is the whole of what travels, and the colour is
+what this watches for.
+
+> **Red is not on the list.** Apple encodes a flag's colour as up to three IMAP keywords,
+> and red is the index they all leave unset - so a red flag is indistinguishable from a
+> plain flag set by anything else. The other six are unambiguous. One caveat, from Apple's
+> own documentation: in the iOS Mail *categories* view, "you cannot flag emails that have
+> been categorized as Promotions, Updates, or Transactions", and airline confirmations are
+> Transactions. The current iPhone guide describes flagging them anyway; either way, List
+> View has no such restriction. The mapping, the sources and the disagreement are in
+> [`docs/api-research.md`](docs/api-research.md) §6.
 
 ### A calendar called Flights
 
@@ -211,13 +220,13 @@ Open `https://flighter.<your-tailnet>.ts.net/settings` and finish there:
 1. Set the **public base URL** - the page offers the address you opened it on.
 2. Type the **calendar name** you made in the Calendar app, `Flights` or whatever you
    called it. Leave it empty and nothing is written to any calendar.
-3. Check the **import mailbox** name matches the one you made in Mail, `flighter` by
-   default.
+3. Pick the **import flag** colour, `grey` by default, and decide not to use that colour
+   for anything else.
 4. **Run checks**. It exercises Postgres, AeroAPI, iCloud mail, iCloud Calendar and
    Pushover in turn and names the broken one, which is the question you will actually
-   have. The mail check says how many messages are sitting in `flighter` waiting.
+   have. The mail check says how many messages are carrying the flag and waiting.
 
-Then either add a flight by hand or move a booking email into `flighter`.
+Then either add a flight by hand or flag a booking email.
 
 Pushing to `main` publishes a `linux/amd64` + `linux/arm64` image to
 `ghcr.io/sebastienstdenis/flighter:latest`, so updating the home stack is:
@@ -232,7 +241,8 @@ and tests, so a commit that fails CI never ships as `:latest`.
 
 To build locally instead of pulling, `docker compose build` still works from a checkout.
 
-Marked mail is picked up within seconds, and swept for again every few minutes regardless.
+A flag set on mail in the inbox is picked up within seconds; every mailbox is swept again
+every few minutes regardless, since IDLE only ever reports the one it is watching.
 To run a sweep on the spot instead of waiting:
 
 ```sh

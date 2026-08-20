@@ -1,15 +1,18 @@
-"""iCloud over IMAP: one connection, one folder, and raw messages out.
+"""iCloud over IMAP: one connection, one flag colour, and raw messages out.
 
-It knows nothing about flights. The folder *is* the queue: an email you have moved into
-it is work waiting to be done, and moving it back out is what says the work is finished.
-Nothing is scanned, ranked or guessed at, so there is no cursor to keep and no window to
-re-scan - what is in the folder is what is pending, and an empty folder means there is
-nothing to do.
+It knows nothing about flights. The flag *is* the queue: an email you have flagged the
+colour named on the settings page is work waiting to be done, and taking the flag off is
+what says the work is finished. Nothing is scanned, ranked or guessed at, so there is no
+cursor to keep and no window to re-scan - what is flagged is what is pending, and nothing
+flagged means there is nothing to do.
+
+A flag rides with the message wherever it already lives, so the sweep looks in every
+mailbox the account has rather than in one, all of it down the same connection.
 
 Bodies are read with `BODY.PEEK[]`, so an email is never silently marked as read. The
-mark itself is a write, and the only one: a message that came out the far end of the
-pipeline is moved to the archive folder, and a message that failed is left exactly where
-it stands so the next sweep tries it again.
+unflag is a write, and the only one: a message that came out the far end of the pipeline
+loses its flag where it stands, and a message that failed keeps it so the next sweep
+tries it again.
 """
 
 from __future__ import annotations
@@ -46,14 +49,39 @@ COMMAND_TIMEOUT_SECONDS = 30.0
 RECONNECT_MIN_SECONDS = 15.0
 RECONNECT_MAX_SECONDS = 900.0
 
-# Where a finished message goes. `\Archive` is what the account itself calls its archive
-# whatever the display language is; the last resort is the inbox, which is somewhere the
-# user will certainly look.
-ARCHIVE_ATTRIBUTE = "\\archive"
-ARCHIVE_FALLBACKS = ("Archive", "INBOX")
+# Apple encodes a flag's colour as a three-bit index carried alongside \Flagged, low bit
+# first, in the order the colours appear in Mail's own flag menu. Red is index 0 and so
+# sets no keyword at all, which makes it indistinguishable from a plain flag set by a
+# client that knows nothing about colours; it is not offered. docs/api-research.md §6.1.
+FLAG_KEYWORDS = ("$MailFlagBit0", "$MailFlagBit1", "$MailFlagBit2")
+FLAG_COLOURS = {
+    "orange": 1,
+    "yellow": 2,
+    "green": 3,
+    "blue": 4,
+    "purple": 5,
+    "grey": 6,
+}
+
+# Everything an unflag takes off, whatever colour was configured: removing a flag a
+# message does not carry is not an error, and clearing the colour bits without \Flagged
+# would leave the message flagged red rather than unflagged.
+_UNFLAG = " ".join(("\\Flagged", *FLAG_KEYWORDS))
+
+# IDLE announces changes in the selected mailbox only, and the inbox is where a booking
+# confirmation is flagged nine times in ten.
+IDLE_MAILBOX = "INBOX"
+
+# Never searched. A draft or a sent copy of a forwarded confirmation holds the same
+# flight and would import it a second time under a Message-ID of its own, and mail in
+# Trash was thrown away on purpose. Matched on the RFC 6154 attributes so that a
+# non-English account resolves them, with the names iCloud gives them as a backstop for
+# a LIST reply that carries no attributes at all.
+SKIPPED_ATTRIBUTES = frozenset({"\\trash", "\\junk", "\\drafts", "\\sent"})
+SKIPPED_NAMES = frozenset({"trash", "deleted messages", "junk", "drafts", "sent", "sent messages"})
+UNSELECTABLE_ATTRIBUTE = "\\noselect"
 
 _UIDVALIDITY_RE = re.compile(rb"\[UIDVALIDITY (\d+)\]")
-_EXISTS_RE = re.compile(rb"^(\d+) EXISTS")
 _UID_RE = re.compile(rb"UID (\d+)")
 # `(\HasNoChildren \Archive) "/" "Archive"`: attributes, the hierarchy delimiter, a name
 # that is quoted only when the server feels like quoting it.
@@ -72,8 +100,9 @@ class Message(BaseModel):
 
 
 class Marked(NamedTuple):
-    """One message waiting in the folder, with the UID that clears its mark."""
+    """One flagged message, with the mailbox and UID that together clear its flag."""
 
+    mailbox: str
     uid: int
     message: Message
 
@@ -135,23 +164,27 @@ def _parse_date(value: object) -> datetime | None:
 
 
 class Mailbox:
-    """One IMAP connection to the folder you move flight emails into.
+    """One IMAP connection, and every mailbox on the account behind it.
 
-    Held open and idling rather than reopened every few minutes: a login costs Apple
-    more than an IDLE does, and the connection budget is shared with every other client
-    signed in to the account.
+    Held open and idling rather than reopened every few minutes: a login costs Apple more
+    than an IDLE does, and the connection budget is shared with every other client signed
+    in to the account. The sweep never opens a second one either - it selects each
+    mailbox in turn down this one.
     """
 
     def __init__(self, settings: Settings, client: Any | None = None) -> None:
         self._settings = settings
         self._client = client
-        self.folder = prefs.current().imap_import_folder
-        self.archive = ARCHIVE_FALLBACKS[-1]
+        self.colour = prefs.current().imap_flag_colour
+        self.mailboxes: tuple[str, ...] = ()
         self.waiting = 0
+        self._criteria = ""
+        self._selected: str | None = None
         self._uidvalidity = 0
 
     async def connect(self) -> None:
-        """Open the connection, log in, and select the folder."""
+        """Open the connection, log in, and work out which mailboxes to sweep."""
+        self._criteria = _criteria(self.colour)
         if self._client is None:
             client = IMAP4_SSL(host=IMAP_HOST, port=IMAP_PORT, timeout=COMMAND_TIMEOUT_SECONDS)
             await client.wait_hello_from_server()
@@ -165,73 +198,73 @@ class Mailbox:
         )
 
         listed = _listed(_ok(await self._client.list('""', '"*"'), "list").lines)
-        if self.folder not in {entry.name for entry in listed}:
-            raise RuntimeError(
-                f"there is no mailbox called {self.folder}. Make one in Mail and move the "
-                f"flight emails you want imported into it."
-            )
-        self.archive = _archive(listed)
-
-        response = _ok(await self._client.select(_quote(self.folder)), f"select {self.folder}")
-        uidvalidity = _first(_UIDVALIDITY_RE, response.lines)
-        if uidvalidity is None:
-            raise RuntimeError(f"{self.folder} was selected without a UIDVALIDITY")
-        self._uidvalidity = uidvalidity
-        self.waiting = _first(_EXISTS_RE, response.lines) or 0
+        self.mailboxes = _searchable(listed)
+        await self._select(IDLE_MAILBOX)
         log.info(
-            "watching %s: %d message(s) marked, finished mail goes to %s",
-            self.folder,
-            self.waiting,
-            self.archive,
+            "watching for %s flags across %d mailbox(es): %s",
+            self.colour,
+            len(self.mailboxes),
+            ", ".join(self.mailboxes),
         )
 
     async def close(self) -> None:
         """Hang up. Never raises: this runs while something else is already going wrong."""
         client, self._client = self._client, None
+        self._selected = None
         if client is None:
             return
         with contextlib.suppress(Exception):
             await client.logout()
 
     async def poll(self) -> list[Marked]:
-        """Everything sitting in the folder right now, oldest first.
+        """Every message carrying the flag right now, mailbox by mailbox, oldest first.
 
-        No de-duplication and no cursor: the folder holds only what is still to be done,
-        and anything already dealt with was moved out of it by `clear_mark`.
+        No de-duplication and no cursor: a flag is only ever set by the user and only ever
+        cleared by `clear_mark`, so what is flagged is exactly what is still to be done.
         """
-        response = _ok(await self._require_client().uid_search("ALL", charset=None), "search")
-        uids = _uids(response.lines)
-        self.waiting = len(uids)
-
         marked = []
-        for uid in uids:
-            for _, raw in await self._fetch(uid, "(BODY.PEEK[])"):
-                message_id = _message_id(raw, self._uidvalidity, uid)
-                marked.append(Marked(uid, parse_message(raw, message_id)))
+        for mailbox in self.mailboxes:
+            for uid in await self._flagged(mailbox):
+                for _, raw in await self._fetch(uid, "(BODY.PEEK[])"):
+                    message_id = _message_id(raw, self._uidvalidity, uid)
+                    marked.append(Marked(mailbox, uid, parse_message(raw, message_id)))
+        self.waiting = len(marked)
         return marked
 
-    async def clear_mark(self, uid: int) -> None:
-        """Move a finished message to the archive, which is what unmarks it.
+    async def count_flagged(self) -> int:
+        """How many messages carry the flag, without fetching any of them."""
+        waiting = 0
+        for mailbox in self.mailboxes:
+            waiting += len(await self._flagged(mailbox))
+        self.waiting = waiting
+        return waiting
+
+    async def clear_mark(self, marked: Marked) -> None:
+        """Take the flag off a finished message and leave it exactly where it is.
 
         Only ever called once the pipeline has written the message's ingest_log row, so a
-        crash between the two leaves the message marked and the next sweep replays it.
+        crash between the two leaves the message flagged and the next sweep replays it.
         """
+        await self._select(marked.mailbox)
         _ok(
-            await self._require_client().uid("move", str(uid), _quote(self.archive)),
-            f"move {uid} to {self.archive}",
+            await self._require_client().uid(
+                "store", str(marked.uid), f"-FLAGS.SILENT ({_UNFLAG})"
+            ),
+            f"unflag {marked.uid} in {marked.mailbox}",
         )
 
     async def wait_for_mail(self, seconds: float) -> None:
         """Idle until the server has something to say, or the cycle is up.
 
-        Marking a message *is* moving it into the selected folder, so IDLE reports it as
-        an arrival and the next sweep runs within a second or two. The timeout is the
-        floor under that: a move made while the connection was being re-established is
-        never announced to anybody, and only the sweep finds it.
+        IDLE reports changes in the selected mailbox and nowhere else, so it catches the
+        common case - a confirmation flagged where it landed, in the inbox - and the next
+        sweep runs within a second or two. A flag set on a message filed somewhere else is
+        never announced to anybody, and the sweep this timeout paces is what finds it.
 
         Cycled rather than left open indefinitely because a silent IDLE is what a NAT
         table and an impatient server both drop, and neither tells the client.
         """
+        await self._select(IDLE_MAILBOX)
         client = self._require_client()
         idle = await client.idle_start(timeout=seconds)
         # idle_start's own timer ends the wait, so the timeout here only matters when
@@ -246,6 +279,25 @@ class Mailbox:
         if self._client is None:
             raise RuntimeError("the mailbox is not connected")
         return self._client
+
+    async def _select(self, mailbox: str) -> None:
+        """SELECT, unless this mailbox is already the selected one."""
+        if self._selected == mailbox:
+            return
+        response = _ok(await self._require_client().select(_quote(mailbox)), f"select {mailbox}")
+        uidvalidity = _first(_UIDVALIDITY_RE, response.lines)
+        if uidvalidity is None:
+            raise RuntimeError(f"{mailbox} was selected without a UIDVALIDITY")
+        self._selected = mailbox
+        self._uidvalidity = uidvalidity
+
+    async def _flagged(self, mailbox: str) -> list[int]:
+        await self._select(mailbox)
+        response = _ok(
+            await self._require_client().uid_search(self._criteria, charset=None),
+            f"search {mailbox}",
+        )
+        return _uids(response.lines)
 
     async def _fetch(self, uid: int, parts: str) -> list[tuple[int, bytes]]:
         response = _ok(await self._require_client().uid("fetch", str(uid), parts), f"fetch {uid}")
@@ -313,28 +365,50 @@ def _listed(lines: Sequence[Any]) -> list[Listed]:
     return entries
 
 
-def _archive(listed: Sequence[Listed]) -> str:
-    for entry in listed:
-        if ARCHIVE_ATTRIBUTE in entry.attributes:
-            return entry.name
-    names = {entry.name for entry in listed}
-    return next((name for name in ARCHIVE_FALLBACKS if name in names), ARCHIVE_FALLBACKS[-1])
+def _searchable(listed: Sequence[Listed]) -> tuple[str, ...]:
+    """The mailboxes a flagged message is worth looking for in, in LIST order."""
+    return tuple(
+        entry.name
+        for entry in listed
+        if UNSELECTABLE_ATTRIBUTE not in entry.attributes
+        and not entry.attributes & SKIPPED_ATTRIBUTES
+        and entry.name.lower() not in SKIPPED_NAMES
+    )
+
+
+def _criteria(colour: str) -> str:
+    """The SEARCH keys that match exactly one flag colour and no other.
+
+    Every bit is pinned, not only the set ones: purple and grey both carry
+    `$MailFlagBit2`, so a search that only asked for what is set would import mail marked
+    for something else entirely.
+    """
+    index = FLAG_COLOURS.get(colour)
+    if index is None:
+        raise RuntimeError(
+            f"{colour!r} is not a flag colour this can watch for. "
+            f"Pick one of {', '.join(FLAG_COLOURS)} on the settings page."
+        )
+    keys = ["FLAGGED"]
+    for bit, keyword in enumerate(FLAG_KEYWORDS):
+        keys.append(f"{'KEYWORD' if index >> bit & 1 else 'UNKEYWORD'} {keyword}")
+    return " ".join(keys)
 
 
 def _message_id(raw: bytes, uidvalidity: int, uid: int) -> str:
     """The RFC822 Message-ID, which is what survives a message being moved or re-filed.
 
-    A UID does not: it belongs to one folder and one UIDVALIDITY, and clearing a mark
-    moves the message to another folder, so keying the ingest log on it would make every
-    finished message look new again.
+    A UID does not: it belongs to one mailbox under one UIDVALIDITY, and the same
+    confirmation filed by hand in two places would look like two different messages, so
+    keying the ingest log on it would import it twice.
     """
     header = message_from_bytes(raw, policy=policy.default).get("Message-ID")
     value = str(header).strip() if header else ""
     return value or f"<uid-{uidvalidity}-{uid}@icloud.invalid>"
 
 
-def _quote(folder: str) -> str:
-    escaped = folder.replace("\\", "\\\\").replace('"', '\\"')
+def _quote(mailbox: str) -> str:
+    escaped = mailbox.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
 
 

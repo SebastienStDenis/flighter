@@ -192,10 +192,10 @@ class IngestLog(Base):
     """Every email we have looked at, so a replay never re-processes one.
 
     Keyed on the RFC822 Message-ID rather than anything the server hands out: an IMAP
-    UID belongs to one folder under one UIDVALIDITY, and finishing with a message moves
-    it to another folder, so keying on a UID would make every import look new again.
+    UID belongs to one mailbox under one UIDVALIDITY, so keying on a UID would make the
+    same confirmation, filed by hand in two places, look like two different emails.
 
-    It is also the retry state. An `error` row keeps its message marked and is tried
+    It is also the retry state. An `error` row keeps its message flagged and is tried
     again on the next sweep; every other outcome is final, and having one already on file
     is what stops a second push going out about the same email.
     """

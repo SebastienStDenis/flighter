@@ -313,18 +313,24 @@ async def test_an_extraction_that_is_not_a_confirmation_is_no_flight(
 
 
 class FakeMailbox:
-    """A folder holding marked messages, and a record of which marks were cleared."""
+    """Flagged messages across the account, and a record of which flags were cleared.
 
-    def __init__(self, *messages: Message) -> None:
-        self.marked = [Marked(index + 1, message) for index, message in enumerate(messages)]
-        self.cleared: list[int] = []
+    Nothing here moves: an unflagged message is still in the mailbox it was found in, so
+    `cleared` names both, and a message left flagged comes back on the next sweep.
+    """
+
+    def __init__(self, *messages: Message, mailbox: str = "INBOX") -> None:
+        self.marked = [
+            Marked(mailbox, index + 1, message) for index, message in enumerate(messages)
+        ]
+        self.cleared: list[tuple[str, int]] = []
 
     async def poll(self) -> list[Marked]:
         return list(self.marked)
 
-    async def clear_mark(self, uid: int) -> None:
-        self.cleared.append(uid)
-        self.marked = [item for item in self.marked if item.uid != uid]
+    async def clear_mark(self, marked: Marked) -> None:
+        self.cleared.append((marked.mailbox, marked.uid))
+        self.marked = [item for item in self.marked if item.uid != marked.uid]
 
 
 class FakeNotifier:
@@ -365,10 +371,21 @@ async def test_a_marked_message_is_imported_and_unmarked(
     notifier = FakeNotifier()
 
     assert await sweep(mailbox, notifier, settings) == ["created"]
-    assert mailbox.cleared == [1]
+    assert mailbox.cleared == [("INBOX", 1)]
     (outcome, bookings) = notifier.imported[0]
     assert (outcome, [booking.id for booking in bookings]) == ("created", [1])
     assert notifier.failed == []
+
+
+async def test_a_message_is_unflagged_where_it_was_found(
+    settings: Settings, recorder: Recorder, one_session: FakeSession
+) -> None:
+    """Nothing is filed anywhere: the email is left in whichever mailbox it already sat in."""
+    mailbox = FakeMailbox(message("flight_jsonld.eml"), mailbox="Travel")
+    notifier = FakeNotifier()
+
+    assert await sweep(mailbox, notifier, settings) == ["created"]
+    assert mailbox.cleared == [("Travel", 1)]
 
 
 async def test_a_failure_keeps_its_mark(
@@ -432,7 +449,7 @@ async def test_a_retry_that_works_is_imported_and_reported(
     use_model(monkeypatch, extraction())
     assert await sweep(mailbox, notifier, settings) == ["created"]
 
-    assert mailbox.cleared == [1]
+    assert mailbox.cleared == [("INBOX", 1)]
     assert [outcome for outcome, _ in notifier.imported] == ["created"]
     assert one_session.log["flight_plain.eml"].error is None
 
@@ -445,7 +462,7 @@ async def test_a_marked_email_with_no_flight_is_reported_and_unmarked(
     notifier = FakeNotifier()
 
     assert await sweep(mailbox, notifier, settings) == ["no_flight"]
-    assert mailbox.cleared == [1]
+    assert mailbox.cleared == [("INBOX", 1)]
     (message_id, _, reason) = notifier.failed[0]
     assert message_id == "airline_promo.eml"
     assert "no flight" in reason
@@ -458,8 +475,8 @@ async def test_a_message_that_will_not_unmark_is_not_reported_twice(
     """A mark that cannot be cleared must not turn one import into a push every sweep."""
 
     class Stuck(FakeMailbox):
-        async def clear_mark(self, uid: int) -> None:
-            raise RuntimeError("the archive is over quota")
+        async def clear_mark(self, marked: Marked) -> None:
+            raise RuntimeError("the flag will not come off")
 
     mailbox = Stuck(message("flight_jsonld.eml"))
     notifier = FakeNotifier()

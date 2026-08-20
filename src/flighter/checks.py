@@ -98,10 +98,10 @@ async def _check_pushover(settings: Settings) -> CheckResult:
 
 
 async def _check_mail(settings: Settings) -> CheckResult:
-    """Logs in, finds the import folder and counts what is waiting in it.
+    """Logs in and counts what carries the flag, across every mailbox the sweep looks in.
 
     That is the whole sweep short of doing the work, so it answers both questions at
-    once: can the mark be seen at all, and is anything sitting there unimported.
+    once: can the flag be seen at all, and is anything sitting there unimported.
     """
     if not settings.icloud_configured:
         return CheckResult(
@@ -112,11 +112,17 @@ async def _check_mail(settings: Settings) -> CheckResult:
     mailbox = Mailbox(settings)
     try:
         await mailbox.connect()
+        waiting = await mailbox.count_flagged()
     except Exception as exc:
         return CheckResult("mail", False, str(exc))
     finally:
         await mailbox.close()
-    return CheckResult("mail", True, f"{mailbox.waiting} message(s) marked in {mailbox.folder}")
+    return CheckResult(
+        "mail",
+        True,
+        f"{waiting} message(s) flagged {mailbox.colour} across "
+        f"{len(mailbox.mailboxes)} mailbox(es)",
+    )
 
 
 async def _check_calendar(settings: Settings) -> CheckResult:

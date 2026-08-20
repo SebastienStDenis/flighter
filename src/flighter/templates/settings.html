@@ -121,22 +121,27 @@
   <div class="card mt-3" data-size="sm">
     <header>
       <h3>Mail</h3>
-      <p>Only the emails you move into this mailbox are imported. Nothing else is read.</p>
+      <p>Only the emails you flag this colour are imported. Nothing else is read.</p>
     </header>
     <section>
       <fieldset class="fieldset gap-4">
         <div role="group" class="field">
-          <label for="imap_import_folder">Import mailbox</label>
-          <input type="text" id="imap_import_folder" name="imap_import_folder" required
-                 class="font-mono" aria-describedby="folder-help"
-                 value="{{ posted['imap_import_folder'] }}">
-          <p id="folder-help">Make a mailbox with this name in your iCloud account, then move a
-            booking email into it and the flight appears here. On the iPhone:
-            <strong>Mailboxes &rarr; Edit &rarr; New Mailbox</strong>, give it this name, set
-            <strong>Mailbox Location</strong> to iCloud; then swipe an email and tap
-            <strong>More &rarr; Move Message</strong>. On the Mac, drag the email into the same
-            mailbox. Imported mail is moved to Archive; anything that failed stays where it is
-            and is tried again, and your phone is told either way.</p>
+          <label for="imap_flag_colour">Import flag</label>
+          <select id="imap_flag_colour" name="imap_flag_colour" aria-describedby="flag-help">
+            {% for colour in flag_colours %}
+            <option value="{{ colour }}"{{ ' selected' if colour == posted['imap_flag_colour'] }}>
+              {{- colour|capitalize -}}</option>
+            {% endfor %}
+          </select>
+          <p id="flag-help">Give this colour to a booking email and the flight appears here.
+            On the iPhone: <strong>open the email, tap the More button, tap Flag</strong>, then
+            pick the colour. On the Mac: select the email and <strong>choose the colour from the
+            flag button in the toolbar</strong>. Once it is imported the flag comes off and the
+            email stays exactly where it was; anything that failed keeps its flag and is tried
+            again, and your phone is told either way. Rename the flag to <em>flighter</em> in Mail
+            on the Mac if you like - that name is only a label on that Mac, and the colour is what
+            this watches for. <strong>Red is not on the list</strong>: it is the one colour Apple
+            sends with no marker at all, so it cannot be told apart from an ordinary flag.</p>
         </div>
         <div class="grid grid-cols-3 gap-3">
           <div role="group" class="field">

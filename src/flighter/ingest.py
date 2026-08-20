@@ -1,13 +1,14 @@
-"""The pipeline: a marked email in, bookings, a push, and one ingest_log row out.
+"""The pipeline: a flagged email in, bookings, a push, and one ingest_log row out.
 
 Every message ends with exactly one ingest_log row, whatever happened to it, because
 that row is both the record of what we decided and the thing that stops a re-delivery
 being processed twice. One bad email is never allowed to stop the loop.
 
-The mark is the queue, so the row is also the retry state. A message that failed keeps
-its mark and is swept again a few minutes later; a message that got as far as a decision
-has its mark cleared and never comes back. Either way the phone is told once, and only
-once, which is why the outcome already on file is read before the new one is written.
+The flag is the queue, so the row is also the retry state. A message that failed keeps
+its flag and is swept again a few minutes later; a message that got as far as a decision
+is unflagged where it stands and never comes back. Either way the phone is told once, and
+only once, which is why the outcome already on file is read before the new one is
+written.
 """
 
 from __future__ import annotations
@@ -36,9 +37,9 @@ log = logging.getLogger(__name__)
 # a success because it is the one that still needs a person.
 _OUTCOME_PRECEDENCE = ("review", "created", "duplicate")
 
-# The only outcome that keeps its mark, and so the only one that is ever tried again.
+# The only outcome that keeps its flag, and so the only one that is ever tried again.
 # Everything else has been decided, including an email that turned out to hold no flight:
-# leaving that one marked would retry a message whose answer cannot change, every few
+# leaving that one flagged would retry a message whose answer cannot change, every few
 # minutes, for as long as the service runs.
 ERROR = "error"
 
@@ -189,7 +190,7 @@ async def _record(
 
 
 async def run_ingest_loop(stopping: asyncio.Event, *, settings: Settings | None = None) -> None:
-    """Hold one IMAP connection open and import what is marked on it, until asked to stop.
+    """Hold one IMAP connection open and import what is flagged on it, until asked to stop.
 
     A connection that fails is reopened after a wait that doubles each time: iCloud
     allows only a handful of connections per account, and a client that reconnects in a
@@ -201,7 +202,7 @@ async def run_ingest_loop(stopping: asyncio.Event, *, settings: Settings | None 
 
     while not stopping.is_set():
         if not settings.icloud_configured:
-            log.debug("iCloud is not configured; not watching the mailbox")
+            log.debug("iCloud is not configured; not watching for flagged mail")
             await _pause(stopping, prefs.current().imap_idle_seconds)
             continue
 
@@ -209,10 +210,10 @@ async def run_ingest_loop(stopping: asyncio.Event, *, settings: Settings | None 
         try:
             await mailbox.connect()
             backoff = RECONNECT_MIN_SECONDS
-            # The folder is a preference, and the connection is selected on the one that
-            # was live when it opened. Changing it on the settings page drops out of here
-            # and reconnects on the new one rather than waiting for a restart.
-            while not stopping.is_set() and mailbox.folder == prefs.current().imap_import_folder:
+            # The colour is a preference, and the search was built from the one that was
+            # live when the connection opened. Changing it on the settings page drops out
+            # of here and reconnects on the new one rather than waiting for a restart.
+            while not stopping.is_set() and mailbox.colour == prefs.current().imap_flag_colour:
                 await ingest_once(mailbox, settings, notifier)
                 await mailbox.wait_for_mail(prefs.current().imap_idle_seconds)
         except Exception:
@@ -225,10 +226,10 @@ async def run_ingest_loop(stopping: asyncio.Event, *, settings: Settings | None 
 
 
 async def ingest_once(mailbox: Mailbox, settings: Settings, notifier: Notifier) -> list[str]:
-    """One sweep: import everything that is marked, and unmark whatever is finished.
+    """One sweep: import everything that is flagged, and unflag whatever is finished.
 
     Each message is committed on its own so that a failure part way through a sweep keeps
-    everything already imported, and the mark is cleared only after its row is written.
+    everything already imported, and the flag is cleared only after its row is written.
     """
     outcomes = []
     for marked in await mailbox.poll():
@@ -238,15 +239,15 @@ async def ingest_once(mailbox: Mailbox, settings: Settings, notifier: Notifier) 
     return outcomes
 
 
-async def import_marked(*, settings: Settings | None = None) -> list[str]:
-    """One sweep of the folder, for the CLI.
+async def import_flagged(*, settings: Settings | None = None) -> list[str]:
+    """One sweep of every mailbox, for the CLI.
 
     Opens a connection of its own, so running this while the watcher is up costs it a
     connection for no longer than the sweep takes.
     """
     settings = settings or get_settings()
     if not settings.icloud_configured:
-        log.warning("iCloud is not configured; there is no mailbox to sweep")
+        log.warning("iCloud is not configured; there is no mail to sweep")
         return []
 
     mailbox = Mailbox(settings)
@@ -258,7 +259,7 @@ async def import_marked(*, settings: Settings | None = None) -> list[str]:
 
 
 async def _import(mailbox: Mailbox, marked: Marked, settings: Settings, notifier: Notifier) -> str:
-    """One marked message: through the pipeline, onto the phone, and out of the folder."""
+    """One flagged message: through the pipeline, onto the phone, and unflagged."""
     message = marked.message
     async with session_scope() as session:
         # Read as a string rather than kept as a row: the pipeline is about to rewrite
@@ -266,22 +267,22 @@ async def _import(mailbox: Mailbox, marked: Marked, settings: Settings, notifier
         logged = await session.get(IngestLog, message.id)
         reported = logged.outcome if logged is not None else None
         result = await process_message(session, message, settings=settings)
-        # A message that fails keeps its mark and is swept again in a few minutes, so
+        # A message that fails keeps its flag and is swept again in a few minutes, so
         # repeating the push would mean a notification every cycle for as long as the
         # email stays broken. Only a decision that differs from the one already on file
-        # is news, which also covers the case where the mark itself would not clear.
+        # is news, which also covers the case where the flag itself would not clear.
         if reported != result.outcome:
             await _announce(session, notifier, message, result)
 
     if result.outcome != ERROR:
-        await mailbox.clear_mark(marked.uid)
+        await mailbox.clear_mark(marked)
     return result.outcome
 
 
 async def _announce(
     session: AsyncSession, notifier: Notifier, message: Message, result: Ingested
 ) -> None:
-    """Tell the phone what became of a marked email, whichever way it went."""
+    """Tell the phone what became of a flagged email, whichever way it went."""
     if result.outcome in _FAILURES:
         await notifier.mail_failed(
             message_id=message.id,

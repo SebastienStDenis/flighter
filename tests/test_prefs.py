@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from flighter import prefs
+from flighter.mail import FLAG_COLOURS
 from flighter.models import Preferences
 from flighter.prefs import Prefs
 
@@ -37,12 +38,12 @@ async def test_a_missing_row_is_created_with_the_defaults() -> None:
 
 
 async def test_saving_one_field_leaves_the_others_alone() -> None:
-    session = FakeSession(Preferences(id=1, values={"imap_import_folder": "Travel"}))
+    session = FakeSession(Preferences(id=1, values={"imap_flag_colour": "blue"}))
     saved = await prefs.save(session, {"log_level": "DEBUG"})  # type: ignore[arg-type]
     assert saved.log_level == "DEBUG"
-    assert saved.imap_import_folder == "Travel"
+    assert saved.imap_flag_colour == "blue"
     assert session.row is not None
-    assert session.row.values["imap_import_folder"] == "Travel"
+    assert session.row.values["imap_flag_colour"] == "blue"
 
 
 async def test_a_saved_value_becomes_the_live_one() -> None:
@@ -67,3 +68,9 @@ async def test_a_trailing_slash_never_reaches_a_generated_link() -> None:
         session, {"public_base_url": "https://flighter.tailnet.ts.net/"}
     )
     assert saved.public_base_url == "https://flighter.tailnet.ts.net"
+
+
+async def test_the_default_flag_colour_is_one_the_app_can_tell_apart() -> None:
+    """Red sets no keyword at all, so it would match every ordinary flag on the account."""
+    assert Prefs().imap_flag_colour in FLAG_COLOURS
+    assert "red" not in FLAG_COLOURS

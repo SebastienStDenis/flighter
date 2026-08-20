@@ -746,97 +746,152 @@ enough key across renames in the Calendar app.
 
 The service imports the emails you tell it to rather than everything that arrives, so the
 question is what a "tell it to" can be that survives the trip from an iPhone or a Mac, through
-iCloud, to an IMAP client. Three candidates, and only one of them works.
+iCloud, to an IMAP client that is not Apple's. The answer is one colour of Apple Mail's flag.
 
-### 6.1 A custom keyword named `flighter` - not settable from any Apple client
+### 6.1 What a colour flag is on the wire
 
-RFC 3501 §2.3.2 allows server-defined keywords and says a server advertises `\*` in
+Apple Mail's flag control offers seven fixed colours. A flag sets the `\Flagged` system flag, and
+the colour rides alongside it as up to three keywords - `$MailFlagBit0`, `$MailFlagBit1` and
+`$MailFlagBit2` - which together form a three-bit index. `$MailFlagBit0` carries the low bit,
+`$MailFlagBit1` the middle, `$MailFlagBit2` the high, and the index they add up to is the colour's
+position in Mail's own menu:
+
+| Index | `$MailFlagBit0` (1) | `$MailFlagBit1` (2) | `$MailFlagBit2` (4) | Colour |
+| ----- | ------------------- | ------------------- | ------------------- | ------ |
+| 0 | | | | red |
+| 1 | set | | | orange |
+| 2 | | set | | yellow |
+| 3 | set | set | | green |
+| 4 | | | set | blue |
+| 5 | set | | set | purple |
+| 6 | | set | set | grey |
+
+The keywords are registered by an Internet-Draft written by an Apple engineer, now adopted by the
+IETF mailmaint working group
+(<https://www.ietf.org/archive/id/draft-eggert-mailflagcolors-00.html>,
+<https://www.ietf.org/archive/id/draft-ietf-mailmaint-messageflag-mailboxattribute-04.txt>). Its
+own table is wrong on one row and should not be copied out of: the `-00` draft gives green as
+`0,1,1`, which is the row it already gave to grey, and the working-group revisions "fix" it to
+`1,1,1`, which is index 7 and leaves index 3 unassigned. The table above is what an IMAP client
+actually observes when Apple Mail sets each colour in turn - green is `$MailFlagBit0` plus
+`$MailFlagBit1`, grey is `$MailFlagBit1` plus `$MailFlagBit2`
+(<https://web.archive.org/web/2023/http://somethingfast.net/2023/imapfilter_applemailflags.html>) -
+and it is the only reading under which the seven colours are a contiguous 0-6 index in menu order.
+
+**Red is index zero, so a red flag carries no `$MailFlagBit` keyword at all.** A message flagged
+red is on the wire exactly a message flagged by a client that knows nothing about colours: bare
+`\Flagged`. There is no way to tell the two apart, so red cannot be the trigger, and it is not
+offered on the settings page. Every other colour sets at least one keyword and is unambiguous.
+
+`\Flagged` is always set alongside. The draft is explicit that the colour keywords "SHOULD be
+ignored if the `\Flagged` system flag is not set", and Mail only ever writes them as part of
+flagging, so the search asks for `FLAGGED` as well as the bits rather than trusting a stray keyword
+left behind by something else.
+
+### 6.2 Searching for one colour, and clearing it
+
+A colour is a state of all three bits, not a single keyword, so the search pins down each of them.
+`KEYWORD` and `UNKEYWORD` are core RFC 9051 search keys, mandatory for any keyword the server
+supports (<https://datatracker.ietf.org/doc/html/rfc9051#section-6.4.4>). Grey is:
+
+```
+UID SEARCH FLAGGED UNKEYWORD $MailFlagBit0 KEYWORD $MailFlagBit1 KEYWORD $MailFlagBit2
+```
+
+Search keys are ANDed by juxtaposition, so this is one message set and one round trip per mailbox.
+Without the `UNKEYWORD` half, grey's search would also match nothing else - but purple's would
+match grey, since both set `$MailFlagBit2` - so all three are always constrained.
+
+Clearing the mark is one `UID STORE` and no move:
+
+```
+UID STORE <uid> -FLAGS.SILENT (\Flagged $MailFlagBit0 $MailFlagBit1 $MailFlagBit2)
+```
+
+Removing a flag a message does not have is not an error - RFC 9051 §6.4.6 defines `-FLAGS` as
+removing the listed flags from those already set - so all three keywords go in the list whatever
+the configured colour is, and the message ends up genuinely unflagged rather than back at a plain
+red flag. The message stays exactly where it was. `.SILENT` suppresses the untagged `FETCH` that
+would otherwise come back, which nothing here reads.
+
+### 6.3 Setting the flag, on each device
+
+On the iPhone, "Swipe left on the Primary message, then choose Flag", and for a colour, "open the
+message, tap the More button, tap Flag, then select another color"
+(<https://support.apple.com/guide/iphone/iph3caefa61/ios>). The same page settles that the mark
+travels: "Flags you add to a message appear on that message in Mail on all your Apple devices where
+you're signed in to the same Apple Account." The only channel between those devices is the IMAP
+account, so the keywords are stored server-side by iCloud, which is what this design needs from it.
+
+On the Mac, "Select one or more messages. Click in the Mail toolbar, then choose a flag", and the
+reverse is "click, then choose Clear Flag"
+(<https://support.apple.com/guide/mail/flag-emails-mlhlp1052/mac>). On
+[iCloud.com](https://www.icloud.com/mail) the flag control is in the message toolbar.
+
+### 6.4 Categories view, which is why this is a choice rather than the obvious answer
+
+Apple states, of the iOS categories layout: "If you use the categories view for Mail in iOS 18.2,
+**you cannot flag emails that have been categorized as Promotions, Updates, or Transactions**"
+(<https://support.apple.com/en-us/104971>). Airline confirmations are precisely what Mail files
+under *Transactions*, and categories view is on by default, so on that page's reading the one
+gesture this design rests on is the one iOS withholds for this class of mail.
+
+The current iPhone guide reads the other way, describing flagging inside categories directly:
+"Flag all Transactions, Updates, or Promotions messages from a single sender: Swipe left on a
+message in the Transactions, Updates, or Promotions message list, then choose Flag. Flag a single
+Transactions, Updates, or Promotions message: Tap a message to open the sender's digest view, swipe
+left on the message, then tap" (<https://support.apple.com/guide/iphone/iph3caefa61/ios>). Whether
+that is a later fix or a documentation disagreement is not established here, and it does not need
+to be: the owner of this deployment does not use categories view. The escape hatch, if it were ever
+needed, is on the same Apple page - "tap the More button and choose List View to switch the overall
+layout".
+
+This is the reason a flag is a deliberate decision rather than the obvious one. Against it, one
+layout may withhold the gesture for exactly this class of mail. For it, flagging is one swipe from
+wherever the email already is, on any device, and it needs no mailbox made anywhere, no message
+moved, and nothing filed back afterwards.
+
+### 6.5 A custom keyword named `flighter` - still not settable
+
+RFC 9051 §2.3.2 allows server-defined keywords and says a server advertises `\*` in
 `PERMANENTFLAGS` when it will accept new ones
-(<https://datatracker.ietf.org/doc/html/rfc3501#section-2.3.2>). Whether iCloud advertises `\*`
-is not documented by Apple and is not established here.
+(<https://datatracker.ietf.org/doc/html/rfc9051#section-2.3.2>). Whether iCloud advertises `\*` is
+not documented by Apple and is not established here. It matters less than it looks: `\*` gates
+*arbitrary* keywords, and the three `$MailFlagBit` keywords are Apple's own, stored and synced by
+iCloud as §6.3 shows, so they are not the case `\*` is about.
 
-It does not matter, because nothing on the user's side can set such a keyword. Apple Mail's flag
-control offers seven fixed colours, which travel as the keywords `$MailFlagBit0`, `$MailFlagBit1`
-and `$MailFlagBit2`, which together encode a colour index 0-6: red `0,0,0`, blue `0,0,1`, yellow
-`0,1,0`, grey `0,1,1`, orange `1,0,0`, purple `1,0,1`, green `1,1,0`. The keywords are registered
-in an Internet-Draft written by an Apple engineer
-(<https://www.ietf.org/archive/id/draft-eggert-mailflagcolors-00.html>), and a plain `\Flagged`
-with none of the three set is the red one, which is why a colour flag cannot be told apart from
-ordinary flagging on a non-Apple client. Renaming a flag in Mail
-on the Mac - "click the flag name, click it again, and type a new name" - changes a label held on
-that Mac and nothing on the server
-(<https://support.apple.com/guide/mail/mlhlp1052/mac>,
-<https://discussions.apple.com/thread/255689889>). A user who renames the orange flag to
-`flighter` has still set `$MailFlagBit0`, and no client offers a field for an arbitrary keyword.
+It is moot anyway, because nothing on the user's side can set an arbitrary keyword. No Apple client
+offers a field for one. Renaming a flag on the Mac - "Click the flag name, click it again, then
+type a new name. For example, you could rename Red to Urgent"
+(<https://support.apple.com/guide/mail/flag-emails-mlhlp1052/mac>) - changes a label Mail keeps
+next to the colour, not anything on the server: the wire format in §6.1 carries a three-bit index
+and has nowhere to put a name. So the owner renames their chosen flag to `flighter` for their own
+benefit, and this app matches the colour underneath and never looks for the word.
 
-**Ruled out.** The owner's word for it survives; the mechanism does not.
+### 6.6 Where a flagged message can be
 
-### 6.2 One specific colour flag - settable, but broken for exactly this mail
+A mailbox is a place a message is put; a flag is a property a message carries wherever it already
+is. That is the whole appeal, and it is also why the sweep cannot look in one mailbox. It runs
+`LIST "" "*"` once per connection and searches each mailbox in turn on that same connection, which
+is what keeps the cost at one: iCloud allows about five simultaneous connections per account -
+undocumented by Apple, and the figure every third-party client is built around - and the user's own
+phone and Mac are already holding some of them.
 
-Colours are settable on both platforms. On the iPhone, "Swipe left over the email message. Tap
-Flag", and for a colour, "Tap the Reply button. Tap Flag, then select the color you want to use
-for that flag" (<https://support.apple.com/en-us/104971>). Flags sync to every device signed in to
-the same Apple Account.
-
-Two problems, one of them fatal:
-
-- The same Apple page states: "If you use the categories view for Mail in iOS 18.2, **you cannot
-  flag emails that have been categorized as Promotions, Updates, or Transactions**"
-  (<https://support.apple.com/en-us/104971>). Airline confirmations are precisely what Mail files
-  under *Transactions*, and categories view is the default. The one gesture this design rests on
-  is the one iOS withholds for this class of mail.
-- No colour is the default on both platforms, so "flag it orange" is a colour the user has to pick
-  deliberately and remember, and it collides with any other use they already make of flags.
-
-**Ruled out**, on the first point alone.
-
-### 6.3 A mailbox the message is moved into - the one that works
-
-Creating the mailbox, on the iPhone: "In the Mailboxes list, tap Edit in the upper-right corner,
-then tap New Mailbox. Give your mailbox a name ... tap Mailbox Location and choose the account
-where you want to create a mailbox." Moving mail into it: "Tap Select in the upper-right corner.
-Select the email messages, then tap the Folder button. Choose a mailbox to move the email messages
-to." (<https://support.apple.com/en-us/104971>)
-
-The same page settles the categories question the other way: "**You can still move individual
-email messages into specific mailboxes when you use the categories layout.**" Moving works where
-flagging does not.
-
-On the Mac, `Mailbox > New Mailbox`, and the guide is explicit that the location decides whether it
-travels: "Mailboxes you create in On My Mac are local ... while mailboxes created on your email
-account's Mail server can be accessed on any computer or device where you use the account"
-(<https://support.apple.com/guide/mail/create-or-delete-mailboxes-mlhlp1021/mac>). On iCloud.com,
-folders are created and messages moved from the Mail sidebar
+Four mailboxes are skipped, found by their RFC 6154 attributes on the `LIST` reply rather than by
+name, so a non-English account still resolves them
+(<https://datatracker.ietf.org/doc/html/rfc6154>): `\Trash`, `\Junk`, `\Drafts` and `\Sent`. A
+draft or a sent copy of a forwarded confirmation carries the same flight and would import a second
+time under a different `Message-ID`, and mail in Trash was thrown away on purpose. iCloud ships
+those among its seven default folders - Inbox, VIP, Drafts, Sent, Archive, Trash and Junk
 (<https://support.apple.com/guide/icloud/organize-email-with-folders-mm6b1a6730/icloud>).
 
-**Chosen.** It is one mailbox called `flighter`, made once, and thereafter one move per email from
-whichever device is in hand. It carries the owner's own word for it, it cannot be confused with
-any other use of the mailbox, and it needs no scripting anywhere.
+`IDLE` is kept, on the inbox, but it is not what finds the work. RFC 2177 announces changes in the
+*selected* mailbox only (<https://datatracker.ietf.org/doc/html/rfc2177>), so a flag set on a
+message filed in some other folder is never announced to anybody, and only the periodic sweep sees
+it. IDLE earns its place on the common case, where the confirmation is still in the inbox and the
+push arrives within a second or two.
 
-The unmark is the reverse move. iCloud ships an Archive folder among its seven defaults - Inbox,
-VIP, Drafts, Sent, Archive, Trash and Junk
-(<https://support.apple.com/guide/icloud/organize-email-with-folders-mm6b1a6730/icloud>) - and the
-client finds it by the RFC 6154 `\Archive` attribute on the `LIST` reply rather than by name, so a
-non-English account still lands in the right place
-(<https://datatracker.ietf.org/doc/html/rfc6154>).
-
-### 6.4 `MOVE`, and the risk in relying on it
-
-Clearing a mark is `UID MOVE` (RFC 6851, <https://datatracker.ietf.org/doc/html/rfc6851>). Apple's
-own TN3191 lists `MOVE` among the extensions Mail uses and says it "will use this to efficiently
-move messages between mailboxes. This notably improves message deletion, as messages are generally
-moved to Trash when the user deletes them"
-(<https://developer.apple.com/documentation/technotes/tn3191-imap-extensions-supported-by-mail>).
-That is Apple describing its client, not its server, and it is the strongest evidence available
-short of an account to test against.
-
-Third-party reports of iCloud's post-login `CAPABILITY` line disagree with each other on `MOVE`,
-so this is the one assumption in the design that is not settled. The failure is benign and loud
-rather than silent: a refused `MOVE` raises, the message keeps its mark, the ingest log already
-holds its outcome so nothing is imported twice and nothing is pushed twice, and `flighter check`
-reports the message still sitting in the folder.
-
-### 6.5 `message:` URLs, for the link on a failure push
+### 6.7 `message:` URLs, for the link on a failure push
 
 A push about an email that did not import links back to the email. Apple Mail registers the
 `message:` scheme on both platforms; the structure is "the 'message:' scheme, followed by the
@@ -850,20 +905,23 @@ will attempt to open URLs with the custom message: scheme ... The only trick her
 percent-encode the Message ID in the URL" - and adds two caveats: the message has to be present in
 Mail already, and on macOS a link to a message Mail has not loaded raises an alert rather than
 opening (<https://nshipster.com/message-id/>). Neither matters here: the link is only ever sent
-about a message the user marked minutes earlier and which is still on the server.
+about a message the user marked minutes earlier, which has not moved.
 
 Pushover carries it as the supplementary URL, capped at 512 characters
 (<https://pushover.net/api>). Pushover advises against app-specific URL schemes "in public plugins,
 websites, and apps" because handling varies by platform; this is a single-user deployment on Apple
 devices, where `message:` is handled by a system app.
 
-### 6.6 Not verified
+### 6.8 Not verified
 
-Without a real iCloud account to run against, four things rest on documentation alone: that iCloud
-advertises `MOVE` after login (§6.4); the exact `LIST` reply shape for the account, including
-whether the archive really carries `\Archive`; whether `IDLE` on the import folder reports a move
-*into* it promptly enough to matter, or whether the periodic sweep is doing all the real work; and
-whether iCloud advertises `\*` in `PERMANENTFLAGS`, which is now moot.
+Without a real iCloud account to run against, five things rest on documentation alone: that iCloud
+accepts a `UID STORE` of the `$MailFlagBit` keywords from a third-party client rather than only
+serving ones Mail wrote; that it answers `SEARCH KEYWORD $MailFlagBitN` rather than returning an
+empty set for keywords it stores but does not index; whether it advertises `\*` in `PERMANENTFLAGS`
+(§6.5); the exact `LIST` reply shape for the account, including whether Trash, Junk, Drafts and
+Sent really carry their RFC 6154 attributes rather than only their English names; and whether the
+categories-view restriction in §6.4 still holds on current iOS.
+
 
 ---
 

@@ -54,7 +54,7 @@ SETTINGS_FORM = {
     "aeroapi_rate_limit_per_minute": "8",
     "anthropic_model": "claude-sonnet-5",
     "extraction_confidence_threshold": "0.85",
-    "imap_import_folder": "flighter",
+    "imap_flag_colour": "grey",
     "imap_idle_seconds": "300",
     "icloud_calendar_name": "Flights",
 }
@@ -384,6 +384,20 @@ def test_a_typo_in_the_cap_is_refused_with_the_field_named(client: TestClient) -
     assert "aeroapi monthly cap usd" in response.text
     # And the typed-in value is still on the form rather than silently reverted.
     assert "four dollars" in response.text
+
+
+def test_the_settings_page_offers_every_usable_flag_colour(client: TestClient) -> None:
+    """Red is the one Apple sends unmarked, so it is not on the list to be chosen."""
+    body = client.get("/settings").text
+    for colour in ("Orange", "Yellow", "Green", "Blue", "Purple", "Grey"):
+        assert f">{colour}<" in body
+    assert '"red"' not in body
+
+
+def test_a_flag_colour_the_app_cannot_watch_for_is_refused(client: TestClient) -> None:
+    response = client.post("/settings", data=SETTINGS_FORM | {"imap_flag_colour": "red"})
+    assert response.status_code == 400
+    assert "imap flag colour" in response.text
 
 
 def test_naming_the_calendar_turns_the_sync_on(client: TestClient) -> None:
