@@ -3,6 +3,11 @@
 {% block title %}Settings{% endblock %}
 {% block content %}
 
+{% set icloud_ready = connected['icloud_email'] and connected['icloud_app_password'] %}
+{% set flightaware_ready = connected['aeroapi_key'] %}
+{% set pushover_ready = connected['pushover_token'] and connected['pushover_user_key'] %}
+{% set calendar_ready = prefs.calendar_configured %}
+
 <h1 class="mb-4 text-xl font-semibold tracking-tight">Settings</h1>
 
 {% if saved %}
@@ -18,44 +23,186 @@
 </div>
 {% endif %}
 
+{# A status is a word first. The badge only colours the word it is already carrying. #}
+{% macro status(ready, done='Connected', todo='Not connected') %}
+<span class="badge" data-variant="{{ 'ok' if ready else 'quiet' }}">
+  {{- done if ready else todo -}}</span>
+{% endmacro %}
+
+{# A box that is empty because nothing is stored looks exactly like a box that is empty
+   because what is stored is not being shown. Only the placeholder can tell them apart. #}
+{% macro secret(name, stored, hint='') %}
+<input type="password" id="{{ name }}" name="{{ name }}" class="font-mono" autocomplete="off"
+       aria-describedby="{{ name }}-help"
+       placeholder="{{ 'Stored. Type a new one to replace it' if stored else hint }}">
+{% endmacro %}
+
+{% macro step(number, name, ready, what) %}
+<div class="item" data-size="xs">
+  <aside class="w-6 shrink-0 text-center font-mono font-bold {{ 'text-ok' if ready else 'text-muted-foreground' }}">
+    {{- '&check;'|safe if ready else number -}}
+  </aside>
+  <section>
+    <h4>{{ name }}</h4>
+    <p>{{ what }}</p>
+  </section>
+  <aside>{{ status(ready, 'Done', 'To do') }}</aside>
+</div>
+{% endmacro %}
+
+{# One card, one service, one form: nothing is shown back, so each form covers exactly
+   the credentials somebody is looking at when they press its button, and an empty box in
+   it can only mean "leave this alone". #}
 {% set connections %}
-<div class="card" data-size="sm">
-  <header><h3>Connections</h3></header>
+{% if not (icloud_ready and flightaware_ready and pushover_ready and calendar_ready) %}
+<div class="card mb-3" data-size="sm">
+  <header>
+    <h3>Start here</h3>
+    <p>Four things, in this order. Then flag a booking email
+      {{ prefs.imap_flag_colour }} and the flight appears on the board.</p>
+  </header>
   <section>
     <div class="item-group -mx-2.5">
-      {% for name, ready, detail in [
-           ('FlightAware', settings.aeroapi_configured,
-            'Ready' if settings.aeroapi_configured else 'Add AEROAPI_KEY to .env'),
-           ('Anthropic', settings.anthropic_api_key,
-            'Ready' if settings.anthropic_api_key else 'Optional'),
-           ('iCloud', settings.icloud_configured,
-            settings.icloud_email if settings.icloud_configured
-            else 'Add ICLOUD_EMAIL and ICLOUD_APP_PASSWORD to .env'),
-           ('Calendar', prefs.calendar_configured,
-            calendar_name or calendar_error
-            or 'Pick an iCloud calendar under Preferences'),
-           ('Pushover', settings.pushover_configured,
-            'Ready' if settings.pushover_configured
-            else 'Add PUSHOVER_TOKEN and PUSHOVER_USER_KEY to .env')] %}
-      <div class="item" data-size="xs">
-        <section>
-          <h4>{{ name }}</h4>
-          <p class="font-mono break-all">{{ detail }}</p>
-        </section>
-        <aside>
-          <span class="badge" data-variant="{{ 'ok' if ready else 'quiet' }}">
-            {{- 'Ready' if ready else 'Not set up' -}}</span>
-        </aside>
-      </div>
-      {% endfor %}
+      {{ step(1, 'Apple ID', icloud_ready, 'The mailbox this reads and the calendar it writes') }}
+      {{ step(2, 'FlightAware', flightaware_ready, 'Where the gate, the delay and the diversion come from') }}
+      {{ step(3, 'Pushover', pushover_ready, 'How your phone is told when any of that changes') }}
+      {{ step(4, 'Calendar', calendar_ready, 'Which iCloud calendar to write to, under Preferences') }}
     </div>
   </section>
 </div>
+{% endif %}
+
+<form class="card" data-size="sm" method="post" action="/settings/credentials">
+  <input type="hidden" name="service" value="icloud">
+  <header>
+    <h3>iCloud</h3>
+    <div class="card-action">{{ status(icloud_ready) }}</div>
+    <p>One app-specific password reaches both the mailbox flights are imported from and
+      the calendar they are written to.</p>
+  </header>
+  <section>
+    <fieldset class="fieldset gap-4">
+      <div role="group" class="field">
+        <label for="icloud_email">Apple ID</label>
+        <input type="email" id="icloud_email" name="icloud_email" class="font-mono"
+               autocomplete="username" placeholder="you@icloud.com"
+               value="{{ icloud_email }}">
+      </div>
+      <div role="group" class="field">
+        <label for="icloud_app_password">App-specific password</label>
+        {{ secret('icloud_app_password', connected['icloud_app_password'],
+                  'xxxx-xxxx-xxxx-xxxx') }}
+        <p id="icloud_app_password-help">Make one at
+          <a href="https://appleid.apple.com" target="_blank" rel="noopener">appleid.apple.com</a>
+          under <strong>Sign-In and Security &rarr; App-Specific Passwords</strong>. iCloud
+          refuses your Apple ID password on both mail and calendar, so this is not optional.
+          Changing your Apple ID password revokes every app-specific password, so make a new
+          one and enter it here when you do.</p>
+      </div>
+    </fieldset>
+  </section>
+  <footer class="border-t">
+    <button class="btn" type="submit">Save</button>
+    {% if icloud_ready %}
+    <button class="btn ml-auto" data-variant="ghost" type="submit" name="forget" value="1">
+      Forget</button>
+    {% endif %}
+  </footer>
+</form>
+
+<form class="card mt-3" data-size="sm" method="post" action="/settings/credentials">
+  <input type="hidden" name="service" value="flightaware">
+  <header>
+    <h3>FlightAware</h3>
+    <div class="card-action">{{ status(flightaware_ready) }}</div>
+    <p>Where every gate, delay, diversion and baggage belt comes from.</p>
+  </header>
+  <section>
+    <div role="group" class="field">
+      <label for="aeroapi_key">AeroAPI key</label>
+      {{ secret('aeroapi_key', connected['aeroapi_key']) }}
+      <p id="aeroapi_key-help">Sign up for the <strong>Personal</strong> tier at
+        <a href="https://www.flightaware.com/aeroapi/signup/personal" target="_blank"
+           rel="noopener">flightaware.com/aeroapi</a>. It is free up to $5 a month; the tier
+        above it carries a $100 minimum, so the spend cap under Preferences is what stops
+        polling before you get there.</p>
+    </div>
+  </section>
+  <footer class="border-t">
+    <button class="btn" type="submit">Save</button>
+    {% if flightaware_ready %}
+    <button class="btn ml-auto" data-variant="ghost" type="submit" name="forget" value="1">
+      Forget</button>
+    {% endif %}
+  </footer>
+</form>
+
+<form class="card mt-3" data-size="sm" method="post" action="/settings/credentials">
+  <input type="hidden" name="service" value="pushover">
+  <header>
+    <h3>Pushover</h3>
+    <div class="card-action">{{ status(pushover_ready) }}</div>
+    <p>How the phone is told: what was imported, what changed, and what went wrong.</p>
+  </header>
+  <section>
+    <fieldset class="fieldset gap-4">
+      <div role="group" class="field">
+        <label for="pushover_token">Application token</label>
+        {{ secret('pushover_token', connected['pushover_token']) }}
+        <p id="pushover_token-help">Register this service as an application at
+          <a href="https://pushover.net/apps/build" target="_blank"
+             rel="noopener">pushover.net/apps/build</a> and copy the API token it hands back.</p>
+      </div>
+      <div role="group" class="field">
+        <label for="pushover_user_key">User key</label>
+        {{ secret('pushover_user_key', connected['pushover_user_key']) }}
+        <p id="pushover_user_key-help">On the dashboard you land on after signing in at
+          <a href="https://pushover.net" target="_blank" rel="noopener">pushover.net</a>.
+          Install the Pushover app on the phone and sign in as the same user; that is what
+          actually rings.</p>
+      </div>
+    </fieldset>
+  </section>
+  <footer class="border-t">
+    <button class="btn" type="submit">Save</button>
+    {% if pushover_ready %}
+    <button class="btn ml-auto" data-variant="ghost" type="submit" name="forget" value="1">
+      Forget</button>
+    {% endif %}
+  </footer>
+</form>
+
+<form class="card mt-3" data-size="sm" method="post" action="/settings/credentials">
+  <input type="hidden" name="service" value="anthropic">
+  <header>
+    <h3>Anthropic</h3>
+    <div class="card-action">{{ status(connected['anthropic_api_key'], 'Connected', 'Optional') }}</div>
+    <p>The fallback for airlines that embed no structured data. Everything else is parsed
+      for free, so leaving this empty costs you only those emails.</p>
+  </header>
+  <section>
+    <div role="group" class="field">
+      <label for="anthropic_api_key">API key</label>
+      {{ secret('anthropic_api_key', connected['anthropic_api_key']) }}
+      <p id="anthropic_api_key-help">From
+        <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a>
+        under API keys. Only an email you flagged is ever sent.</p>
+    </div>
+  </section>
+  <footer class="border-t">
+    <button class="btn" type="submit">Save</button>
+    {% if connected['anthropic_api_key'] %}
+    <button class="btn ml-auto" data-variant="ghost" type="submit" name="forget" value="1">
+      Forget</button>
+    {% endif %}
+  </footer>
+</form>
 
 <div class="card mt-3" data-size="sm">
   <header>
     <h3>Checks</h3>
-    <p>Tries every connection in turn and names the one that is broken.</p>
+    <p>Tries every connection in turn and names the one that is broken. The mail check
+      says how many emails are flagged and waiting; the Pushover check sends a real push.</p>
   </header>
   <section>
     <button class="btn w-full" data-variant="outline" type="button" hx-post="/settings/checks"
@@ -63,6 +210,11 @@
     <div id="checks"></div>
   </section>
 </div>
+
+<p class="mt-3 text-xs text-muted-foreground">Saved to
+  <code class="font-mono">data/secrets.env</code> in the volume, readable only by the app.
+  Nothing typed here is ever shown back: an empty box leaves what is stored alone, and
+  <strong>Forget</strong> is what clears it.</p>
 {% endset %}
 
 {% set preferences %}
@@ -180,7 +332,7 @@
         <p class="text-sm text-destructive">{{ calendar_error }}</p>
         <p id="calendar-help">The calendar cannot be listed, so it cannot be changed here
           right now. Whichever one was picked before is still being written to. Fix the
-          connection and reload this page.</p>
+          connection under Connections and reload this page.</p>
         {% else %}
         <select id="icloud_calendar_url" name="icloud_calendar_url"
                 aria-describedby="calendar-help">
@@ -204,6 +356,10 @@
       </div>
     </section>
   </div>
+
+  <div class="action-bar">
+    <button class="btn w-full" data-size="lg" type="submit">Save</button>
+  </div>
 </form>
 {% endset %}
 
@@ -214,7 +370,7 @@
     <p>Enter this the first time you run the widget on your phone.</p>
   </header>
   <section>
-    <pre class="overflow-x-auto rounded-md bg-muted p-3 font-mono text-sm">{{ settings.widget_token }}</pre>
+    <pre class="overflow-x-auto rounded-md bg-muted p-3 font-mono text-sm">{{ widget_token }}</pre>
   </section>
 </div>
 {% endset %}
@@ -227,9 +383,5 @@
        {'tab': 'Preferences', 'panel': preferences},
        {'tab': 'Widget', 'panel': widget},
      ]) }}
-
-<div class="action-bar">
-  <button class="btn w-full" data-size="lg" type="submit" form="settings-form">Save</button>
-</div>
 
 {% endblock %}

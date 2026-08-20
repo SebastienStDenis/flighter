@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from logging.config import fileConfig
 
 from alembic import context
@@ -15,7 +16,10 @@ from flighter.models import Base
 
 config = context.config
 
-if config.config_file_name is not None:
+# Only when alembic was invoked on its own. Run from the app, logging is already
+# configured, and fileConfig would replace the root handler and disable every logger that
+# was imported before the migration - which is most of them.
+if config.config_file_name is not None and not logging.getLogger().handlers:
     fileConfig(config.config_file_name)
 
 # The URL belongs to the deployment, not to this file: reading it from Settings means a

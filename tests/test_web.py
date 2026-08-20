@@ -207,6 +207,18 @@ def client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
         yield test_client
 
 
+def record_secrets(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
+    """Catch what would be written, so the suite stays off the filesystem."""
+    written: list[dict[str, str]] = []
+
+    def write(values: Any) -> Settings:
+        written.append(dict(values))
+        return Settings()
+
+    monkeypatch.setattr(web, "write_secrets", write)
+    return written
+
+
 def show(monkeypatch: pytest.MonkeyPatch, view_booking: Booking, snapshot: Any) -> None:
     """Make one booking and its newest snapshot the whole of the database."""
 
@@ -441,10 +453,79 @@ def test_healthz_is_liveness_only(client: TestClient) -> None:
 
 def test_the_settings_page_shows_what_is_connected(client: TestClient) -> None:
     body = client.get("/settings").text
+    # The Apple ID names the account rather than proving anything, so it is shown back.
     assert "someone@icloud.com" in body
     assert "Flights" in body
     # The token has to be readable: it is typed into Scriptable by hand.
     assert "test-token" in body
+
+
+def test_no_stored_credential_is_ever_rendered_back(client: TestClient) -> None:
+    body = client.get("/settings").text
+    for secret in ("abcd-efgh-ijkl-mnop", "test-key", "app-token", "user-key"):
+        assert secret not in body
+    # What is shown instead is that they are there, and a box to replace them.
+    assert body.count("Connected") >= 3
+    assert 'name="icloud_app_password"' in body
+
+
+def test_a_fresh_deployment_is_told_what_to_do_in_order(
+    unconfigured: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(prefs, "_current", prefs.Prefs())
+    with build_client(unconfigured, monkeypatch) as fresh:
+        body = fresh.get("/settings").text
+    assert "Start here" in body
+    for step, name in enumerate(("Apple ID", "FlightAware", "Pushover", "Calendar"), start=1):
+        assert name in body
+        assert f">{step}<" in body
+    # And the board says where to go rather than sitting there empty.
+    assert "Nothing is connected yet" in fresh.get("/").text
+
+
+def test_the_first_run_signpost_goes_away_once_everything_is_set_up(
+    client: TestClient,
+) -> None:
+    assert "Start here" not in client.get("/settings").text
+
+
+def test_only_what_was_typed_in_is_written(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    written = record_secrets(monkeypatch)
+
+    response = client.post(
+        "/settings/credentials",
+        data={"service": "icloud", "icloud_email": " me@icloud.com ", "icloud_app_password": ""},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    # A blank box means "leave it alone", never "clear it": nothing was shown to leave in.
+    assert written == [{"icloud_email": "me@icloud.com"}]
+
+
+def test_a_form_with_nothing_typed_in_writes_nothing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    written = record_secrets(monkeypatch)
+    client.post("/settings/credentials", data={"service": "pushover"})
+    assert written == []
+
+
+def test_forgetting_a_connection_clears_every_credential_it_needs(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    written = record_secrets(monkeypatch)
+    client.post("/settings/credentials", data={"service": "pushover", "forget": "1"})
+    assert written == [{"pushover_token": "", "pushover_user_key": ""}]
+
+
+def test_a_connection_that_does_not_exist_is_a_404(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_secrets(monkeypatch)
+    assert client.post("/settings/credentials", data={"service": "gmail"}).status_code == 404
 
 
 def test_saving_a_preference_redirects_and_takes_effect(client: TestClient) -> None:

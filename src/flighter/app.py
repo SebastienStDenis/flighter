@@ -113,7 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         asyncio.create_task(_supervise("ingest", run_ingest_loop(stopping)), name="ingest"),
     ]
     if not settings.icloud_configured:
-        log.warning("iCloud is not configured; bookings must be added by hand")
+        log.warning("nothing is connected yet; open /settings and work down Connections")
     elif not prefs.current().calendar_configured:
         log.warning("no iCloud calendar is picked; nothing will reach the calendar")
 

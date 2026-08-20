@@ -44,7 +44,7 @@ async def _check_database() -> CheckResult:
 
 async def _check_aeroapi(settings: Settings) -> CheckResult:
     if not settings.aeroapi_configured:
-        return CheckResult("aeroapi", False, "AEROAPI_KEY is not set in .env")
+        return CheckResult("aeroapi", False, "add a FlightAware key under Connections")
     # A known-good ident on a carrier that always has flights in the window. This spends
     # one result set, which is the point: an unspent key proves nothing.
     url = f"{BASE_URL}/flights/UAL4"
@@ -68,9 +68,7 @@ async def _check_aeroapi(settings: Settings) -> CheckResult:
 async def _check_pushover(settings: Settings) -> CheckResult:
     """Sends a real push, quietly, because a token that is never spent proves nothing."""
     if not settings.pushover_configured:
-        return CheckResult(
-            "pushover", False, "PUSHOVER_TOKEN and PUSHOVER_USER_KEY are not set in .env"
-        )
+        return CheckResult("pushover", False, "add a Pushover token and user key under Connections")
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
             response = await client.post(
@@ -105,7 +103,7 @@ async def _check_mail(settings: Settings) -> CheckResult:
     """
     if not settings.icloud_configured:
         return CheckResult(
-            "mail", False, "ICLOUD_EMAIL and ICLOUD_APP_PASSWORD are not set in .env"
+            "mail", False, "add an Apple ID and app-specific password under Connections"
         )
     from .mail import Mailbox
 
@@ -136,7 +134,7 @@ async def _check_calendar(settings: Settings) -> CheckResult:
 
     chosen = prefs.current().icloud_calendar_url
     if not chosen:
-        return CheckResult("calendar", False, "no calendar picked on the settings page")
+        return CheckResult("calendar", False, "pick a calendar under Preferences")
     try:
         offered = await CalendarClient(settings).calendars()
     except Exception as exc:

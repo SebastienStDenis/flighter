@@ -122,16 +122,17 @@ def _aware(moment: datetime | None) -> datetime | None:
 
 async def run_poller(stopping: asyncio.Event) -> None:
     """Tick until asked to stop. Nothing here is allowed to raise out of the loop."""
-    if not get_settings().aeroapi_configured:
-        log.warning("AEROAPI_KEY is not set; the poller will not run")
-        return
-
     log.info("poller started, ticking every %ss", TICK_SECONDS)
     while not stopping.is_set():
-        try:
-            await poll_once()
-        except Exception:
-            log.exception("poll tick failed")
+        # Waited for rather than given up on: a key saved on the settings page is live in
+        # this process immediately, and the poller is what has to notice.
+        if not get_settings().aeroapi_configured:
+            log.debug("no FlightAware key; there is nothing to poll with")
+        else:
+            try:
+                await poll_once()
+            except Exception:
+                log.exception("poll tick failed")
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(stopping.wait(), timeout=TICK_SECONDS)
     log.info("poller stopped")

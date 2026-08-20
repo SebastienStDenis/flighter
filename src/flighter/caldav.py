@@ -282,7 +282,7 @@ class CalendarClient:
         page and the `check` command - exist to put the failure text in front of a person.
         """
         if not self._settings.icloud_configured:
-            raise CalendarUnavailable("ICLOUD_EMAIL and ICLOUD_APP_PASSWORD are not set in .env")
+            raise CalendarUnavailable("add an Apple ID and app-specific password under Connections")
         async with self._client(timeout=DISCOVERY_TIMEOUT_SECONDS) as client:
             principal = await _href(
                 client, f"{CALDAV_ROOT}/", _PROPFIND_PRINCIPAL, f"{{{DAV}}}current-user-principal"
@@ -391,8 +391,8 @@ def _refused(response: httpx.Response) -> CalendarUnavailable:
     if response.status_code == 401:
         return CalendarUnavailable(
             "iCloud rejected the app-specific password. Changing your Apple ID password "
-            "revokes every app-specific password, so generate a new one, put it in "
-            "ICLOUD_APP_PASSWORD and restart."
+            "revokes every app-specific password, so generate a new one and enter it "
+            "under Connections on the settings page."
         )
     return CalendarUnavailable(
         f"CalDAV {response.request.method} on {response.request.url} answered "

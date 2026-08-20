@@ -125,8 +125,8 @@ def authorize(settings: Settings, authorization: str | None, token: str | None) 
     """Bearer header, or `?token=` for pasting the URL into a browser to debug.
 
     An unset token refuses everything. The alternative reading, that a blank token means
-    no authentication, publishes the user's travel plans the moment the environment
-    variable is forgotten, so the failure is loud instead.
+    no authentication, publishes the user's travel plans the moment the token is cleared,
+    so the failure is loud instead.
     """
     expected = settings.widget_token
     if not expected:

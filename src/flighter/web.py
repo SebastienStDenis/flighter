@@ -30,7 +30,7 @@ from .aeroapi import budget_status
 from .airports import airport_tz, get_airport
 from .caldav import CalendarClient, CalendarUnavailable, Collection, calendar_link
 from .checks import run_checks
-from .config import Settings
+from .config import CREDENTIALS, SERVICES, Settings, write_secrets
 from .db import get_session
 from .ingest import list_set_aside
 from .ingest import retry as retry_ingest
@@ -593,6 +593,9 @@ def create_app(settings: Settings) -> FastAPI:
                 "pending": pending,
                 "urgent_id": most_urgent(upcoming),
                 "budget": await budget_status(session),
+                # An empty board on a fresh deployment is not the same thing as an empty
+                # board on a working one, and only one of them is worth a signpost.
+                "set_up": settings.icloud_configured or settings.aeroapi_configured,
             },
         )
 
@@ -740,7 +743,12 @@ def create_app(settings: Settings) -> FastAPI:
         return {
             "prefs": current,
             "posted": current.model_dump(mode="json"),
-            "settings": settings,
+            # Booleans, never values: a stored credential is never rendered back into the
+            # page. The Apple ID is the exception, because it names the account rather
+            # than proving anything about it.
+            "connected": {name: bool(getattr(settings, name)) for name in CREDENTIALS},
+            "icloud_email": settings.icloud_email,
+            "widget_token": settings.widget_token,
             "log_levels": LOG_LEVELS,
             "flag_colours": tuple(FLAG_COLOURS),
             "calendars": calendars,
@@ -800,12 +808,55 @@ def create_app(settings: Settings) -> FastAPI:
             "icloud_calendar_url": icloud_calendar_url.strip(),
         }
         try:
-            await prefs.save(session, posted)
+            updated = await prefs.save(session, posted)
         except ValidationError as exc:
             context = await settings_context(request)
             context["error"] = _first_validation_message(exc)
             context["posted"] = posted
             return page(request, "settings.html", context, status_code=400)
+        # Applied here rather than only at boot, so turning the logs up to find out what
+        # is going wrong does not need the restart that would clear the evidence.
+        logging.getLogger().setLevel(updated.log_level.upper())
+        return RedirectResponse("/settings?saved=1", status_code=303)
+
+    @app.post("/settings/credentials")
+    async def save_credentials(
+        service: Annotated[str, Form()],
+        forget: Annotated[str, Form()] = "",
+        icloud_email: Annotated[str, Form()] = "",
+        icloud_app_password: Annotated[str, Form()] = "",
+        aeroapi_key: Annotated[str, Form()] = "",
+        anthropic_api_key: Annotated[str, Form()] = "",
+        pushover_token: Annotated[str, Form()] = "",
+        pushover_user_key: Annotated[str, Form()] = "",
+    ) -> Response:
+        """Store one service's credentials, or forget them.
+
+        Saved one service at a time so that the boxes on the page and the values on file
+        can never disagree: nothing is shown back, so a form covering all of them would
+        have no way to say which blank boxes were meant.
+        """
+        found = next((candidate for candidate in SERVICES if candidate.key == service), None)
+        if found is None:
+            raise HTTPException(status_code=404, detail="No such connection.")
+        entered = {
+            "icloud_email": icloud_email,
+            "icloud_app_password": icloud_app_password,
+            "aeroapi_key": aeroapi_key,
+            "anthropic_api_key": anthropic_api_key,
+            "pushover_token": pushover_token,
+            "pushover_user_key": pushover_user_key,
+        }
+        if forget:
+            write_secrets(dict.fromkeys(found.fields, ""))
+        else:
+            # An empty box means "leave this one alone", because the page never shows a
+            # stored credential back for it to have been left in. Forget is what clears.
+            changed = {
+                name: entered[name].strip() for name in found.fields if entered[name].strip()
+            }
+            if changed:
+                write_secrets(changed)
         return RedirectResponse("/settings?saved=1", status_code=303)
 
     @app.post("/settings/checks")

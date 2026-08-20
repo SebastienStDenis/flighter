@@ -53,6 +53,11 @@ ERROR = "error"
 # is still where the person left it, and the health page offers it back.
 RETRY_DELAYS = (timedelta(minutes=2), timedelta(minutes=10))
 
+# How often the watcher looks again while there is nothing to sign in with. Seconds
+# rather than minutes because no connection is open to cost anybody anything, and because
+# somebody who has just typed an Apple ID into the settings page is watching for it.
+UNCONFIGURED_PAUSE_SECONDS = 5.0
+
 # Outcomes the user is told about as a failure rather than as a flight.
 _FAILURES = frozenset({ERROR, "no_flight"})
 
@@ -263,17 +268,17 @@ async def run_ingest_loop(stopping: asyncio.Event, *, settings: Settings | None 
     while not stopping.is_set():
         if not settings.icloud_configured:
             log.debug("iCloud is not configured; not watching for flagged mail")
-            await _pause(stopping, prefs.current().imap_idle_seconds)
+            await _pause(stopping, UNCONFIGURED_PAUSE_SECONDS)
             continue
 
         mailbox = Mailbox(settings)
         try:
             await mailbox.connect()
             backoff = RECONNECT_MIN_SECONDS
-            # The colour is a preference, and the search was built from the one that was
-            # live when the connection opened. Changing it on the settings page drops out
-            # of here and reconnects on the new one rather than waiting for a restart.
-            while not stopping.is_set() and mailbox.colour == prefs.current().imap_flag_colour:
+            # The flag colour and the sign-in were both read when the connection opened.
+            # Changing either on the settings page drops out of here and connects again on
+            # the new one rather than waiting for a restart.
+            while not stopping.is_set() and mailbox.current:
                 await ingest_once(mailbox, settings, notifier)
                 await mailbox.wait_for_mail(prefs.current().imap_idle_seconds)
         except Exception:

@@ -108,7 +108,7 @@ def init_engine(settings: Settings) -> AsyncEngine:
         if not settings.database_url.startswith("sqlite"):
             raise ValueError(
                 f"DATABASE_URL is set to {settings.database_url.split('://')[0]}://, but "
-                "the database is SQLite in the data directory. Delete the line from .env."
+                "the database is SQLite in the data directory. Unset DATABASE_URL."
             )
         ensure_data_dir()
         # Small pool on purpose: the web app, the poll worker and the mail loop share it,
