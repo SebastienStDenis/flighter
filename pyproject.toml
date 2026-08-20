@@ -1,10 +1,11 @@
 [project]
 name = "flighter"
 version = "0.1.0"
-description = "Self-hosted flight tracking: Gmail bookings in, AeroAPI status, Google Calendar and a phone widget out."
+description = "Self-hosted flight tracking: iCloud bookings in, AeroAPI status, Google Calendar and a phone widget out."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "aioimaplib>=2.0.1",
     "aiosqlite>=0.20",
     "airportsdata>=20250909",
     "alembic>=1.16",
@@ -53,13 +54,21 @@ python_version = "3.12"
 strict = true
 files = ["src"]
 
-# The Google client libraries ship no type information, so calls into them are untyped.
+# The Google and IMAP client libraries ship no type information, so calls into them are
+# untyped.
 [[tool.mypy.overrides]]
-module = ["flighter.gcal", "flighter.gmail", "flighter.google_auth"]
+module = ["flighter.gcal", "flighter.google_auth", "flighter.mail"]
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]
-module = ["googleapiclient.*", "google_auth_oauthlib.*", "google.*", "airportsdata.*", "bs4.*"]
+module = [
+    "aioimaplib.*",
+    "googleapiclient.*",
+    "google_auth_oauthlib.*",
+    "google.*",
+    "airportsdata.*",
+    "bs4.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -26,7 +26,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import bookings as booking_repo
-from . import gcal, gmail, google_auth, prefs
+from . import gcal, google_auth, prefs
 from .aeroapi import budget_status
 from .airports import airport_tz, get_airport
 from .checks import run_checks
@@ -741,7 +741,8 @@ def create_app(settings: Settings) -> FastAPI:
         aeroapi_rate_limit_per_minute: Annotated[str, Form()],
         anthropic_model: Annotated[str, Form()],
         extraction_confidence_threshold: Annotated[str, Form()],
-        gmail_poll_seconds: Annotated[str, Form()],
+        imap_folder: Annotated[str, Form()],
+        imap_idle_seconds: Annotated[str, Form()],
         ntfy_url: Annotated[str, Form()],
         ntfy_topic: Annotated[str, Form()],
         gcal_calendar_id: Annotated[str, Form()] = "",
@@ -753,7 +754,8 @@ def create_app(settings: Settings) -> FastAPI:
             "aeroapi_rate_limit_per_minute": aeroapi_rate_limit_per_minute.strip(),
             "anthropic_model": anthropic_model.strip(),
             "extraction_confidence_threshold": extraction_confidence_threshold.strip(),
-            "gmail_poll_seconds": gmail_poll_seconds.strip(),
+            "imap_folder": imap_folder.strip(),
+            "imap_idle_seconds": imap_idle_seconds.strip(),
             "ntfy_url": ntfy_url.strip(),
             "ntfy_topic": ntfy_topic.strip(),
             "gcal_calendar_id": gcal_calendar_id.strip(),
@@ -791,9 +793,6 @@ def create_app(settings: Settings) -> FastAPI:
         authorised = await google_auth.exchange_code(
             settings, google_auth.callback_url(base_url()), state, code
         )
-        # The mail loop holds a client built from the dead token; drop it so the next
-        # pass builds one with the token that was just granted.
-        gmail.reset_service()
         if not prefs.current().calendar_configured:
             await prefs.save(session, {"gcal_calendar_id": await gcal.create_calendar(authorised)})
         return RedirectResponse("/settings?connected=1", status_code=303)
@@ -816,7 +815,7 @@ def create_app(settings: Settings) -> FastAPI:
                 "counts": {status: count for status, count in counts.all()},
                 "last_snapshot": last_snapshot,
                 "budget": await budget_status(session),
-                # The poller and the Gmail sync each own their own keys in here, so the
+                # The poller and the mail watcher each own their own keys in here, so the
                 # page reports what is in the table rather than asserting a shape.
                 "state": [
                     (row.key, json.dumps(row.value, indent=2, default=str))

@@ -34,7 +34,7 @@
 
 <section class="panel">
   <span class="label">Worker state</span>
-  <p class="panel-note">The poller and the Gmail sync each keep their own cursor here.</p>
+  <p class="panel-note">The poller and the mail watcher each keep their own cursor here.</p>
   {% if state %}
     {% for key, value in state %}
     <div class="label">{{ key }}</div>
@@ -48,6 +48,7 @@
 <section class="panel">
   <span class="label">Connected services</span>
   <dl class="facts">
+    <dt>iCloud mail</dt><dd class="text">{{ 'configured' if settings.mail_configured else 'not configured' }}</dd>
     <dt>Google</dt><dd class="text">{{ 'connected' if settings.google_connected else 'not connected' }}</dd>
     <dt>Google Calendar</dt><dd class="text">{{ 'configured' if prefs.calendar_configured else 'not configured' }}</dd>
     <dt>AeroAPI</dt><dd class="text">{{ 'configured' if settings.aeroapi_configured else 'not configured' }}</dd>

@@ -206,11 +206,16 @@ class FlightEvent(Base):
 
 
 class IngestLog(Base):
-    """Every Gmail message we have looked at, so a replay never re-processes one."""
+    """Every email we have looked at, so a replay never re-processes one.
+
+    Keyed on the RFC822 Message-ID rather than anything the server hands out: an IMAP
+    UID belongs to one folder under one UIDVALIDITY, so a message filed elsewhere, or a
+    mailbox renumbered, would otherwise arrive as something new.
+    """
 
     __tablename__ = "ingest_log"
 
-    gmail_message_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    message_id: Mapped[str] = mapped_column(Text, primary_key=True)
     processed_at: Mapped[datetime] = _created_at()
     outcome: Mapped[str] = mapped_column(Text, nullable=False)
     raw_extraction: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
@@ -248,7 +253,7 @@ class Preferences(Base):
 
 
 class KV(Base):
-    """Small singleton state: the Gmail history cursor, breaker latches, and the like."""
+    """Small singleton state: the mailbox cursor, breaker latches, and the like."""
 
     __tablename__ = "kv"
 

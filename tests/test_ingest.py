@@ -1,4 +1,4 @@
-"""The pipeline, against a stand-in session: no database, no Gmail, no Anthropic."""
+"""The pipeline, against a stand-in session: no database, no mailbox, no Anthropic."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import pytest
 from flighter import ingest
 from flighter.config import Settings
 from flighter.extract import Extraction, Segment
-from flighter.gmail import Message, parse_message
+from flighter.mail import Message, parse_message
 from flighter.models import IngestLog, Passenger
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -80,7 +80,7 @@ class FakeSession:
 
     def add(self, row: Any) -> None:
         assert isinstance(row, IngestLog)
-        self.log[row.gmail_message_id] = row
+        self.log[row.message_id] = row
 
     async def flush(self) -> None:
         return None

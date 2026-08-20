@@ -1,20 +1,20 @@
 # flighter
 
-A self-hosted replacement for Flighty. It reads flight bookings out of your Gmail, tracks
-them on FlightAware, keeps a Google Calendar honest, and puts a live countdown on your
-phone's lock screen. One user, one machine, no App Store.
+A self-hosted replacement for Flighty. It reads flight bookings out of your iCloud
+mailbox, tracks them on FlightAware, keeps a Google Calendar honest, and puts a live
+countdown on your phone's lock screen. One user, one machine, no App Store.
 
 ```
-Gmail  →  extraction  →  bookings  →  AeroAPI polling  →  snapshots  →  change detection
-          JSON-LD                     cadence tightens    append-only    diff last two
-          Claude fallback             as departure                       dead band
-          review queue                approaches                             │
-                                                                   ┌─────────┴─────────┐
-                                                                   ▼                   ▼
-                                                              ntfy push        Google Calendar
-                                                                   │
-                                             web UI  ←─────────────┘─────→  Scriptable widget
-                                             flight detail                  live countdown
+iCloud IMAP  →  extraction  →  bookings  →  AeroAPI polling  →  snapshots  →  change detection
+IDLE            JSON-LD                     cadence tightens    append-only    diff last two
+                Claude fallback             as departure                       dead band
+                review queue                approaches                             │
+                                                                         ┌─────────┴─────────┐
+                                                                         ▼                   ▼
+                                                                    ntfy push        Google Calendar
+                                                                         │
+                                                   web UI  ←─────────────┘─────→  Scriptable widget
+                                                   flight detail                  live countdown
 ```
 
 The point is not that a phone can show a flight number. The point is that the gate change
@@ -26,6 +26,12 @@ arrives while you are still at the wrong end of the terminal.
 you can edit it. A snapshot is what FlightAware saw, is append-only, and is never
 corrected. Change detection is a diff of the newest two snapshots, so rewriting a snapshot
 would erase the very event it should have raised.
+
+**The mailbox is read, never written.** Everything is fetched with `BODY.PEEK[]`, so
+nothing is marked read, flagged or moved: the folder looks exactly the same afterwards as
+your phone left it. What has been dealt with is tracked here instead, as a UIDVALIDITY
+and the highest UID processed, and the ingest log is keyed on each email's `Message-ID`
+so re-filing a message does not make it new again.
 
 **Passengers are first-class.** Tracking your sister's flight into JFK so you know when to
 leave for the airport is a normal thing to want, and it is not a note field.
@@ -52,7 +58,7 @@ useless in an airport.
 
 **Credentials and preferences live in different places, and never both.** A credential is
 set once by hand in `.env`, is never handed back out by the UI, and the app never writes
-it. Everything else - the public URL, the spend cap, the poll interval, the ntfy topic,
+it. Everything else - the public URL, the spend cap, the watched folder, the ntfy topic,
 the calendar - is a preference: it has a working default, it is edited at `/settings`,
 and the database is the only place it lives. No value has two homes, so there is never a
 question of which one wins.
@@ -63,7 +69,7 @@ widget token generated on first boot. Those keys never appear in `.env` either.
 
 ## Prerequisites
 
-Three accounts, and only two of them involve a form.
+Four accounts and an Apple ID you already have, and only two of them involve a form.
 
 ### Tailscale
 
@@ -81,6 +87,25 @@ this app.
 Your phone therefore needs the Tailscale app connected. It stays up in the background; if
 it drops, the widget shows the last data it had rather than failing loudly.
 
+### iCloud app-specific password
+
+The mail loop signs in to `imap.mail.me.com` as you. With two-factor authentication on -
+and it is, for every Apple ID that can reach iCloud Mail - IMAP refuses your Apple ID
+password outright, so it needs an app-specific one.
+
+At [appleid.apple.com](https://appleid.apple.com), **Sign-In and Security →
+App-Specific Passwords → +**, name it `flighter`, and put the generated
+`xxxx-xxxx-xxxx-xxxx` string in `ICLOUD_APP_PASSWORD`. `ICLOUD_EMAIL` is the address you
+sign in with.
+
+> Changing your Apple ID password **revokes every app-specific password**, this one
+> included. `flighter check` is what tells you that is what happened: generate a new one,
+> put it in `.env`, and restart.
+
+The folder to watch is a preference, `INBOX` by default, and only one connection is ever
+held: iCloud allows about five per account, and your phone and your Mac are already using
+some of them.
+
 ### FlightAware AeroAPI key
 
 Sign up for the **Personal** tier at
@@ -93,14 +118,13 @@ licensed for personal use only.
 > cap of its own. The monthly cap on the settings page defaults to `$4.00` and stops all
 > polling when month-to-date estimated spend passes it. `/health` shows the running total.
 
-### Google OAuth client (Gmail + Calendar)
+### Google OAuth client (Calendar)
 
-One project, one client, both APIs. A five-minute setup you do once, and the only Google
-value you ever paste is the client id and secret - the refresh token is minted by the
-app.
+One project, one client. A five-minute setup you do once, and the only Google value you
+ever paste is the client id and secret - the refresh token is minted by the app.
 
 1. At [console.cloud.google.com](https://console.cloud.google.com), create a project.
-2. **APIs & Services → Library** → enable the **Gmail API** and the **Google Calendar API**.
+2. **APIs & Services → Library** → enable the **Google Calendar API**.
 3. **APIs & Services → OAuth consent screen**: set it up for **External** users, then set
    the publishing status to **In production**.
 4. **APIs & Services → Credentials → Create Credentials → OAuth client ID → Web
@@ -112,10 +136,6 @@ Step 3 is not optional. An app left in **Testing** issues refresh tokens that ex
 **7 days**, and the service will silently stop working every week. Publishing does not
 require Google's verification review; you will see a one-time "Google hasn't verified this
 app" screen (Advanced → Go to …), and Google exempts apps used only by their author.
-
-> **Turn off Google Calendar's own "Events from Gmail"** (Calendar → Settings → Events
-> from Gmail). If you leave it on, every flight lands on your calendar twice: once from
-> Google and once from here.
 
 ### Anthropic API key
 
@@ -142,9 +162,9 @@ serving.
 Open `https://flighter.<your-tailnet>.ts.net/settings` and finish there:
 
 1. Set the **public base URL** - the page offers the address you opened it on.
-2. **Connect Google**, once. Sign in, accept both scopes, and the app stores the refresh
-   token and creates a calendar called *Flights* to write into.
-3. **Run checks**. It exercises Postgres, AeroAPI, Gmail, Calendar and ntfy in turn and
+2. **Connect Google**, once. Sign in, accept the calendar scope, and the app stores the
+   refresh token and creates a calendar called *Flights* to write into.
+3. **Run checks**. It exercises Postgres, AeroAPI, iCloud, Calendar and ntfy in turn and
    names the broken one, which is the question you will actually have.
 
 Then add a passenger for yourself on the **People** page, and either add a flight by hand

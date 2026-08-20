@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from . import prefs
 from .config import Settings, get_settings
-from .gmail import Message
+from .mail import Message
 
 log = logging.getLogger(__name__)
 

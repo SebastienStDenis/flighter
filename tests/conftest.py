@@ -19,6 +19,8 @@ def settings() -> Settings:
     return Settings(
         aeroapi_key="test-key",
         widget_token="test-token",
+        icloud_email="someone@icloud.com",
+        icloud_app_password="abcd-efgh-ijkl-mnop",
         google_client_id="client-id",
         google_client_secret="client-secret",
         google_refresh_token="refresh-token",

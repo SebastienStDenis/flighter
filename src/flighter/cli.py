@@ -78,13 +78,12 @@ def _cmd_seed_airports(settings: Settings, _args: argparse.Namespace) -> int:
 
 def _cmd_backfill(settings: Settings, args: argparse.Namespace) -> int:
     """One-off catch-up over recent mail, for a first run or after a long outage."""
-    from .db import session_scope
-    from .gmail import backfill
+    from .ingest import backfill
 
     async def run() -> int:
-        async with _database(settings), session_scope() as session:
-            processed = await backfill(session, days=args.days)
-        print(f"processed {processed} messages")
+        async with _database(settings):
+            outcomes = await backfill(days=args.days, settings=settings)
+        print(f"processed {len(outcomes)} message(s)")
         return 0
 
     return asyncio.run(run())

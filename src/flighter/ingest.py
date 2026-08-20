@@ -1,4 +1,4 @@
-"""The pipeline: a Gmail message in, bookings and one ingest_log row out.
+"""The pipeline: an email in, bookings and one ingest_log row out.
 
 Every message ends with exactly one ingest_log row, whatever happened to it, because
 that row is both the record of what we decided and the thing that stops a re-delivery
@@ -22,7 +22,7 @@ from .bookings import create_booking, find_duplicate
 from .config import Settings, get_settings
 from .db import session_scope
 from .extract import Extraction, Segment, from_jsonld, from_model, looks_like_flight
-from .gmail import Message, commit_history_id, poll_history
+from .mail import RECONNECT_MAX_SECONDS, RECONNECT_MIN_SECONDS, Mailbox, Message
 from .models import IngestLog, Passenger
 from .timezones import to_utc
 
@@ -235,7 +235,7 @@ async def _record(
     """Write the ingest_log row. Every path through the pipeline ends here."""
     session.add(
         IngestLog(
-            gmail_message_id=message.id,
+            message_id=message.id,
             outcome=outcome,
             raw_extraction=extraction.model_dump(mode="json") if extraction else None,
             error=error,
@@ -249,41 +249,91 @@ async def _record(
 
 
 async def run_ingest_loop(stopping: asyncio.Event, *, settings: Settings | None = None) -> None:
-    """Poll Gmail until asked to stop.
+    """Hold one IMAP connection open and ingest what arrives on it, until asked to stop.
 
-    Each message is committed on its own so that a failure part way through a batch
-    keeps everything already ingested, and the Gmail cursor only advances once the whole
-    batch is in the log.
+    A connection that fails is reopened after a wait that doubles each time: iCloud
+    allows only a handful of connections per account, and a client that reconnects in a
+    tight loop is a client it stops answering.
     """
     settings = settings or get_settings()
+    backoff = RECONNECT_MIN_SECONDS
 
     while not stopping.is_set():
+        if not settings.mail_configured:
+            log.debug("iCloud is not configured; not watching the mailbox")
+            await _pause(stopping, prefs.current().imap_idle_seconds)
+            continue
+
+        mailbox = Mailbox(settings)
         try:
-            # Checked every pass rather than once: Google is connected from the settings
-            # page, and a loop that gave up at boot would need a restart to notice.
-            if settings.google_connected:
-                await ingest_once(settings)
+            await mailbox.connect()
+            backoff = RECONNECT_MIN_SECONDS
+            # The folder is a preference, and the connection is selected on the one that
+            # was live when it opened. Changing it on the settings page drops out of here
+            # and reconnects on the new one rather than waiting for a restart.
+            while not stopping.is_set() and mailbox.folder == prefs.current().imap_folder:
+                await ingest_once(mailbox, settings)
+                await mailbox.wait_for_mail(prefs.current().imap_idle_seconds)
         except Exception:
-            log.exception("ingest poll failed; retrying at the next interval")
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(stopping.wait(), timeout=prefs.current().gmail_poll_seconds)
+            log.exception("the mail connection failed; reconnecting in %.0fs", backoff)
+            await mailbox.close()
+            await _pause(stopping, backoff)
+            backoff = min(backoff * 2, RECONNECT_MAX_SECONDS)
+        else:
+            await mailbox.close()
 
 
-async def ingest_once(settings: Settings) -> list[str]:
-    """One poll: fetch, process, then advance the cursor. Returns the outcomes."""
+async def ingest_once(mailbox: Mailbox, settings: Settings) -> list[str]:
+    """One pass: fetch, process, then advance the cursor. Returns the outcomes.
+
+    Each message is committed on its own so that a failure part way through a batch
+    keeps everything already ingested, and the cursor only advances once the whole batch
+    is in the log.
+    """
     async with session_scope() as session:
-        messages = await poll_history(session, settings=settings)
+        messages = await mailbox.poll(session)
 
+    outcomes = await _process(messages, settings)
+    async with session_scope() as session:
+        await mailbox.commit_cursor(session)
+    return outcomes
+
+
+async def backfill(days: int = 30, *, settings: Settings | None = None) -> list[str]:
+    """A one-off sweep over recent mail, for the CLI.
+
+    Opens a connection of its own and leaves the cursor where it was, so running this
+    while the watcher is up neither moves its position nor costs it its connection for
+    longer than the sweep takes.
+    """
+    settings = settings or get_settings()
+    if not settings.mail_configured:
+        log.warning("iCloud is not configured; nothing to backfill")
+        return []
+
+    mailbox = Mailbox(settings)
+    try:
+        await mailbox.connect()
+        async with session_scope() as session:
+            messages = await mailbox.backfill(session, days)
+    finally:
+        await mailbox.close()
+    return await _process(messages, settings)
+
+
+async def _process(messages: list[Message], settings: Settings) -> list[str]:
     outcomes: list[str] = []
     for message in messages:
         async with session_scope() as session:
             outcomes.append(await process_message(session, message, settings=settings))
-
     if messages:
         log.info("ingested %d message(s): %s", len(messages), _tally(outcomes))
-    async with session_scope() as session:
-        await commit_history_id(session)
     return outcomes
+
+
+async def _pause(stopping: asyncio.Event, seconds: float) -> None:
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(stopping.wait(), timeout=seconds)
 
 
 def _tally(outcomes: list[str]) -> str:

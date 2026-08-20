@@ -43,9 +43,13 @@ class Settings(BaseSettings):
     # --- Anthropic, the extraction fallback ------------------------------------------
     anthropic_api_key: str = Field(default="", repr=False)
 
-    # --- Google, one client for Gmail and Calendar alike -----------------------------
-    # Both APIs sit in one Cloud project behind one consent screen, so asking for two
-    # clients only ever bought two ways to paste the wrong string.
+    # --- iCloud, the mailbox we watch ------------------------------------------------
+    # An app-specific password from appleid.apple.com, not the Apple ID password: IMAP
+    # refuses the account password outright once two-factor authentication is on.
+    icloud_email: str = ""
+    icloud_app_password: str = Field(default="", repr=False)
+
+    # --- Google Calendar -------------------------------------------------------------
     google_client_id: str = ""
     google_client_secret: str = Field(default="", repr=False)
     # Minted by the consent flow at /settings/google/connect, not typed by anyone.
@@ -57,6 +61,10 @@ class Settings(BaseSettings):
     # --- Widget -----------------------------------------------------------------------
     # Generated on first boot. The only authentication in front of the flight data.
     widget_token: str = Field(default="", repr=False)
+
+    @property
+    def mail_configured(self) -> bool:
+        return bool(self.icloud_email and self.icloud_app_password)
 
     @property
     def google_configured(self) -> bool:
@@ -106,7 +114,7 @@ def ensure_widget_token() -> Settings:
 def reload_settings() -> Settings:
     """Re-read the environment into the object every caller is already holding.
 
-    The alternative, returning a fresh instance, leaves the poller and the mail loop
+    The alternative, returning a fresh instance, leaves the poller and the dispatcher
     talking to Google with the token that was live when they started.
     """
     current = get_settings()

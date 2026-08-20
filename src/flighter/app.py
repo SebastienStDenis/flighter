@@ -110,8 +110,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ),
         asyncio.create_task(_supervise("ingest", run_ingest_loop(stopping)), name="ingest"),
     ]
+    if not settings.mail_configured:
+        log.warning("iCloud is not configured; bookings must be added by hand")
     if not settings.google_connected:
-        log.warning("Google is not connected; bookings must be added by hand")
+        log.warning("Google is not connected; nothing will reach the calendar")
 
     app.state.background_tasks = tasks
     try:

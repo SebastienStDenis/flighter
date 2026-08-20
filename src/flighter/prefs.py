@@ -49,7 +49,11 @@ class Prefs(BaseModel):
     # Below this an extraction lands in the review queue instead of the tracked list.
     extraction_confidence_threshold: float = 0.85
 
-    gmail_poll_seconds: int = 180
+    # The folder the IMAP watcher idles on, and how often that IDLE is re-issued. A
+    # silent connection is what an impatient server and a NAT table both drop, and five
+    # minutes is well inside what either tolerates.
+    imap_folder: str = "INBOX"
+    imap_idle_seconds: int = 300
     # A calendar of its own, so a bad sync is undone by deleting one calendar. Created
     # by the consent flow rather than looked up by hand.
     gcal_calendar_id: str = ""

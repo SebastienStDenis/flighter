@@ -18,7 +18,7 @@ from flighter.extract import (
     looks_like_flight,
     render,
 )
-from flighter.gmail import Message, parse_message
+from flighter.mail import Message, parse_message
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

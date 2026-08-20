@@ -1,9 +1,7 @@
-"""One Google client, both APIs, and the consent flow that fills in the refresh token.
+"""The Google client, and the consent flow that fills in the refresh token.
 
-Gmail and Calendar sit in the same Cloud project behind the same consent screen, so
-they share a client here rather than asking for the same two strings twice. The flow is
-the browser redirect one: it hands the token straight back to the running app, so the
-only thing left for a person to do is click through Google's screens.
+The flow is the browser redirect one: it hands the token straight back to the running
+app, so the only thing left for a person to do is click through Google's screens.
 """
 
 from __future__ import annotations
@@ -19,12 +17,9 @@ from .config import Settings, write_secret
 
 log = logging.getLogger(__name__)
 
-# Read the mailbox, write one calendar. Asked for together because a second consent
-# screen for the second API is a second thing to go stale.
-SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/calendar",
-]
+# Write one calendar, and nothing else. Creating the calendar the app writes into needs
+# `calendars.insert`, which the read-only scope does not cover.
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
 

@@ -19,6 +19,11 @@
     <dd class="text">{{ 'key set' if settings.aeroapi_configured else 'AEROAPI_KEY is not set' }}</dd>
     <dt>Anthropic</dt>
     <dd class="text">{{ 'key set' if settings.anthropic_api_key else 'JSON-LD emails only' }}</dd>
+    <dt>iCloud mail</dt>
+    <dd class="text">
+      {{- settings.icloud_email if settings.mail_configured
+          else 'ICLOUD_EMAIL and ICLOUD_APP_PASSWORD are not set' -}}
+    </dd>
     <dt>Google</dt>
     <dd class="text">
       {%- if settings.google_connected %}connected
@@ -41,7 +46,7 @@
 
 <section class="panel">
   <span class="label">Checks</span>
-  <p class="panel-note">Exercises Postgres, AeroAPI, Gmail, Calendar and ntfy in turn, and
+  <p class="panel-note">Exercises Postgres, AeroAPI, iCloud, Calendar and ntfy in turn, and
     names the broken one. The AeroAPI check spends one result set, and ntfy sends a real push.</p>
   <div class="actions">
     <button class="btn" hx-post="/settings/checks" hx-target="#checks" hx-swap="innerHTML"
@@ -115,31 +120,39 @@
     <span class="label">Mail</span>
     <div class="row">
       <div class="field">
-        <label for="gmail_poll_seconds">Check mail every (seconds)</label>
-        <input type="number" min="30" id="gmail_poll_seconds" name="gmail_poll_seconds"
-               required value="{{ posted['gmail_poll_seconds'] }}">
+        <label for="imap_folder">Watched folder</label>
+        <input type="text" id="imap_folder" name="imap_folder" required
+               value="{{ posted['imap_folder'] }}">
       </div>
+      <div class="field">
+        <label for="imap_idle_seconds">Re-idle every (seconds)</label>
+        <input type="number" min="60" max="1740" id="imap_idle_seconds" name="imap_idle_seconds"
+               required value="{{ posted['imap_idle_seconds'] }}">
+      </div>
+    </div>
+    <div class="row">
       <div class="field">
         <label for="extraction_confidence_threshold">Review below confidence</label>
         <input type="number" min="0" max="1" step="0.01" id="extraction_confidence_threshold"
                name="extraction_confidence_threshold" required
                value="{{ posted['extraction_confidence_threshold'] }}">
       </div>
-    </div>
-    <div class="row">
       <div class="field">
         <label for="anthropic_model">Extraction model</label>
         <input type="text" id="anthropic_model" name="anthropic_model" required
                value="{{ posted['anthropic_model'] }}">
       </div>
+    </div>
+    <div class="row">
       <div class="field">
         <label for="gcal_calendar_id">Calendar id</label>
         <input type="text" id="gcal_calendar_id" name="gcal_calendar_id"
                value="{{ posted['gcal_calendar_id'] }}">
       </div>
     </div>
-    <p class="hint">Any email carrying schema.org flight data is parsed exactly and for free;
-      the model only sees the ones that do not.</p>
+    <p class="hint">The mailbox is only ever read: everything is fetched with
+      <code>BODY.PEEK</code>, so nothing is marked read or moved. Any email carrying schema.org
+      flight data is parsed exactly and for free; the model only sees the ones that do not.</p>
   </section>
 
   <div class="actions">

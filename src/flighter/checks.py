@@ -84,16 +84,22 @@ async def _check_ntfy(settings: Settings) -> CheckResult:
     return CheckResult("ntfy", True, "test push sent; check your phone")
 
 
-async def _check_gmail(settings: Settings) -> CheckResult:
-    if not settings.google_connected:
-        return CheckResult("gmail", False, "Google is not connected")
-    try:
-        from .gmail import profile
+async def _check_mail(settings: Settings) -> CheckResult:
+    """Logs in and selects the folder, which is everything the watcher needs to work."""
+    if not settings.mail_configured:
+        return CheckResult(
+            "mail", False, "ICLOUD_EMAIL and ICLOUD_APP_PASSWORD are not set in .env"
+        )
+    from .mail import Mailbox
 
-        address = await profile()
+    mailbox = Mailbox(settings)
+    try:
+        await mailbox.connect()
     except Exception as exc:
-        return CheckResult("gmail", False, str(exc))
-    return CheckResult("gmail", True, f"authenticated as {address}")
+        return CheckResult("mail", False, str(exc))
+    finally:
+        await mailbox.close()
+    return CheckResult("mail", True, f"{mailbox.message_count} message(s) in {mailbox.folder}")
 
 
 async def _check_calendar(settings: Settings) -> CheckResult:
@@ -114,7 +120,7 @@ async def run_checks(settings: Settings) -> list[CheckResult]:
     return [
         await _check_database(),
         await _check_aeroapi(settings),
-        await _check_gmail(settings),
+        await _check_mail(settings),
         await _check_calendar(settings),
         await _check_ntfy(settings),
     ]
