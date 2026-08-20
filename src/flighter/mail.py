@@ -13,6 +13,11 @@ Bodies are read with `BODY.PEEK[]`, so an email is never silently marked as read
 unflag is a write, and the only one: a message that came out the far end of the pipeline
 loses its flag where it stands, and a message that failed keeps it so the next sweep
 tries it again.
+
+`imap_tools` speaks the protocol. Nothing here reads a server reply by hand: the mailbox
+list, the search result and the message all arrive parsed, which is the only honest way
+to treat a server we cannot test against. It is synchronous, so every command runs on a
+worker thread and the surface this module offers stays async.
 """
 
 from __future__ import annotations
@@ -20,14 +25,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import re
-from collections.abc import Sequence
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from email import message_from_bytes, policy
 from email.utils import parsedate_to_datetime
+from time import monotonic
 from typing import Any, NamedTuple
 
-from aioimaplib import IMAP4_SSL
+from imap_tools import FolderInfo, MailBox
 from pydantic import BaseModel
 
 from . import prefs
@@ -72,6 +77,11 @@ _UNFLAG = " ".join(("\\Flagged", *FLAG_KEYWORDS))
 # confirmation is flagged nine times in ten.
 IDLE_MAILBOX = "INBOX"
 
+# A wait is served as a run of short IDLEs rather than one long one. The thread running
+# it cannot be interrupted, so this is how long a shutdown can be left waiting on it, and
+# it keeps the wait inside the 29 minutes RFC 2177 allows however long a cycle is set to.
+IDLE_CHUNK_SECONDS = 30.0
+
 # Never searched. A draft or a sent copy of a forwarded confirmation holds the same
 # flight and would import it a second time under a Message-ID of its own, and mail in
 # Trash was thrown away on purpose. Matched on the RFC 6154 attributes so that a
@@ -80,12 +90,6 @@ IDLE_MAILBOX = "INBOX"
 SKIPPED_ATTRIBUTES = frozenset({"\\trash", "\\junk", "\\drafts", "\\sent"})
 SKIPPED_NAMES = frozenset({"trash", "deleted messages", "junk", "drafts", "sent", "sent messages"})
 UNSELECTABLE_ATTRIBUTE = "\\noselect"
-
-_UIDVALIDITY_RE = re.compile(rb"\[UIDVALIDITY (\d+)\]")
-_UID_RE = re.compile(rb"UID (\d+)")
-# `(\HasNoChildren \Archive) "/" "Archive"`: attributes, the hierarchy delimiter, a name
-# that is quoted only when the server feels like quoting it.
-_LIST_RE = re.compile(r'^\(([^)]*)\)\s+(?:"[^"]*"|NIL)\s+(?:"((?:[^"\\]|\\.)*)"|(\S+))\s*$')
 
 
 class Message(BaseModel):
@@ -105,13 +109,6 @@ class Marked(NamedTuple):
     mailbox: str
     uid: int
     message: Message
-
-
-class Listed(NamedTuple):
-    """One line of a LIST reply."""
-
-    attributes: frozenset[str]
-    name: str
 
 
 # -- message parsing -----------------------------------------------------------------
@@ -170,18 +167,20 @@ class Mailbox:
     than an IDLE does, and the connection budget is shared with every other client signed
     in to the account. The sweep never opens a second one either - it selects each
     mailbox in turn down this one.
+
+    Every method here is a single hop onto a worker thread around the blocking half of
+    the same name below, so the connection is only ever touched by one thread at a time.
     """
 
-    def __init__(self, settings: Settings, client: Any | None = None) -> None:
+    def __init__(self, settings: Settings, box: MailBox | None = None) -> None:
         self._settings = settings
-        self._client = client
+        self._box = box
         self.colour = prefs.current().imap_flag_colour
         self._generation = credentials_generation()
         self.mailboxes: tuple[str, ...] = ()
         self.waiting = 0
         self._criteria = ""
         self._selected: str | None = None
-        self._uidvalidity = 0
 
     @property
     def current(self) -> bool:
@@ -198,21 +197,7 @@ class Mailbox:
     async def connect(self) -> None:
         """Open the connection, log in, and work out which mailboxes to sweep."""
         self._criteria = _criteria(self.colour)
-        if self._client is None:
-            client = IMAP4_SSL(host=IMAP_HOST, port=IMAP_PORT, timeout=COMMAND_TIMEOUT_SECONDS)
-            await client.wait_hello_from_server()
-            self._client = client
-
-        _ok(
-            await self._client.login(
-                self._settings.icloud_email, self._settings.icloud_app_password
-            ),
-            "login",
-        )
-
-        listed = _listed(_ok(await self._client.list('""', '"*"'), "list").lines)
-        self.mailboxes = _searchable(listed)
-        await self._select(IDLE_MAILBOX)
+        await asyncio.to_thread(self._connect)
         log.info(
             "watching for %s flags across %d mailbox(es): %s",
             self.colour,
@@ -222,12 +207,7 @@ class Mailbox:
 
     async def close(self) -> None:
         """Hang up. Never raises: this runs while something else is already going wrong."""
-        client, self._client = self._client, None
-        self._selected = None
-        if client is None:
-            return
-        with contextlib.suppress(Exception):
-            await client.logout()
+        await asyncio.to_thread(self._close)
 
     async def poll(self) -> list[Marked]:
         """Every message carrying the flag right now, mailbox by mailbox, oldest first.
@@ -235,22 +215,14 @@ class Mailbox:
         No de-duplication and no cursor: a flag is only ever set by the user and only ever
         cleared by `clear_mark`, so what is flagged is exactly what is still to be done.
         """
-        marked = []
-        for mailbox in self.mailboxes:
-            for uid in await self._flagged(mailbox):
-                for _, raw in await self._fetch(uid, "(BODY.PEEK[])"):
-                    message_id = _message_id(raw, self._uidvalidity, uid)
-                    marked.append(Marked(mailbox, uid, parse_message(raw, message_id)))
+        marked = await asyncio.to_thread(self._poll)
         self.waiting = len(marked)
         return marked
 
     async def count_flagged(self) -> int:
         """How many messages carry the flag, without fetching any of them."""
-        waiting = 0
-        for mailbox in self.mailboxes:
-            waiting += len(await self._flagged(mailbox))
-        self.waiting = waiting
-        return waiting
+        self.waiting = await asyncio.to_thread(self._count_flagged)
+        return self.waiting
 
     async def clear_mark(self, marked: Marked) -> None:
         """Take the flag off a finished message and leave it exactly where it is.
@@ -258,13 +230,7 @@ class Mailbox:
         Only ever called once the pipeline has written the message's ingest_log row, so a
         crash between the two leaves the message flagged and the next sweep replays it.
         """
-        await self._select(marked.mailbox)
-        _ok(
-            await self._require_client().uid(
-                "store", str(marked.uid), f"-FLAGS.SILENT ({_UNFLAG})"
-            ),
-            f"unflag {marked.uid} in {marked.mailbox}",
-        )
+        await asyncio.to_thread(self._clear_mark, marked)
 
     async def wait_for_mail(self, seconds: float) -> None:
         """Idle until the server has something to say, or the cycle is up.
@@ -273,120 +239,107 @@ class Mailbox:
         common case - a confirmation flagged where it landed, in the inbox - and the next
         sweep runs within a second or two. A flag set on a message filed somewhere else is
         never announced to anybody, and the sweep this timeout paces is what finds it.
-
-        Cycled rather than left open indefinitely because a silent IDLE is what a NAT
-        table and an impatient server both drop, and neither tells the client.
         """
-        await self._select(IDLE_MAILBOX)
-        client = self._require_client()
-        idle = await client.idle_start(timeout=seconds)
-        # idle_start's own timer ends the wait, so the timeout here only matters when
-        # the connection has died without saying so.
-        await client.wait_server_push(timeout=seconds + COMMAND_TIMEOUT_SECONDS)
-        client.idle_done()
-        await asyncio.wait_for(idle, COMMAND_TIMEOUT_SECONDS)
+        deadline = monotonic() + seconds
+        while (remaining := deadline - monotonic()) > 0:
+            if await asyncio.to_thread(self._idle, min(remaining, IDLE_CHUNK_SECONDS)):
+                return
 
-    # -- internals -------------------------------------------------------------------
+    # -- the blocking half -----------------------------------------------------------
 
-    def _require_client(self) -> Any:
-        if self._client is None:
+    def _require_box(self) -> MailBox:
+        if self._box is None:
             raise RuntimeError("the mailbox is not connected")
-        return self._client
+        return self._box
 
-    async def _select(self, mailbox: str) -> None:
+    def _connect(self) -> None:
+        if self._box is None:
+            self._box = MailBox(IMAP_HOST, port=IMAP_PORT, timeout=COMMAND_TIMEOUT_SECONDS)
+        box = self._box
+        box.login(self._settings.icloud_email, self._settings.icloud_app_password)
+        # Signing in selects the inbox, which is where the wait between sweeps idles.
+        self._selected = IDLE_MAILBOX
+        self.mailboxes = _searchable(box.folder.list())
+
+    def _close(self) -> None:
+        box, self._box = self._box, None
+        self._selected = None
+        if box is None:
+            return
+        with contextlib.suppress(Exception):
+            box.logout()
+
+    def _poll(self) -> list[Marked]:
+        marked = []
+        for mailbox in self.mailboxes:
+            self._select(mailbox)
+            # Everything is read out before any of it is processed: the pipeline takes a
+            # model call and a handful of network writes per message, and iCloud drops a
+            # connection left holding a half-consumed fetch across all of that.
+            for message in self._require_box().fetch(self._criteria, mark_seen=False):
+                uid = int(message.uid or 0)
+                raw = message.obj.as_bytes()
+                marked.append(
+                    Marked(mailbox, uid, parse_message(raw, _message_id(raw, mailbox, uid)))
+                )
+        return marked
+
+    def _count_flagged(self) -> int:
+        waiting = 0
+        for mailbox in self.mailboxes:
+            self._select(mailbox)
+            waiting += len(self._require_box().uids(self._criteria))
+        return waiting
+
+    def _clear_mark(self, marked: Marked) -> None:
+        self._select(marked.mailbox)
+        # Issued rather than left to `MailBox.flag`, which follows every store with an
+        # EXPUNGE: this service takes a flag off, and it does not delete anybody's mail.
+        # SILENT because the reply is the flags we just cleared and nothing reads them.
+        _ok(
+            self._require_box().client.uid(
+                "STORE", str(marked.uid), "-FLAGS.SILENT", f"({_UNFLAG})"
+            ),
+            f"unflag {marked.uid} in {marked.mailbox}",
+        )
+
+    def _idle(self, seconds: float) -> bool:
+        """One IDLE, and whether the server said anything before it was up."""
+        self._select(IDLE_MAILBOX)
+        return bool(self._require_box().idle.wait(timeout=seconds))
+
+    def _select(self, mailbox: str) -> None:
         """SELECT, unless this mailbox is already the selected one."""
         if self._selected == mailbox:
             return
-        response = _ok(await self._require_client().select(_quote(mailbox)), f"select {mailbox}")
-        uidvalidity = _first(_UIDVALIDITY_RE, response.lines)
-        if uidvalidity is None:
-            raise RuntimeError(f"{mailbox} was selected without a UIDVALIDITY")
+        self._require_box().folder.set(mailbox)
         self._selected = mailbox
-        self._uidvalidity = uidvalidity
-
-    async def _flagged(self, mailbox: str) -> list[int]:
-        await self._select(mailbox)
-        response = _ok(
-            await self._require_client().uid_search(self._criteria, charset=None),
-            f"search {mailbox}",
-        )
-        return _uids(response.lines)
-
-    async def _fetch(self, uid: int, parts: str) -> list[tuple[int, bytes]]:
-        response = _ok(await self._require_client().uid("fetch", str(uid), parts), f"fetch {uid}")
-        return _fetched(response.lines)
 
 
 # -- responses -----------------------------------------------------------------------
 
 
-def _ok(response: Any, what: str) -> Any:
-    """Every command is checked: a rejected login answers NO rather than raising."""
-    if response.result != "OK":
-        detail = b" ".join(bytes(line) for line in response.lines).decode(errors="replace")
-        raise RuntimeError(f"IMAP {what} failed: {response.result} {detail}".strip())
-    return response
+def _ok(result: tuple[str, Any], what: str) -> None:
+    """Every command is checked: a refused store answers NO rather than raising."""
+    status, detail = result
+    if status != "OK":
+        joined = b" ".join(line for line in detail if isinstance(line, bytes))
+        raise RuntimeError(
+            f"IMAP {what} failed: {status} {joined.decode(errors='replace')}".strip()
+        )
 
 
-def _first(pattern: re.Pattern[bytes], lines: Sequence[Any]) -> int | None:
-    for line in lines:
-        if isinstance(line, bytearray):
-            continue
-        match = pattern.search(bytes(line))
-        if match:
-            return int(match.group(1))
-    return None
-
-
-def _uids(lines: Sequence[Any]) -> list[int]:
-    """The UIDs out of a SEARCH reply, which arrives as one space-separated line."""
-    if not lines:
-        return []
-    return sorted(int(uid) for uid in bytes(lines[0]).split() if uid.isdigit())
-
-
-def _fetched(lines: Sequence[Any]) -> list[tuple[int, bytes]]:
-    """Pair each fetched literal with the UID from the line that introduced it.
-
-    A FETCH reply is a header line naming the UID and the size, then the bytes as a
-    bytearray, then a closing parenthesis, repeated once per message.
-    """
-    fetched: list[tuple[int, bytes]] = []
-    uid: int | None = None
-    for line in lines:
-        if isinstance(line, bytearray):
-            if uid is not None:
-                fetched.append((uid, bytes(line)))
-                uid = None
-            continue
-        match = _UID_RE.search(bytes(line))
-        if match:
-            uid = int(match.group(1))
-    return fetched
-
-
-def _listed(lines: Sequence[Any]) -> list[Listed]:
-    """The mailboxes out of a LIST reply, one per line, plus a completion line to ignore."""
-    entries = []
-    for line in lines:
-        if isinstance(line, bytearray):
-            continue
-        match = _LIST_RE.match(bytes(line).decode(errors="replace").strip())
-        if match:
-            attributes = frozenset(flag.lower() for flag in match.group(1).split())
-            entries.append(Listed(attributes, _unquote(match.group(2) or match.group(3))))
-    return entries
-
-
-def _searchable(listed: Sequence[Listed]) -> tuple[str, ...]:
+def _searchable(folders: Iterable[FolderInfo]) -> tuple[str, ...]:
     """The mailboxes a flagged message is worth looking for in, in LIST order."""
-    return tuple(
-        entry.name
-        for entry in listed
-        if UNSELECTABLE_ATTRIBUTE not in entry.attributes
-        and not entry.attributes & SKIPPED_ATTRIBUTES
-        and entry.name.lower() not in SKIPPED_NAMES
-    )
+    searchable = []
+    for folder in folders:
+        attributes = {attribute.lower() for attribute in folder.flags}
+        if UNSELECTABLE_ATTRIBUTE in attributes or attributes & SKIPPED_ATTRIBUTES:
+            continue
+        if folder.name.lower() in SKIPPED_NAMES:
+            continue
+        searchable.append(folder.name)
+    return tuple(searchable)
 
 
 def _criteria(colour: str) -> str:
@@ -408,22 +361,14 @@ def _criteria(colour: str) -> str:
     return " ".join(keys)
 
 
-def _message_id(raw: bytes, uidvalidity: int, uid: int) -> str:
+def _message_id(raw: bytes, mailbox: str, uid: int) -> str:
     """The RFC822 Message-ID, which is what survives a message being moved or re-filed.
 
-    A UID does not: it belongs to one mailbox under one UIDVALIDITY, and the same
+    A UID does not: it belongs to the one mailbox it was handed out in, and the same
     confirmation filed by hand in two places would look like two different messages, so
-    keying the ingest log on it would import it twice.
+    keying the ingest log on it would import it twice. Where a message carries no id at
+    all - legal, if rare - where it is sitting is the only handle there is.
     """
     header = message_from_bytes(raw, policy=policy.default).get("Message-ID")
     value = str(header).strip() if header else ""
-    return value or f"<uid-{uidvalidity}-{uid}@icloud.invalid>"
-
-
-def _quote(mailbox: str) -> str:
-    escaped = mailbox.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
-
-
-def _unquote(name: str) -> str:
-    return name.replace('\\"', '"').replace("\\\\", "\\")
+    return value or f"<uid-{mailbox}-{uid}@icloud.invalid>"
