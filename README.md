@@ -6,9 +6,9 @@ on your phone's lock screen. One user, one machine, no App Store.
 
 ```
 you mark an email  →  iCloud IMAP  →  extraction  →  bookings  →  AeroAPI polling  →  change detection
-flag it the           IDLE + sweep    JSON-LD                     cadence tightens    diff last two
-import colour         every mailbox   Claude fallback             as departure        snapshots
-      │               done → unflag   review queue                approaches          dead band
+flag it the           IDLE + sweep    JSON-LD         board rows   cadence tightens    diff last two
+import colour         every mailbox   Claude fallback badged when  as departure        snapshots
+      │               done → unflag   a confidence    unsure       approaches          dead band
       ▼               failed → stays                                                      │
 Pushover push                                                                 ┌───────────┴───────┐
 imported, or why not                                                          ▼                   ▼
@@ -61,6 +61,11 @@ estimate, pushes an alert, and shows a banner until the next month starts.
 
 Billing is per *page of up to 15 flight records*, not per call, so every request is sent
 with `max_pages=1`. At $0.005 per page the free allowance is exactly 1,000 polls a month.
+
+Polling starts two days before departure, which is as far ahead as AeroAPI answers for a
+flight: anything asked earlier is a result set spent on an empty list. From there the
+interval tightens as departure approaches, and stops once the flight is on the ground and
+its bag belt is known.
 
 **The widget countdown is a real timer.** It is drawn with Scriptable's `applyTimerStyle`,
 so it ticks continuously, offline, without the widget refreshing. A countdown rendered as
@@ -135,10 +140,18 @@ be read out of it you get a push saying so, with a link that opens the email in 
 the flag stays on so the next pass tries again - except when there was simply no flight in
 it, which is an answer that will not change, so that one is unflagged too.
 
+An email the extraction was not confident about - a time or an airport inferred rather
+than printed - still lands on the board, wearing a **Check this** badge. Its flight page
+offers **Looks right**, **Fix details** and **Not a flight**, so the decision is one tap
+from the thing you are looking at rather than a queue to work through somewhere else.
+
 Something that fails for a passing reason - the model, iCloud, the network - is tried
 again after two minutes and again after ten. If it still fails, your phone is told once
 and the email is set aside: it keeps its flag, so it is still where you left it in Mail,
-and it is listed on `/health` with a **Try again** button. Unflagging it in Mail drops it.
+and it sits at the top of the flight board with **Try again** and **Ignore** beside it.
+Unflagging it in Mail drops it too. An email naming an airport code the app has no row
+for skips the retries and is set aside straight away, because a mis-read code reads the
+same way every time and the push says which one it was.
 
 Rename the flag to `flighter` in Mail on the Mac if you want your own word for it -
 **click the flag name in the sidebar, click it again, and type**. That name is a label on
@@ -157,7 +170,8 @@ what this watches for.
 ### A calendar of its own
 
 Open the Calendar app on any of your devices and make a new iCloud calendar - call it
-`Flights`, or anything else - then pick it from the list on `/settings`. The list comes
+`Flights`, or anything else - then pick it from the list in the **iCloud** card on the
+Connections tab, under the Apple ID it belongs to. The list comes
 from your account over CalDAV, so there is no name to type and nothing to spell wrong,
 and renaming the calendar later does not break anything: what is stored is the calendar
 itself rather than what it is called.
@@ -184,8 +198,10 @@ Connections tab.
 
 > Read the pricing page before you enable anything beyond this service. The tier above
 > Personal has a $100/month minimum with no free allowance, and FlightAware provides no
-> cap of its own. The monthly cap on the settings page defaults to `$4.00` and stops all
-> polling when month-to-date estimated spend passes it. `/health` shows the running total.
+> cap of its own. The monthly limit under **Preferences → Advanced** defaults to `$4.00`
+> and stops all polling when month-to-date estimated spend passes it. The FlightAware
+> card on the settings page shows the running total, and once the limit is reached the
+> flight board carries a banner with a button to raise it.
 
 ### Anthropic API key
 
@@ -235,7 +251,9 @@ Open `http://<host>:8000/settings`. It opens on **Connections**, which lists wha
 to do, in order. Work down it:
 
 1. **iCloud.** Your Apple ID and the app-specific password you made above. One password
-   covers both the mailbox this reads and the calendar it writes.
+   covers both the mailbox this reads and the calendar it writes. Once it is saved, the
+   same card lists the calendars your account offers so you can pick the one flights go
+   into; leave it unset and nothing is written to any calendar.
 2. **FlightAware.** The AeroAPI key. This is where every gate, delay and diversion comes
    from, so nothing is tracked until it is set.
 3. **Pushover.** The application token and your user key, which is how the phone is told.
@@ -259,10 +277,11 @@ Then finish on **Preferences**:
    all use it - so it has to be an address that works when you are not at home. If the
    host is on your tailnet, its tailnet name is that address. The page offers whatever
    you opened it on.
-2. Pick the **calendar** you made in the Calendar app from the list your account offers.
-   Leave it unset and nothing is written to any calendar.
-3. Pick the **import flag** colour, `grey` by default, and decide not to use that colour
+2. Pick the **import flag** colour, `grey` by default, and decide not to use that colour
    for anything else.
+
+**Advanced**, on the same tab, holds the two knobs almost nobody needs to move: the
+monthly FlightAware limit and the log level.
 
 Then either add a flight by hand or flag a booking email.
 
@@ -325,8 +344,8 @@ the container volume; `flighter serve --host 0.0.0.0` if you want it off the loo
 ## The widget
 
 See [`widget/README.md`](widget/README.md). Short version: install Scriptable, copy in
-`widget/flights-widget.js`, run it once in the app to store the widget token from
-`/settings` in the Keychain, then add it to your home and lock screens.
+`widget/flights-widget.js`, run it once in the app to store the widget token from the
+**Widget** tab on `/settings` in the Keychain, then add it to your home and lock screens.
 
 ## Development
 
@@ -336,10 +355,13 @@ uv run mypy
 uv run pytest -q
 ```
 
-The test suite is deliberately database-free and network-free. Everything worth testing
-here is a pure function over data: timezone normalisation, poll cadence, snapshot
-diffing, calendar event bodies, widget payloads, and the column that keeps every stored
-instant in UTC. Migrations are verified separately in CI, forwards and backwards.
+The test suite is deliberately network-free, and most of it is database-free as well:
+most of what is worth testing here is a pure function over data - timezone
+normalisation, poll cadence, snapshot diffing, calendar event bodies, widget payloads,
+and the column that keeps every stored instant in UTC. The rest is SQL that has to be
+proven against SQLite itself - the dedupe rule, the newest-snapshot query, delivery
+stamping - and that runs on an in-memory database that lives exactly as long as the test
+that asked for it. Migrations are verified separately in CI, forwards and backwards.
 
 ### The stylesheet
 

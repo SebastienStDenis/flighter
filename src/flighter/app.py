@@ -3,7 +3,7 @@
 They all live in one process on purpose. There is one user and a handful of flights in
 flight at a time, so the coordination a second process would need costs more than it
 saves. The pieces are still independent tasks: any one of them failing leaves the others
-running, is restarted, and the health page says which is unhappy.
+running and is started again after a pause that doubles each time.
 """
 
 from __future__ import annotations

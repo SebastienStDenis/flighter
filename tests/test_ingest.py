@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Any
 import pytest
 
 from flighter import ingest
+from flighter.airports import UnknownAirport
 from flighter.config import Settings
 from flighter.extract import Extraction, Segment
 from flighter.mail import Marked, Message, parse_message
@@ -306,6 +308,29 @@ async def test_a_failing_booking_is_rolled_back_and_logged(
     logged = one_session.log["flight_package_jsonld.eml"]
     assert logged.error is not None and "database is locked" in logged.error
     assert logged.raw_extraction is not None
+
+
+async def test_an_airport_we_do_not_know_is_never_retried(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    """Reading the same email again reads the same code, so the retries would buy nothing."""
+
+    async def unknown(session: Any, iata: str) -> str:
+        raise UnknownAirport(iata)
+
+    monkeypatch.setattr(ingest, "airport_tz", unknown)
+
+    result = await ingest.process_message(message("flight_jsonld.eml"), settings=settings)
+
+    assert result.outcome == "error"
+    assert result.settled
+    logged = one_session.log["flight_jsonld.eml"]
+    assert ingest.set_aside(logged)
+    assert logged.error is not None and "JFK is not an airport" in logged.error
+    assert recorder.created == []
 
 
 async def test_an_extraction_that_is_not_a_confirmation_is_no_flight(
@@ -610,7 +635,10 @@ async def test_a_message_that_will_not_unmark_is_not_reported_twice(
 
 
 async def test_a_push_that_fails_does_not_hold_the_email(
-    settings: Settings, recorder: Recorder, one_session: FakeSession
+    settings: Settings,
+    recorder: Recorder,
+    one_session: FakeSession,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The row is committed and the flight is on the board; the flag comes off regardless."""
 
@@ -620,6 +648,37 @@ async def test_a_push_that_fails_does_not_hold_the_email(
 
     mailbox = FakeMailbox(message("flight_jsonld.eml"))
 
-    assert await sweep(mailbox, Unreachable(), settings) == ["created"]
+    with caplog.at_level(logging.WARNING, logger="flighter.ingest"):
+        assert await sweep(mailbox, Unreachable(), settings) == ["created"]
+
     assert mailbox.cleared == [("INBOX", 1)]
     assert one_session.log["flight_jsonld.eml"].outcome == "created"
+    # A warning rather than an error, and it names the email a person would recognise.
+    (record,) = [entry for entry in caplog.records if entry.name == "flighter.ingest"]
+    assert record.levelno == logging.WARNING
+    assert "Your trip is confirmed" in record.getMessage()
+
+
+async def test_a_flagged_email_naming_an_unknown_airport_is_set_aside_at_once(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    """One push naming the code, and no second look at an email that cannot come right."""
+
+    async def unknown(session: Any, iata: str) -> str:
+        raise UnknownAirport(iata)
+
+    monkeypatch.setattr(ingest, "airport_tz", unknown)
+    mailbox, notifier = FakeMailbox(message("flight_jsonld.eml")), FakeNotifier()
+
+    assert await sweep(mailbox, notifier, settings) == ["error"]
+    assert await sweep(mailbox, notifier, settings) == []
+
+    (_, _, reason) = notifier.failed[0]
+    assert len(notifier.failed) == 1
+    assert "JFK is not an airport we know" in reason
+    assert "set aside" in reason
+    # The flag is still on, so the email is where the person left it.
+    assert mailbox.cleared == []

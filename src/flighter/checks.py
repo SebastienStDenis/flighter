@@ -115,7 +115,7 @@ async def _check_calendar(settings: Settings) -> CheckResult:
 
     chosen = prefs.current().icloud_calendar_url
     if not chosen:
-        return CheckResult("calendar", False, "pick a calendar under Preferences")
+        return CheckResult("calendar", False, "pick a calendar under Connections")
     try:
         offered = await CalendarClient(settings).calendars()
     except Exception as exc:
