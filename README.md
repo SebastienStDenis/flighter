@@ -67,16 +67,23 @@ so it ticks continuously, offline, without the widget refreshing. A countdown re
 a pre-computed string is wrong within a minute of being drawn, which is worse than
 useless in an airport.
 
-**Credentials and preferences live in different places, and never both.** A credential is
-set once by hand in `.env`, is never handed back out by the UI, and the app never writes
-it. Everything else - the public URL, the spend cap, the import flag, the calendar -
-is a preference: it has a working default, it is edited at `/settings`, and the database
-is the only place it lives. No value has two homes, so there is never a
-question of which one wins.
+**Everything is configured in the app.** There is no file to fill in before first boot.
+You start the container, open `/settings`, and type your Apple ID, your FlightAware key
+and your Pushover keys into the Connections tab; each one takes effect immediately, with
+no restart. Credentials are stored in `data/secrets.env`, which the app writes with mode
+`0600` and never reads back out into a page: the tab shows whether each connection is
+set and offers a box to replace it, and **Forget** is the only way to clear one.
 
-The one file the app writes for itself is `data/secrets.env`, holding the credentials it
-mints rather than asks for: today just the widget token generated on first boot. That key
-never appears in `.env` either.
+Preferences - the public URL, the spend cap, the import flag, the calendar - live in the
+database instead, because they are worth diffing and backing up alongside the flights.
+No value has two homes, so there is never a question of which one wins.
+
+The environment is still read, and outranked. Setting `AEROAPI_KEY` in the container's
+environment or in a `.env` beside `docker-compose.yml` seeds it for a deployment that has
+never had one typed in; the moment somebody saves one on the settings page, that is the
+value, and a container restarted with the old one in its environment does not undo it.
+`DATABASE_URL` is the exception and stays an environment value with a working default:
+the app cannot read a setting out of a database it has not opened yet.
 
 **All of the state is one file in one directory.** `data/` holds the SQLite database and
 that secrets file, and nothing outside it survives the container. One volume to mount,
@@ -85,9 +92,12 @@ database server because there is one writer, a few hundred rows a year, and no q
 that a server would answer any faster - and a second container is a second thing to
 upgrade, watch and restore.
 
-## Prerequisites
+## What you need
 
 Four accounts and an Apple ID you already have, and only three of them involve a form.
+Collect these before you start, or collect them with the app already running: every one
+of them is typed into **Settings &rarr; Connections**, and nothing has to be in place
+before the first boot.
 
 ### iCloud app-specific password
 
@@ -97,13 +107,15 @@ two-factor authentication on - and it is, for every Apple ID that can reach iClo
 neither service accepts your Apple ID password, so an app-specific one is not optional.
 
 At [appleid.apple.com](https://appleid.apple.com), **Sign-In and Security →
-App-Specific Passwords → +**, name it `flighter`, and put the generated
-`xxxx-xxxx-xxxx-xxxx` string in `ICLOUD_APP_PASSWORD`. `ICLOUD_EMAIL` is the address you
-sign in with.
+App-Specific Passwords → +**, name it `flighter`, and paste the generated
+`xxxx-xxxx-xxxx-xxxx` string into the **iCloud** card on the Connections tab, along with
+the address you sign in with.
 
 > Changing your Apple ID password **revokes every app-specific password**, this one
-> included. `flighter check` is what tells you that is what happened: generate a new one,
-> put it in `.env`, and restart.
+> included. **Run checks** is what tells you that is what happened: generate a new one,
+> paste it into the same box and save. Checks sign in on the new password straight away,
+> and the mail loop drops its connection and picks it up on its next pass, so there is
+> nothing to restart.
 
 Only one connection is ever held: iCloud allows about five per account, and your phone and
 your Mac are already using some of them.
@@ -167,7 +179,8 @@ time instead of by deleting one calendar.
 Sign up for the **Personal** tier at
 [flightaware.com/aeroapi/signup/personal](https://www.flightaware.com/aeroapi/signup/personal).
 It is free up to $5/month of usage, rate-limited to 10 result sets per minute, and
-licensed for personal use only.
+licensed for personal use only. The key goes in the **FlightAware** card on the
+Connections tab.
 
 > Read the pricing page before you enable anything beyond this service. The tier above
 > Personal has a $100/month minimum with no free allowance, and FlightAware provides no
@@ -176,10 +189,11 @@ licensed for personal use only.
 
 ### Anthropic API key
 
-From [console.anthropic.com](https://console.anthropic.com). It is only the fallback: any
-email carrying schema.org `FlightReservation` JSON-LD is parsed exactly and for free, and
-most airlines embed it because Gmail and Outlook read it. The model is for the ones that
-do not.
+From [console.anthropic.com](https://console.anthropic.com), into the **Anthropic** card
+on the Connections tab. It is the one connection that is genuinely optional: any email
+carrying schema.org `FlightReservation` JSON-LD is parsed exactly and for free, and most
+airlines embed it because Gmail and Outlook read it. The model is for the ones that do
+not, and leaving this empty costs you only those emails.
 
 ### Pushover
 
@@ -187,12 +201,14 @@ Pushes reach the phone through [Pushover](https://pushover.net), which is hosted
 there is no notification server in the stack to keep alive.
 
 1. Sign up at [pushover.net](https://pushover.net). Your **user key** is on the dashboard
-   you land on; that is `PUSHOVER_USER_KEY`.
+   you land on.
 2. Register this service as an application at
    [pushover.net/apps/build](https://pushover.net/apps/build) - a name is all it asks
-   for. The **API token** it hands back is `PUSHOVER_TOKEN`.
+   for - and copy the **API token** it hands back.
 3. Install the Pushover app on the phone and sign in as the same user. That is what
    actually rings.
+
+Both go in the **Pushover** card on the Connections tab.
 
 Sending is free, at 10,000 messages a month per application, which a flight tracker
 never comes near. The phone app is the cost: free for 30 days, then a one-time purchase
@@ -203,21 +219,40 @@ of around $5 per platform, with no subscription behind it.
 ```sh
 git clone https://github.com/sebastienstdenis/flighter
 cd flighter
-cp .env.example .env
-$EDITOR .env
 docker compose pull          # fetch the published image instead of compiling it here
 docker compose up -d
 ```
 
-That is the whole install: one container, one volume, one port. On first boot the app
-runs its own migrations, seeds the airport table with its timezones, generates the widget
-token, and starts serving on port 8000 of the host.
+There is nothing to fill in first. That is the whole install: one container, one volume,
+one port. On first boot the app runs its own migrations, seeds the airport table with its
+timezones, generates the widget token, and starts serving on port 8000 of the host.
 
 The app has no login of its own. Anything that can reach the host on that port can read
 and edit your flights, so it relies on the machine it runs on not being reachable from
 the internet.
 
-Open `http://<host>:8000/settings` and finish there:
+Open `http://<host>:8000/settings`. It opens on **Connections**, which lists what is still
+to do, in order. Work down it:
+
+1. **iCloud.** Your Apple ID and the app-specific password you made above. One password
+   covers both the mailbox this reads and the calendar it writes.
+2. **FlightAware.** The AeroAPI key. This is where every gate, delay and diversion comes
+   from, so nothing is tracked until it is set.
+3. **Pushover.** The application token and your user key, which is how the phone is told.
+4. **Run checks**, at the bottom of the same tab. It exercises the database, AeroAPI,
+   iCloud mail, iCloud Calendar and Pushover in turn and names the broken one, which is
+   the question you will actually have. The mail check says how many messages are
+   carrying the flag and waiting; the Pushover check sends a real push.
+
+Each card saves on its own and is live in the running app at once: the next poll uses a
+new AeroAPI key, the next push a new Pushover token, and the mail loop drops its
+connection and signs in again on a new password at the end of its current pass. So you can
+type one in and prove it with **Run checks**, which signs in there and then, before moving
+to the next. Nothing you type is ever shown back: a
+card that is already set shows an empty box that means *leave this alone*, and **Forget**
+is what clears it.
+
+Then finish on **Preferences**:
 
 1. Set the **public base URL**. It is the address of the *host*, and it is read on your
    phone rather than on the machine serving it - calendar links, pushes and the widget
@@ -228,11 +263,16 @@ Open `http://<host>:8000/settings` and finish there:
    Leave it unset and nothing is written to any calendar.
 3. Pick the **import flag** colour, `grey` by default, and decide not to use that colour
    for anything else.
-4. **Run checks**. It exercises the database, AeroAPI, iCloud mail, iCloud Calendar and
-   Pushover in turn and names the broken one, which is the question you will actually
-   have. The mail check says how many messages are carrying the flag and waiting.
 
 Then either add a flight by hand or flag a booking email.
+
+If you would rather a deployment come up already knowing a credential - a rebuild you do
+not want to reconfigure by hand - put it in the container's environment, either through
+an `environment:` block or a `.env` beside `docker-compose.yml`, using the names
+`ICLOUD_EMAIL`, `ICLOUD_APP_PASSWORD`, `AEROAPI_KEY`, `ANTHROPIC_API_KEY`,
+`PUSHOVER_TOKEN` and `PUSHOVER_USER_KEY`. That only ever seeds: anything saved on the
+settings page wins over it from then on, and the file is optional, so a fresh clone
+without one starts fine.
 
 Pushing to `main` publishes a `linux/amd64` + `linux/arm64` image to
 `ghcr.io/sebastienstdenis/flighter:latest`, so updating the home stack is:
@@ -266,7 +306,8 @@ uv sync --all-groups
 uv run flighter serve
 ```
 
-`serve` migrates and seeds on the way up, so a fresh database needs nothing else. It
+`serve` migrates and seeds on the way up, so a fresh checkout needs nothing else: open
+`http://127.0.0.1:8000/settings` and fill it in there, exactly as in the container. It
 writes `./data/flighter.db` and `./data/secrets.env` into the checkout rather than into
 the container volume; `flighter serve --host 0.0.0.0` if you want it off the loopback.
 
@@ -329,3 +370,11 @@ host's crontab:
 Those copies live in the same volume as the database they came from, so they survive a
 bad migration but not a lost disk. Getting them off the machine is a job for whatever
 already backs the machine up.
+
+**A copy of the `data` volume is a copy of your credentials**: `data/secrets.env` holds
+your Apple ID and its app-specific password, your AeroAPI key, your Anthropic key, your
+Pushover token and user key, and the widget token, all in plain text. The database beside
+it holds none of them - `scripts/backup.sh` copies only the database, so its output in
+`data/backups/` carries your flights and your preferences and no secret - but anything
+that archives the whole volume is archiving the lot, so treat it the way you would treat
+the password itself.

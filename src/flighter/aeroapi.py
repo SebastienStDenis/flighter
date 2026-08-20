@@ -221,7 +221,6 @@ class AeroAPIClient:
         self._settings = settings or get_settings()
         self._http = httpx.AsyncClient(
             base_url=BASE_URL,
-            headers={"x-apikey": self._settings.aeroapi_key},
             timeout=httpx.Timeout(HTTP_TIMEOUT_SECONDS),
             transport=transport,
         )
@@ -248,7 +247,13 @@ class AeroAPIClient:
 
         await ensure_budget(session)
         await self._limiter.acquire()
-        response = await self._http.get(f"/flights/{quote(ident, safe='')}", params=params)
+        # The key rides on the request rather than on the client, because the shared
+        # client outlives a key replaced on the settings page.
+        response = await self._http.get(
+            f"/flights/{quote(ident, safe='')}",
+            params=params,
+            headers={"x-apikey": self._settings.aeroapi_key},
+        )
         response.raise_for_status()
         payload: dict[str, Any] = response.json()
         await self._record_usage(session, FLIGHT_INFO_ENDPOINT, payload)

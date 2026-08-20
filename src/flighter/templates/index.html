@@ -35,7 +35,13 @@
       </svg>
     </figure>
     <h2>Nothing on the board</h2>
-    <p>Add a flight, or forward a booking confirmation.</p>
+    {% if set_up %}
+    <p>Add a flight, or flag a booking confirmation.</p>
+    {% else %}
+    <p>Nothing is connected yet. Start on the
+      <a class="btn" data-variant="link" href="/settings">settings page</a>, then flag a
+      booking confirmation.</p>
+    {% endif %}
   </header>
 </section>
 {% else %}

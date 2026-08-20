@@ -27,7 +27,7 @@ USER app
 WORKDIR /app
 # Mounted at /app/data rather than /data so the default relative paths resolve the same
 # way here as they do in a checkout, and one configuration serves both. It holds the
-# SQLite database and the credentials the app mints for itself.
+# SQLite database and every credential.
 VOLUME ["/app/data"]
 
 EXPOSE 8000

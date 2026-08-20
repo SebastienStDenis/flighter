@@ -31,7 +31,7 @@ from aioimaplib import IMAP4_SSL
 from pydantic import BaseModel
 
 from . import prefs
-from .config import Settings
+from .config import Settings, credentials_generation
 
 log = logging.getLogger(__name__)
 
@@ -176,11 +176,24 @@ class Mailbox:
         self._settings = settings
         self._client = client
         self.colour = prefs.current().imap_flag_colour
+        self._generation = credentials_generation()
         self.mailboxes: tuple[str, ...] = ()
         self.waiting = 0
         self._criteria = ""
         self._selected: str | None = None
         self._uidvalidity = 0
+
+    @property
+    def current(self) -> bool:
+        """Whether this connection still matches what the settings page says.
+
+        Neither a new flag colour nor a new app-specific password reaches the server
+        without opening a connection again, and this one may sit idling for minutes.
+        """
+        return (
+            self.colour == prefs.current().imap_flag_colour
+            and self._generation == credentials_generation()
+        )
 
     async def connect(self) -> None:
         """Open the connection, log in, and work out which mailboxes to sweep."""

@@ -330,14 +330,16 @@ async def test_a_rejected_password_says_why(settings: Settings) -> None:
     assert "app-specific password" in str(raised.value)
 
 
-async def test_an_account_without_credentials_never_reaches_icloud() -> None:
+async def test_an_account_without_credentials_never_reaches_icloud(
+    unconfigured: Settings,
+) -> None:
     def refuse(request: httpx.Request) -> httpx.Response:
         raise AssertionError(f"nothing should reach iCloud, but {request.method} did")
 
-    client = CalendarClient(Settings(), AIRPORTS, transport=httpx.MockTransport(refuse))
+    client = CalendarClient(unconfigured, AIRPORTS, transport=httpx.MockTransport(refuse))
     with pytest.raises(CalendarUnavailable) as raised:
         await client.calendars()
-    assert "ICLOUD_EMAIL" in str(raised.value)
+    assert "under Connections" in str(raised.value)
 
 
 def test_the_calendar_link_aims_at_noon_where_the_flight_leaves() -> None:

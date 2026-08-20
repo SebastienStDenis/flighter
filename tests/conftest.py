@@ -10,20 +10,33 @@ from __future__ import annotations
 import pytest
 
 from flighter import prefs
-from flighter.config import Settings
+from flighter.config import CREDENTIALS, Settings
 from flighter.prefs import Prefs
+
+# Every credential named explicitly, so that a developer's own .env or data/secrets.env
+# can never be what a test is really asserting against.
+BLANK = dict.fromkeys((*CREDENTIALS, "widget_token"), "")
 
 
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
-        aeroapi_key="test-key",
-        widget_token="test-token",
-        icloud_email="someone@icloud.com",
-        icloud_app_password="abcd-efgh-ijkl-mnop",
-        pushover_token="app-token",
-        pushover_user_key="user-key",
+        **BLANK
+        | {
+            "aeroapi_key": "test-key",
+            "widget_token": "test-token",
+            "icloud_email": "someone@icloud.com",
+            "icloud_app_password": "abcd-efgh-ijkl-mnop",
+            "pushover_token": "app-token",
+            "pushover_user_key": "user-key",
+        }
     )
+
+
+@pytest.fixture
+def unconfigured() -> Settings:
+    """A deployment on its first boot, with nothing entered anywhere."""
+    return Settings(**BLANK)
 
 
 @pytest.fixture(autouse=True)
