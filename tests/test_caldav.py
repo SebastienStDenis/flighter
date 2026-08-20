@@ -24,6 +24,7 @@ from flighter.caldav import (
 )
 from flighter.config import Settings
 from flighter.models import Airport, Booking, FlightSnapshot
+from flighter.phase import CANCELLED_NOTICE
 from flighter.prefs import Prefs
 
 BASE_URL = "https://flights.example.com"
@@ -140,12 +141,32 @@ def test_a_flight_with_no_arrival_time_still_gets_an_end() -> None:
 
 
 def test_cancelled_flight_is_marked_never_deleted() -> None:
+    """AeroAPI's flag means FlightAware stopped tracking, which is not quite the same
+    as the airline cancelling, so the entry says who said so rather than striking the
+    trip through."""
     body = event_body(booking(), snapshot(cancelled=True), AIRPORTS, base_url=BASE_URL)
     text = body.to_ical().decode()
-    assert "SUMMARY:CANCELLED - DL1234 JFK -> LAX" in text
-    assert "STATUS:CANCELLED" in text
+    assert "SUMMARY:DL1234 JFK -> LAX (marked cancelled)" in text
+    assert "STATUS:TENTATIVE" in text
+    assert "STATUS:CANCELLED" not in text
+    [event] = body.walk("VEVENT")
+    assert str(event["DESCRIPTION"]).startswith(CANCELLED_NOTICE)
     # Still a full event: the trip stays visible where it was planned.
     assert "DTSTART;TZID=America/New_York:20260912T150000" in text
+
+
+def test_the_event_follows_the_flight_as_it_moves() -> None:
+    """The block starts when the flight actually left and ends when it is expected at
+    the gate, read off the same ladder the page and the widget use."""
+    moved = snapshot(
+        scheduled_out=datetime(2026, 9, 12, 19, 0, tzinfo=UTC),
+        estimated_out=datetime(2026, 9, 12, 19, 40, tzinfo=UTC),
+        actual_out=datetime(2026, 9, 12, 19, 45, tzinfo=UTC),
+        estimated_in=datetime(2026, 9, 12, 23, 5, tzinfo=UTC),
+    )
+    text = event_body(booking(), moved, AIRPORTS, base_url=BASE_URL).to_ical().decode()
+    assert "DTSTART;TZID=America/New_York:20260912T154500" in text
+    assert "DTEND;TZID=America/Los_Angeles:20260912T160500" in text
 
 
 def test_overnight_flight_ends_the_next_day() -> None:

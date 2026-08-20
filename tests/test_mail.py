@@ -24,7 +24,7 @@ from imap_tools import MailBox
 
 from flighter import mail, prefs
 from flighter.config import Settings
-from flighter.mail import FLAG_COLOURS, FLAG_KEYWORDS, Mailbox, parse_message
+from flighter.mail import FLAG_COLOURS, FLAG_KEYWORDS, Mailbox, Marked, parse_message
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -322,6 +322,11 @@ async def connected(settings: Settings, server: FakeServer) -> Mailbox:
     return mailbox
 
 
+async def polled(mailbox: Mailbox) -> list[Marked]:
+    """A whole sweep at once, for the tests that care what was found rather than when."""
+    return [marked async for found in mailbox.poll() for marked in found]
+
+
 # -- parsing -------------------------------------------------------------------------
 
 
@@ -340,7 +345,7 @@ async def test_a_message_without_a_message_id_is_still_identified(settings: Sett
     server = FakeServer(inbox((7, body, flags("grey"))))
     mailbox = await connected(settings, server)
 
-    (marked,) = await mailbox.poll()
+    (marked,) = await polled(mailbox)
 
     assert marked.message.id == "<uid-INBOX-7@icloud.invalid>"
 
@@ -367,7 +372,7 @@ async def test_a_search_that_matches_nothing_imports_nothing(
     )
     mailbox = await connected(settings, server)
 
-    assert await mailbox.poll() == []
+    assert await polled(mailbox) == []
     assert await mailbox.count_flagged() == 0
     assert server.fetches == []
 
@@ -382,7 +387,7 @@ async def test_a_search_that_matches_several_returns_exactly_those(settings: Set
     )
     mailbox = await connected(settings, server)
 
-    marked = await mailbox.poll()
+    marked = await polled(mailbox)
 
     assert [(item.uid, item.message.id) for item in marked] == [
         (2, "<first@airline.example>"),
@@ -396,7 +401,7 @@ async def test_a_mailbox_with_nothing_flagged_is_never_fetched_from(settings: Se
     server = FakeServer({"Travel": {1: (raw("<one@airline.example>"), flags("grey"))}})
     mailbox = await connected(settings, server)
 
-    await mailbox.poll()
+    await polled(mailbox)
 
     assert [name for name, _ in server.searches] == ["INBOX", "Archive", "Travel"]
     assert server.fetches == [("1", "(BODY.PEEK[] UID FLAGS RFC822.SIZE)")]
@@ -416,7 +421,7 @@ async def test_a_flag_is_found_wherever_the_message_lives(settings: Settings) ->
     )
     mailbox = await connected(settings, server)
 
-    marked = await mailbox.poll()
+    marked = await polled(mailbox)
 
     assert {(item.mailbox, item.message.id) for item in marked} == {
         ("INBOX", "<inbox@airline.example>"),
@@ -433,7 +438,7 @@ async def test_trash_junk_drafts_and_sent_are_never_even_selected(settings: Sett
     )
     mailbox = await connected(settings, server)
 
-    assert await mailbox.poll() == []
+    assert await polled(mailbox) == []
     assert SKIPPED.isdisjoint(mailbox.mailboxes)
     assert SKIPPED.isdisjoint(server.selected)
     assert SKIPPED.isdisjoint(name for name, _ in server.searches)
@@ -461,11 +466,34 @@ async def test_every_mailbox_is_swept_down_the_one_connection(
     mailbox = await connected(settings, server)
     server.selected.clear()
 
-    await mailbox.poll()
-    await mailbox.poll()
+    await polled(mailbox)
+    await polled(mailbox)
 
     # INBOX is already selected from signing in, so the first sweep skips re-selecting it.
     assert server.selected == ["Archive", "Travel", "INBOX", "Archive", "Travel"]
+
+
+async def test_a_mailbox_is_handed_over_before_the_next_is_searched(settings: Settings) -> None:
+    """What is held in memory at once is one mailbox's flagged mail, not the account's."""
+    server = FakeServer(
+        {
+            "INBOX": {4: (raw("<inbox@airline.example>"), flags("grey"))},
+            "Travel": {2: (raw("<filed@airline.example>"), flags("grey"))},
+        }
+    )
+    mailbox = await connected(settings, server)
+
+    sweep = mailbox.poll()
+    first = await anext(sweep)
+
+    assert [item.message.id for item in first] == ["<inbox@airline.example>"]
+    assert [name for name, _ in server.searches] == ["INBOX"]
+
+    rest = [marked async for found in sweep for marked in found]
+
+    assert [item.message.id for item in rest] == ["<filed@airline.example>"]
+    assert [name for name, _ in server.searches] == ["INBOX", "Archive", "Travel"]
+    assert mailbox.waiting == 2
 
 
 # -- waiting for the next one --------------------------------------------------------
@@ -475,7 +503,7 @@ async def test_idling_goes_back_to_the_inbox(settings: Settings) -> None:
     """IDLE announces the selected mailbox and no other, and a sweep leaves it elsewhere."""
     server = FakeServer({"Travel": {1: (raw("<one@airline.example>"), flags("grey"))}})
     mailbox = await connected(settings, server)
-    await mailbox.poll()
+    await polled(mailbox)
     server.selected.clear()
 
     await mailbox.wait_for_mail(0.05)
@@ -510,7 +538,7 @@ async def test_only_the_configured_colour_is_imported(settings: Settings) -> Non
     )
     mailbox = await connected(settings, server)
 
-    marked = await mailbox.poll()
+    marked = await polled(mailbox)
 
     assert [item.message.id for item in marked] == ["<grey@airline.example>"]
 
@@ -525,7 +553,7 @@ async def test_a_plain_flag_is_not_the_mark(settings: Settings) -> None:
     )
     mailbox = await connected(settings, server)
 
-    assert await mailbox.poll() == []
+    assert await polled(mailbox) == []
 
 
 async def test_an_unflagged_message_is_not_the_mark(settings: Settings) -> None:
@@ -533,7 +561,7 @@ async def test_an_unflagged_message_is_not_the_mark(settings: Settings) -> None:
     server = FakeServer(inbox((1, raw("<stray@airline.example>"), flags("grey") - {FLAGGED})))
     mailbox = await connected(settings, server)
 
-    assert await mailbox.poll() == []
+    assert await polled(mailbox) == []
 
 
 @pytest.mark.parametrize("colour", sorted(FLAG_COLOURS))
@@ -551,7 +579,7 @@ async def test_every_offered_colour_matches_itself_and_nothing_else(
     )
     mailbox = await connected(settings, server)
 
-    marked = await mailbox.poll()
+    marked = await polled(mailbox)
 
     assert [item.message.id for item in marked] == [f"<{colour}@x.example>"]
 
@@ -570,7 +598,7 @@ async def test_nothing_is_ever_fetched_without_peeking(settings: Settings) -> No
     server = FakeServer(inbox((4, raw("<one@airline.example>"), flags("grey"))))
     mailbox = await connected(settings, server)
 
-    await mailbox.poll()
+    await polled(mailbox)
 
     assert server.fetches == [("4", "(BODY.PEEK[] UID FLAGS RFC822.SIZE)")]
 
@@ -595,7 +623,7 @@ async def test_counting_the_flag_fetches_nothing(settings: Settings) -> None:
 async def test_clearing_a_mark_unflags_the_message_where_it_stands(settings: Settings) -> None:
     server = FakeServer({"Travel": {4: (raw("<one@airline.example>"), flags("grey"))}})
     mailbox = await connected(settings, server)
-    (marked,) = await mailbox.poll()
+    (marked,) = await polled(mailbox)
 
     await mailbox.clear_mark(marked)
 
@@ -604,14 +632,14 @@ async def test_clearing_a_mark_unflags_the_message_where_it_stands(settings: Set
     ]
     # Still in Travel, still the same UID, and no longer flagged at all.
     assert set(server.messages["Travel"][4][1]) == set()
-    assert await mailbox.poll() == []
+    assert await polled(mailbox) == []
 
 
 async def test_a_refused_store_is_raised_rather_than_swallowed(settings: Settings) -> None:
     """The mark has to stay set when it cannot be cleared, and silence would hide that."""
     server = FakeServer(inbox((4, raw("<one@airline.example>"), flags("grey"))))
     mailbox = await connected(settings, server)
-    (marked,) = await mailbox.poll()
+    (marked,) = await polled(mailbox)
     server.rejects_store = True
 
     with pytest.raises(RuntimeError, match="Over quota"):

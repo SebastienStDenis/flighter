@@ -8,9 +8,12 @@ from typing import Any
 
 import pytest
 
-from flighter import prefs
+from flighter import extract
 from flighter.config import Settings
 from flighter.extract import (
+    MAX_RETRIES,
+    MODEL,
+    REQUEST_TIMEOUT_SECONDS,
     Extraction,
     ExtractionError,
     from_jsonld,
@@ -51,7 +54,7 @@ MODEL_ANSWER = """
 {"is_flight_confirmation": true, "confidence": 0.92,
  "segments": [{"marketing_carrier": "WS", "marketing_number": "1502",
  "operating_carrier": null, "operating_number": null, "origin_iata": "YYC",
- "dest_iata": "YVR", "departure_local": "2026-11-17T06:30:00", "departure_tz_hint": null,
+ "dest_iata": "YVR", "departure_local": "2026-11-17T06:30:00",
  "arrival_local": "2026-11-17T07:12:00", "confirmation_code": "8HTGRX", "seat": "12A"}]}
 """
 
@@ -61,32 +64,40 @@ def message(name: str) -> Message:
 
 
 class FakeMessages:
-    """Stands in for `client.messages`; records the request so the prompt is testable."""
+    """Stands in for `client.messages`; records the request so the prompt is testable.
 
-    def __init__(self, answer: str) -> None:
+    Validates the answer against the requested type inside the call, the way the SDK's
+    `parse` does, so a bad answer surfaces where the real one would.
+    """
+
+    def __init__(self, answer: str | None, stop_reason: str) -> None:
         self.answer = answer
+        self.stop_reason = stop_reason
         self.calls: list[dict[str, Any]] = []
 
-    async def create(self, **kwargs: Any) -> Any:
+    async def parse(self, **kwargs: Any) -> Any:
         self.calls.append(kwargs)
-        return FakeResponse(self.answer)
+        parsed = None
+        if self.answer is not None:
+            parsed = kwargs["output_format"].model_validate_json(self.answer)
+        return FakeResponse(parsed, self.stop_reason)
 
 
 class FakeResponse:
-    def __init__(self, text: str) -> None:
-        self.content = [FakeBlock(text)]
-        self.stop_reason = "end_turn"
+    def __init__(self, parsed: Any, stop_reason: str) -> None:
+        self.parsed_output = parsed
+        self.stop_reason = stop_reason
+        self.usage = FakeUsage()
 
 
-class FakeBlock:
-    def __init__(self, text: str) -> None:
-        self.type = "text"
-        self.text = text
+class FakeUsage:
+    input_tokens = 1200
+    output_tokens = 180
 
 
 class FakeAnthropic:
-    def __init__(self, answer: str) -> None:
-        self.messages = FakeMessages(answer)
+    def __init__(self, answer: str | None, stop_reason: str = "end_turn") -> None:
+        self.messages = FakeMessages(answer, stop_reason)
 
 
 # -- the prefilter -------------------------------------------------------------------
@@ -195,9 +206,7 @@ async def test_model_answer_is_validated_into_an_extraction(settings: Settings) 
     assert extraction.confidence == pytest.approx(0.92)
 
 
-async def test_model_request_pins_the_schema_and_the_configured_model(
-    settings: Settings,
-) -> None:
+async def test_model_request_pins_the_schema_and_the_model(settings: Settings) -> None:
     client = FakeAnthropic(MODEL_ANSWER)
     await from_model(
         message("flight_plain.eml"),
@@ -205,9 +214,25 @@ async def test_model_request_pins_the_schema_and_the_configured_model(
         client=client,  # type: ignore[arg-type]
     )
     (request,) = client.messages.calls
-    assert request["model"] == prefs.current().anthropic_model
-    schema = request["output_config"]["format"]["schema"]
-    assert schema["properties"].keys() >= {"is_flight_confirmation", "confidence", "segments"}
+    assert request["model"] == MODEL
+    assert request["output_format"] is Extraction
+
+
+async def test_the_client_is_built_with_a_bounded_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hung request must not hold the mail loop for the SDK's default of ten minutes."""
+    built: list[dict[str, Any]] = []
+
+    def build(**kwargs: Any) -> FakeAnthropic:
+        built.append(kwargs)
+        return FakeAnthropic(MODEL_ANSWER)
+
+    monkeypatch.setattr(extract, "AsyncAnthropic", build)
+    settings = Settings(anthropic_api_key="sk-test")
+
+    assert await from_model(message("flight_plain.eml"), settings=settings) is not None
+    (kwargs,) = built
+    assert kwargs["timeout"] == REQUEST_TIMEOUT_SECONDS
+    assert kwargs["max_retries"] == MAX_RETRIES
 
 
 def test_schema_carries_no_constraints_structured_outputs_reject() -> None:
@@ -250,7 +275,27 @@ async def test_malformed_model_output_is_an_error_not_a_booking(settings: Settin
 
 async def test_model_output_missing_a_required_field_is_an_error(settings: Settings) -> None:
     client = FakeAnthropic('{"is_flight_confirmation": true, "segments": []}')
-    with pytest.raises(ExtractionError):
+    with pytest.raises(ExtractionError, match="did not match"):
+        await from_model(
+            message("flight_plain.eml"),
+            settings=settings,
+            client=client,  # type: ignore[arg-type]
+        )
+
+
+async def test_an_answer_cut_off_mid_json_says_so(settings: Settings) -> None:
+    client = FakeAnthropic(MODEL_ANSWER[:80])
+    with pytest.raises(ExtractionError, match="cut off"):
+        await from_model(
+            message("flight_plain.eml"),
+            settings=settings,
+            client=client,  # type: ignore[arg-type]
+        )
+
+
+async def test_a_refusal_is_an_error_not_a_booking(settings: Settings) -> None:
+    client = FakeAnthropic(None, stop_reason="refusal")
+    with pytest.raises(ExtractionError, match="refused"):
         await from_model(
             message("flight_plain.eml"),
             settings=settings,
@@ -261,3 +306,26 @@ async def test_model_output_missing_a_required_field_is_an_error(settings: Setti
 async def test_no_anthropic_key_means_no_extraction_rather_than_a_crash() -> None:
     settings = Settings(anthropic_api_key="")
     assert await from_model(message("flight_plain.eml"), settings=settings) is None
+
+
+async def test_an_email_with_no_body_costs_no_model_call(settings: Settings) -> None:
+    """The subject alone passes the prefilter, and the model would be paid to read nothing."""
+    client = FakeAnthropic(MODEL_ANSWER)
+    empty = Message(id="empty", subject="Your itinerary", from_addr="a@example.com", date=None)
+
+    assert looks_like_flight(empty)
+    assert await from_model(empty, settings=settings, client=client) is None  # type: ignore[arg-type]
+    assert client.messages.calls == []
+
+
+def test_an_html_only_email_is_rendered_as_its_visible_text() -> None:
+    html_only = Message(
+        id="html",
+        subject="Your itinerary",
+        from_addr="a@example.com",
+        date=None,
+        text_html="<html><body><p>Flight <b>DL1234</b></p><p>JFK to LAX</p></body></html>",
+    )
+    rendered = render(html_only)
+    assert "Flight" in rendered and "DL1234" in rendered and "JFK to LAX" in rendered
+    assert "<p>" not in rendered

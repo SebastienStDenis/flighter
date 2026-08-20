@@ -13,15 +13,13 @@ import httpx
 from sqlalchemy import func, select
 
 from . import prefs
-from .aeroapi import BASE_URL
+from .aeroapi import BudgetExceeded, shared_client
 from .config import Settings
 from .db import session_scope
 from .models import Airport
-from .notify import MESSAGES_URL, PRIORITY_QUIET
+from .notify import Notifier
 
 log = logging.getLogger(__name__)
-
-TIMEOUT_SECONDS = 15
 
 
 @dataclass(frozen=True)
@@ -43,55 +41,38 @@ async def _check_database() -> CheckResult:
 
 
 async def _check_aeroapi(settings: Settings) -> CheckResult:
+    """Spends one result set on a known-good ident, through the same meter as a poll.
+
+    An unspent key proves nothing, and a check that bypassed the breaker would be the
+    one call path able to run the bill past the cap.
+    """
     if not settings.aeroapi_configured:
         return CheckResult("aeroapi", False, "add a FlightAware key under Connections")
-    # A known-good ident on a carrier that always has flights in the window. This spends
-    # one result set, which is the point: an unspent key proves nothing.
-    url = f"{BASE_URL}/flights/UAL4"
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-            response = await client.get(
-                url,
-                headers={"x-apikey": settings.aeroapi_key},
-                params={"max_pages": 1, "ident_type": "designator"},
-            )
+        payload = await shared_client().flight_info("UAL4", ident_type="designator")
+    except BudgetExceeded as exc:
+        return CheckResult("aeroapi", False, str(exc))
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 401:
+            return CheckResult("aeroapi", False, "key rejected")
+        return CheckResult(
+            "aeroapi",
+            False,
+            f"HTTP {exc.response.status_code}: {exc.response.text[:200]}",
+        )
     except Exception as exc:
         return CheckResult("aeroapi", False, str(exc))
-    if response.status_code == 401:
-        return CheckResult("aeroapi", False, "key rejected")
-    if response.status_code != 200:
-        return CheckResult("aeroapi", False, f"HTTP {response.status_code}: {response.text[:200]}")
-    flights = response.json().get("flights", [])
+    flights = payload.get("flights") or []
     return CheckResult("aeroapi", True, f"{len(flights)} flights returned for UAL4")
 
 
 async def _check_pushover(settings: Settings) -> CheckResult:
-    """Sends a real push, quietly, because a token that is never spent proves nothing."""
     if not settings.pushover_configured:
         return CheckResult("pushover", False, "add a Pushover token and user key under Connections")
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-            response = await client.post(
-                MESSAGES_URL,
-                data={
-                    "token": settings.pushover_token,
-                    "user": settings.pushover_user_key,
-                    "title": "Flight tracker",
-                    "message": "Checks ran and this arrived.",
-                    "priority": str(PRIORITY_QUIET),
-                },
-            )
+        await Notifier(settings).check()
     except Exception as exc:
         return CheckResult("pushover", False, str(exc))
-    # A rejection carries a JSON body naming the field it refused, which is the difference
-    # between a bad application token and a bad user key.
-    try:
-        body = response.json()
-    except ValueError:
-        return CheckResult("pushover", False, f"HTTP {response.status_code}: {response.text[:200]}")
-    if body.get("status") != 1:
-        errors = "; ".join(body.get("errors", [])) or f"HTTP {response.status_code}"
-        return CheckResult("pushover", False, errors)
     return CheckResult("pushover", True, "test push sent; check your phone")
 
 

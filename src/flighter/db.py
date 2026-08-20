@@ -100,25 +100,31 @@ def _on_begin(connection: Connection) -> None:
 
 
 def init_engine(settings: Settings) -> AsyncEngine:
+    if _engine is not None:
+        return _engine
+    # Caught here rather than left to the driver, which answers a URL for a server this
+    # no longer talks to with a missing-module error several layers down, naming a
+    # package instead of the line that has to go.
+    if not settings.database_url.startswith("sqlite"):
+        raise ValueError(
+            f"DATABASE_URL is set to {settings.database_url.split('://')[0]}://, but "
+            "the database is SQLite in the data directory. Unset DATABASE_URL."
+        )
+    ensure_data_dir()
+    # Small pool on purpose: the web app, the poll worker and the mail loop share it, and
+    # one SQLite file admits one writer at a time however many connections point at it.
+    return bind_engine(create_async_engine(settings.database_url, pool_size=5, max_overflow=0))
+
+
+def bind_engine(engine: AsyncEngine) -> AsyncEngine:
+    """Adopt `engine` as the process's one engine, with the pragmas and the locking
+    rule every connection needs. The test suite hands in an in-memory one."""
     global _engine, _sessionmaker
-    if _engine is None:
-        # Caught here rather than left to the driver, which answers a URL for a server
-        # this no longer talks to with a missing-module error several layers down,
-        # naming a package instead of the line that has to go.
-        if not settings.database_url.startswith("sqlite"):
-            raise ValueError(
-                f"DATABASE_URL is set to {settings.database_url.split('://')[0]}://, but "
-                "the database is SQLite in the data directory. Unset DATABASE_URL."
-            )
-        ensure_data_dir()
-        # Small pool on purpose: the web app, the poll worker and the mail loop share it,
-        # and one SQLite file admits one writer at a time however many connections point
-        # at it.
-        _engine = create_async_engine(settings.database_url, pool_size=5, max_overflow=0)
-        event.listen(_engine.sync_engine, "connect", _on_connect)
-        event.listen(_engine.sync_engine, "begin", _on_begin)
-        _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
-    return _engine
+    event.listen(engine.sync_engine, "connect", _on_connect)
+    event.listen(engine.sync_engine, "begin", _on_begin)
+    _engine = engine
+    _sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+    return engine
 
 
 async def dispose_engine() -> None:

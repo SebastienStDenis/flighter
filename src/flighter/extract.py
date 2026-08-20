@@ -20,11 +20,12 @@ from bs4 import BeautifulSoup
 from bs4.element import Tag
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
-from . import prefs
 from .config import Settings, get_settings
 from .mail import Message
 
 log = logging.getLogger(__name__)
+
+MODEL = "claude-sonnet-5"
 
 # Confirmations put everything that matters in the first screenful; the rest is legal
 # boilerplate and fare rules, and truncating keeps a forwarded 200-message thread from
@@ -32,6 +33,12 @@ log = logging.getLogger(__name__)
 MAX_BODY_CHARS = 8000
 # Shared by thinking and the answer, so this is not merely the size of the JSON.
 MAX_TOKENS = 8000
+
+# The SDK would otherwise wait ten minutes per attempt and attempt three times, and the
+# mail loop can do nothing else while it waits. A confirmation takes seconds to read; a
+# call that has not answered in a minute is not going to.
+REQUEST_TIMEOUT_SECONDS = 60.0
+MAX_RETRIES = 1
 
 
 class ExtractionError(RuntimeError):
@@ -52,7 +59,6 @@ class Segment(BaseModel):
     origin_iata: str
     dest_iata: str
     departure_local: str
-    departure_tz_hint: str | None
     arrival_local: str | None
     confirmation_code: str | None
     seat: str | None
@@ -72,7 +78,7 @@ class Segment(BaseModel):
 
 
 class Extraction(BaseModel):
-    """What one email yielded, whatever tier produced it."""
+    """Whether the email confirms flights, and every segment it names if so."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -269,7 +275,6 @@ def _segment_from(reservation: dict[str, Any]) -> Segment | None:
         origin_iata=origin,
         dest_iata=dest,
         departure_local=departure,
-        departure_tz_hint=None,
         arrival_local=_naive_iso(flight.get("arrivalTime")),
         confirmation_code=_text(reservation.get("reservationNumber")),
         seat=_text(seat),
@@ -344,8 +349,7 @@ segments. Never merge legs.
 Times are local wall-clock time at their own airport, written as naive ISO 8601 with no \
 offset and no zone suffix: 2026-09-12T18:40:00. If the email states an offset or a \
 timezone, ignore it entirely and copy the clock time as printed. We resolve zones from \
-the airport codes ourselves, which is right more often than the airline is. Put a zone \
-in departure_tz_hint only if the email states one; it is recorded, not used.
+the airport codes ourselves, which is right more often than the airline is.
 
 Relative dates ("tomorrow", "next Tuesday") resolve against the email's sent date, \
 which is given to you below.
@@ -361,10 +365,19 @@ than printed.
 """
 
 
+def body_text(message: Message) -> str:
+    """The readable body: the plain part, or the HTML part's visible text without one."""
+    if message.text_plain:
+        return message.text_plain
+    if message.text_html:
+        return BeautifulSoup(message.text_html, "html.parser").get_text("\n", strip=True)
+    return ""
+
+
 def render(message: Message) -> str:
     """The email as the model sees it. The sent date anchors every relative date in it."""
     sent = message.date.isoformat() if message.date else "unknown"
-    body = message.text_plain[:MAX_BODY_CHARS]
+    body = body_text(message)[:MAX_BODY_CHARS]
     return "\n".join(
         [
             "<email>",
@@ -386,28 +399,55 @@ async def from_model(
     settings: Settings | None = None,
     client: AsyncAnthropic | None = None,
 ) -> Extraction | None:
-    """The paid fallback, for the airlines that embed no structured data."""
+    """The paid fallback, for the airlines that embed no structured data.
+
+    Raises `ExtractionError` when the model answered but not with an extraction: it
+    refused, it ran out of room, or what it wrote does not fit the schema.
+    """
     settings = settings or get_settings()
+    if not body_text(message):
+        log.info("%s has no readable body; nothing to extract from", message.id)
+        return None
     if client is None:
         if not settings.anthropic_api_key:
             log.warning("no Anthropic key configured; cannot extract %s", message.id)
             return None
-        client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+        client = AsyncAnthropic(
+            api_key=settings.anthropic_api_key,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+            max_retries=MAX_RETRIES,
+        )
 
-    response = await client.messages.create(
-        model=prefs.current().anthropic_model,
-        max_tokens=MAX_TOKENS,
-        system=SYSTEM_PROMPT,
+    try:
         # A closed JSON schema rather than a "reply with JSON" instruction: the response
         # is a booking, and a prose apology wrapped around it is not recoverable.
-        output_config={"format": {"type": "json_schema", "schema": Extraction.model_json_schema()}},
-        messages=[{"role": "user", "content": render(message)}],
-    )
-
-    text = next((block.text for block in response.content if block.type == "text"), "")
-    if not text:
-        raise ExtractionError(f"model returned no text (stop={response.stop_reason})")
-    try:
-        return Extraction.model_validate_json(text)
+        response = await client.messages.parse(
+            model=MODEL,
+            max_tokens=MAX_TOKENS,
+            system=SYSTEM_PROMPT,
+            output_format=Extraction,
+            messages=[{"role": "user", "content": render(message)}],
+        )
     except ValidationError as exc:
+        if any(error["type"] == "json_invalid" for error in exc.errors()):
+            raise ExtractionError(
+                f"model output is not complete JSON; it was most likely cut off at "
+                f"{MAX_TOKENS} tokens: {exc}"
+            ) from exc
         raise ExtractionError(f"model output did not match the extraction schema: {exc}") from exc
+
+    log.info(
+        "%s: %s used %d input and %d output tokens",
+        message.id,
+        MODEL,
+        response.usage.input_tokens,
+        response.usage.output_tokens,
+    )
+    if response.stop_reason == "refusal":
+        raise ExtractionError("model refused to read the email")
+    if response.stop_reason == "max_tokens":
+        raise ExtractionError(f"model output was cut off at {MAX_TOKENS} tokens")
+    extraction = response.parsed_output
+    if extraction is None:
+        raise ExtractionError(f"model returned no text (stop={response.stop_reason})")
+    return extraction

@@ -117,7 +117,3 @@ def to_icao(carrier: str) -> str:
     if len(code) == 3:
         return code
     return IATA_TO_ICAO.get(code, code)
-
-
-def is_icao(carrier: str) -> bool:
-    return len(carrier.strip()) == 3

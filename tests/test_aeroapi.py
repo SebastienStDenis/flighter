@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 import httpx
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from flighter.aeroapi import (
     DEFAULT_PRICE_USD,
@@ -27,6 +30,7 @@ from flighter.aeroapi import (
 )
 from flighter.config import Settings
 from flighter.models import KV, ApiUsage, Booking
+from flighter.notify import Notifier
 
 DEPARTURE = datetime(2026, 9, 12, 18, 40, tzinfo=UTC)
 
@@ -146,14 +150,40 @@ class FakeSession:
     def usage(self) -> list[ApiUsage]:
         return [row for row in self.added if isinstance(row, ApiUsage)]
 
+    @property
+    def scope(self) -> Any:
+        """A session factory that always hands this session out."""
 
-def make_client(session: FakeSession, handler: Any) -> AeroAPIClient:
-    settings = Settings(aeroapi_key="test-key", aeroapi_base_url="https://aeroapi.example/aeroapi")
+        @contextlib.asynccontextmanager
+        async def enter() -> AsyncIterator[AsyncSession]:
+            yield self  # type: ignore[misc]
+
+        return enter
+
+
+class Pushes:
+    """Records every push the client sends about its budget."""
+
+    def __init__(self) -> None:
+        self.requests: list[httpx.Request] = []
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return httpx.Response(200, json={"status": 1, "request": "a-uuid"})
+
+
+def make_client(session: FakeSession, handler: Any, pushes: Pushes | None = None) -> AeroAPIClient:
+    settings = Settings(
+        aeroapi_key="test-key", pushover_token="app-token", pushover_user_key="user-key"
+    )
+    notifier = Notifier(settings, transport=httpx.MockTransport((pushes or Pushes()).handle))
     return AeroAPIClient(
         settings,
         transport=httpx.MockTransport(handler),
         # A bucket wide enough that no test ever waits on it; timing is tested directly.
         limiter=TokenBucket(6000),
+        sessions=session.scope,
+        notifier=notifier,
     )
 
 
@@ -258,6 +288,27 @@ def test_match_rejects_the_right_time_at_the_wrong_airport() -> None:
     assert select_match([leg(timedelta(0), origin="LGW")], booking()) is None
 
 
+def test_match_rejects_the_right_route_under_another_flight_number() -> None:
+    """Two carriers fly LHR-JFK within the hour; the ident is what tells them apart."""
+    other = leg(timedelta(0), ident="VIR3", ident_icao="VIR3", ident_iata="VS3", codeshares=[])
+    other["codeshares_iata"] = []
+    assert select_match([other], booking()) is None
+
+
+def test_match_accepts_the_marketing_number_as_a_codeshare() -> None:
+    """A booking that never named the operating carrier still finds the flight it is
+    sold on, through the operator's codeshare list."""
+    sold_as = booking(operating_carrier=None, operating_number=None)
+    assert select_match([leg(timedelta(0))], sold_as) is not None
+
+
+def test_match_ignores_zero_padding_and_case_in_idents() -> None:
+    padded = leg(timedelta(0), ident="baw0112", ident_icao=None, ident_iata=None)
+    padded["codeshares"] = []
+    padded["codeshares_iata"] = []
+    assert select_match([padded], booking()) is not None
+
+
 def test_match_falls_back_to_scheduled_off_when_there_is_no_gate_time() -> None:
     candidate = leg(timedelta(0))
     candidate["scheduled_out"] = None
@@ -271,7 +322,6 @@ def test_match_tolerates_junk_in_the_flights_array() -> None:
 
 def test_ident_prefers_the_operating_carrier() -> None:
     assert flight_ident(booking()) == "BAW112"
-    assert flight_ident(booking(aeroapi_ident="BAW112")) == "BAW112"
     assert flight_ident(booking(operating_number="0112")) == "BAW112"
 
 
@@ -360,10 +410,19 @@ async def test_budget_trips_exactly_at_the_cap() -> None:
     assert status.tripped is True
 
 
+async def test_the_last_call_under_the_cap_is_allowed_and_the_next_is_not() -> None:
+    """The breaker keeps the bill under the line rather than noticing once it is over:
+    a call is refused when it would take the month past the cap."""
+    await ensure_budget(FakeSession(spend=Decimal("3.995")))  # type: ignore[arg-type]
+    with pytest.raises(BudgetExceeded):
+        await ensure_budget(FakeSession(spend=Decimal("3.996")))  # type: ignore[arg-type]
+
+
 async def test_ensure_budget_latches_and_raises() -> None:
     session = FakeSession(spend=Decimal("4.50"))
-    with pytest.raises(BudgetExceeded):
+    with pytest.raises(BudgetExceeded) as raised:
         await ensure_budget(session)  # type: ignore[arg-type]
+    assert raised.value.just_tripped is True
     latch = session.kv["aeroapi_budget_breaker"]
     assert latch.value["month"] == datetime.now(UTC).strftime("%Y-%m")
     assert latch.value["spend_usd"] == "4.50"
@@ -397,7 +456,7 @@ async def test_flight_info_authenticates_and_always_asks_for_one_page() -> None:
     session = FakeSession()
     client = make_client(session, handler)
     try:
-        await client.flight_info(session, "BAW112", ident_type="designator")  # type: ignore[arg-type]
+        await client.flight_info("BAW112", ident_type="designator")
     finally:
         await client.aclose()
 
@@ -408,8 +467,8 @@ async def test_flight_info_authenticates_and_always_asks_for_one_page() -> None:
     # every page of 15 records is charged again.
     assert request.url.params["max_pages"] == "1"
     assert request.url.params["ident_type"] == "designator"
-    assert [(row.endpoint, row.result_sets, row.est_cost_usd) for row in session.usage] == [
-        (FLIGHT_INFO_ENDPOINT, 1, 0.005)
+    assert [(row.endpoint, row.est_cost_usd) for row in session.usage] == [
+        (FLIGHT_INFO_ENDPOINT, 0.005)
     ]
 
 
@@ -420,11 +479,10 @@ async def test_usage_is_billed_per_page_returned() -> None:
     session = FakeSession()
     client = make_client(session, handler)
     try:
-        await client.flight_info(session, "BAW112")  # type: ignore[arg-type]
+        await client.flight_info("BAW112")
     finally:
         await client.aclose()
 
-    assert session.usage[0].result_sets == 3
     assert session.usage[0].est_cost_usd == 0.015
 
 
@@ -436,13 +494,32 @@ async def test_the_budget_is_checked_before_the_call_is_made() -> None:
     client = make_client(session, handler)
     try:
         with pytest.raises(BudgetExceeded):
-            await client.flight_info(session, "BAW112")  # type: ignore[arg-type]
+            await client.flight_info("BAW112")
     finally:
         await client.aclose()
     assert session.usage == []
 
 
-async def test_resolve_pins_the_fa_flight_id_and_the_icao_ident() -> None:
+async def test_tripping_the_breaker_pushes_once() -> None:
+    """The phone hears the moment polling stops, and not again on every refused call."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:  # pragma: no cover
+        raise AssertionError("spent money with the breaker tripped")
+
+    pushes = Pushes()
+    client = make_client(FakeSession(spend=Decimal("99")), handler, pushes)
+    try:
+        for _ in range(3):
+            with pytest.raises(BudgetExceeded):
+                await client.flight_info("BAW112")
+    finally:
+        await client.aclose()
+
+    assert len(pushes.requests) == 1
+    assert b"AeroAPI+budget+reached" in pushes.requests[0].content
+
+
+async def test_resolve_pins_the_fa_flight_id() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return json_response(
             {"links": None, "num_pages": 1, "flights": [leg(timedelta(days=-1)), leg(timedelta(0))]}
@@ -452,8 +529,8 @@ async def test_resolve_pins_the_fa_flight_id_and_the_icao_ident() -> None:
     client = make_client(session, handler)
     target = booking(marketing_carrier="AA", operating_carrier="BAW")
     try:
-        match = await resolve_flight(session, target, client)  # type: ignore[arg-type]
-        flight = await fetch_flight(session, target, client)  # type: ignore[arg-type]
+        match = await resolve_flight(target, client)
+        flight = await fetch_flight(target, client)
     finally:
         await client.aclose()
 
@@ -461,7 +538,6 @@ async def test_resolve_pins_the_fa_flight_id_and_the_icao_ident() -> None:
     assert match.fa_flight_id == "BAW112-0"
     assert flight is not None
     assert target.aeroapi_fa_flight_id == "BAW112-0"
-    assert target.aeroapi_ident == "BAW112"
 
 
 async def test_resolve_returns_none_rather_than_raising_when_nothing_matches() -> None:
@@ -471,7 +547,7 @@ async def test_resolve_returns_none_rather_than_raising_when_nothing_matches() -
     session = FakeSession()
     client = make_client(session, handler)
     try:
-        assert await resolve_flight(session, booking(), client) is None  # type: ignore[arg-type]
+        assert await resolve_flight(booking(), client) is None
     finally:
         await client.aclose()
 
@@ -506,7 +582,7 @@ async def test_a_pinned_diversion_returns_the_current_leg_not_the_first() -> Non
     client = make_client(session, handler)
     target = booking(aeroapi_fa_flight_id=FLIGHT["fa_flight_id"])
     try:
-        flight = await fetch_flight(session, target, client)  # type: ignore[arg-type]
+        flight = await fetch_flight(target, client)
     finally:
         await client.aclose()
 
@@ -521,7 +597,7 @@ async def test_a_pinned_id_that_returns_nothing_is_not_an_error() -> None:
     session = FakeSession()
     client = make_client(session, handler)
     try:
-        result = await fetch_flight(session, booking(aeroapi_fa_flight_id="x"), client)  # type: ignore[arg-type]
+        result = await fetch_flight(booking(aeroapi_fa_flight_id="x"), client)
     finally:
         await client.aclose()
     assert result is None

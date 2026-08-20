@@ -1,13 +1,19 @@
 """AeroAPI v4: the only thing in this system that costs money, so it is the only thing
 that rate-limits itself, meters its own spend, and refuses to run once a cap is hit.
+
+No database transaction is ever held across a request. The budget is checked in one
+short session, the call is made, and the spend is recorded in another, so a slow
+answer from FlightAware never locks the web UI out of the database.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable, Iterable
+from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -21,7 +27,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import prefs
 from .airlines import to_icao
 from .config import Settings, get_settings
+from .db import session_scope
 from .models import KV, ApiUsage, Booking, FlightSnapshot
+from .notify import Notifier
+from .timezones import ensure_utc, parse_instant
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +49,10 @@ ENDPOINT_PRICE_USD: dict[str, Decimal] = {
 # new call site over-reports rather than spending invisibly.
 DEFAULT_PRICE_USD = Decimal("0.0050")
 
+# The Personal tier allows 10 result sets a minute; two are left for whatever a retry or
+# a hand-run check spends on top of the poller.
+RATE_LIMIT_PER_MINUTE = 8
+
 # Latch key in `kv`. The web app and the health page read this without touching AeroAPI.
 BREAKER_KEY = "aeroapi_budget_breaker"
 
@@ -50,9 +63,11 @@ MATCH_WINDOW = timedelta(hours=6)
 
 HTTP_TIMEOUT_SECONDS = 20.0
 
+# A flight ident is an airline designator followed by a number; the number is compared
+# without its leading zeros because feeds disagree on padding.
+_IDENT = re.compile(r"^([0-9A-Z]*?[A-Z])0*([0-9]+)$")
 
-class BudgetExceeded(RuntimeError):
-    """Raised instead of spending when month-to-date usage has reached the cap."""
+SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
 
 class BudgetStatus(BaseModel):
@@ -60,6 +75,22 @@ class BudgetStatus(BaseModel):
     cap_usd: Decimal
     tripped: bool
     month: str
+
+
+class BudgetExceeded(RuntimeError):
+    """Raised instead of spending when month-to-date usage has reached the cap.
+
+    Carries whether this refusal is the one that tripped the breaker, so the caller can
+    tell somebody exactly once rather than on every poll afterwards.
+    """
+
+    def __init__(self, status: BudgetStatus, *, just_tripped: bool) -> None:
+        super().__init__(
+            f"AeroAPI spend ${status.spend_usd} has reached the "
+            f"${status.cap_usd} cap for {status.month}"
+        )
+        self.status = status
+        self.just_tripped = just_tripped
 
 
 class FlightMatch(BaseModel):
@@ -115,12 +146,11 @@ class TokenBucket:
 _limiter: TokenBucket | None = None
 
 
-def shared_limiter(rate_per_minute: int | None = None) -> TokenBucket:
+def shared_limiter() -> TokenBucket:
     """One bucket for the process: the quota is per account, not per caller."""
     global _limiter
     if _limiter is None:
-        rate = rate_per_minute or prefs.current().aeroapi_rate_limit_per_minute
-        _limiter = TokenBucket(rate)
+        _limiter = TokenBucket(RATE_LIMIT_PER_MINUTE)
     return _limiter
 
 
@@ -194,17 +224,31 @@ async def _trip(session: AsyncSession, status: BudgetStatus) -> None:
     )
 
 
-async def ensure_budget(session: AsyncSession) -> None:
-    """Gate every call path. Latches on the way past so a restart stays stopped."""
+async def budget_refusal(
+    session: AsyncSession, endpoint: str = FLIGHT_INFO_ENDPOINT
+) -> BudgetExceeded | None:
+    """Why a call to `endpoint` may not be made right now, or None when it may.
+
+    A call is refused once it would take the month past the cap, not only once the cap
+    has already been passed: the breaker exists to keep the bill under the line, and a
+    check that waits for the line to be crossed spends one call on the wrong side of it.
+    Latches on the way past so a restart stays stopped. Returned rather than raised so
+    the caller can commit the latch before it lets the exception out.
+    """
     status = await budget_status(session)
-    if not status.tripped:
-        return
-    if not await _latched(session, status.month):
+    if not status.tripped and status.spend_usd + estimate_cost(endpoint, 1) <= status.cap_usd:
+        return None
+    just_tripped = not await _latched(session, status.month)
+    if just_tripped:
         await _trip(session, status)
-    raise BudgetExceeded(
-        f"AeroAPI spend ${status.spend_usd} has reached the "
-        f"${status.cap_usd} cap for {status.month}"
-    )
+    return BudgetExceeded(status, just_tripped=just_tripped)
+
+
+async def ensure_budget(session: AsyncSession, endpoint: str = FLIGHT_INFO_ENDPOINT) -> None:
+    """Gate a call path, raising `BudgetExceeded` when the call may not go ahead."""
+    refusal = await budget_refusal(session, endpoint)
+    if refusal is not None:
+        raise refusal
 
 
 # --- Client --------------------------------------------------------------------------
@@ -217,6 +261,8 @@ class AeroAPIClient:
         *,
         transport: httpx.AsyncBaseTransport | None = None,
         limiter: TokenBucket | None = None,
+        sessions: SessionFactory = session_scope,
+        notifier: Notifier | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._http = httpx.AsyncClient(
@@ -225,6 +271,8 @@ class AeroAPIClient:
             transport=transport,
         )
         self._limiter = limiter or shared_limiter()
+        self._sessions = sessions
+        self._notifier = notifier or Notifier(self._settings)
 
     @property
     def settings(self) -> Settings:
@@ -233,9 +281,7 @@ class AeroAPIClient:
     async def aclose(self) -> None:
         await self._http.aclose()
 
-    async def flight_info(
-        self, session: AsyncSession, ident: str, *, ident_type: str | None = None
-    ) -> dict[str, Any]:
+    async def flight_info(self, ident: str, *, ident_type: str | None = None) -> dict[str, Any]:
         """`GET /flights/{ident}`, one page, metered.
 
         `max_pages=1` is never optional: without it a bare ident returns roughly 14 days
@@ -245,7 +291,13 @@ class AeroAPIClient:
         if ident_type is not None:
             params["ident_type"] = ident_type
 
-        await ensure_budget(session)
+        async with self._sessions() as session:
+            refusal = await budget_refusal(session, FLIGHT_INFO_ENDPOINT)
+        if refusal is not None:
+            if refusal.just_tripped:
+                await self._announce(refusal.status)
+            raise refusal
+
         await self._limiter.acquire()
         # The key rides on the request rather than on the client, because the shared
         # client outlives a key replaced on the settings page.
@@ -256,22 +308,24 @@ class AeroAPIClient:
         )
         response.raise_for_status()
         payload: dict[str, Any] = response.json()
-        await self._record_usage(session, FLIGHT_INFO_ENDPOINT, payload)
+        async with self._sessions() as session:
+            session.add(_usage(FLIGHT_INFO_ENDPOINT, payload))
         return payload
 
-    async def _record_usage(
-        self, session: AsyncSession, endpoint: str, payload: dict[str, Any]
-    ) -> None:
-        result_sets = payload.get("num_pages") or 1
-        if not isinstance(result_sets, int) or result_sets < 1:
-            result_sets = 1
-        session.add(
-            ApiUsage(
-                endpoint=endpoint,
-                result_sets=result_sets,
-                est_cost_usd=float(estimate_cost(endpoint, result_sets)),
-            )
-        )
+    async def _announce(self, status: BudgetStatus) -> None:
+        """Tell the phone the breaker tripped. Best effort: the breaker has already done
+        its job, and a push that fails must not turn a refusal into a crash."""
+        try:
+            await self._notifier.budget_tripped(status.spend_usd, status.cap_usd)
+        except Exception:
+            log.warning("could not push the budget alert", exc_info=True)
+
+
+def _usage(endpoint: str, payload: dict[str, Any]) -> ApiUsage:
+    pages = payload.get("num_pages")
+    if not isinstance(pages, int) or pages < 1:
+        pages = 1
+    return ApiUsage(endpoint=endpoint, est_cost_usd=float(estimate_cost(endpoint, pages)))
 
 
 _client: AeroAPIClient | None = None
@@ -301,11 +355,43 @@ def flight_ident(booking: Booking) -> str:
     flown, and reported, as BAW112. Marketing is only the fallback for when the booking
     never told us who actually flies it.
     """
-    if booking.aeroapi_ident:
-        return booking.aeroapi_ident
     carrier = to_icao(booking.operating_carrier or booking.marketing_carrier)
     number = (booking.operating_number or booking.marketing_number).strip()
     return f"{carrier}{number.lstrip('0') or number}"
+
+
+def _normalised_ident(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    ident = value.strip().upper()
+    match = _IDENT.match(ident)
+    return ident if match is None else f"{match.group(1)}{match.group(2)}"
+
+
+def _booking_idents(booking: Booking) -> set[str]:
+    """Every spelling of the booking's flight numbers a returned flight might carry."""
+    idents: set[str] = set()
+    for carrier, number in (
+        (booking.operating_carrier, booking.operating_number),
+        (booking.marketing_carrier, booking.marketing_number),
+    ):
+        if not carrier or not number:
+            continue
+        for code in {carrier, to_icao(carrier)}:
+            ident = _normalised_ident(f"{code}{number}")
+            if ident is not None:
+                idents.add(ident)
+    return idents
+
+
+def _flight_idents(flight: dict[str, Any]) -> set[str]:
+    """The flight's own idents and the codeshares sold on it, in both code systems."""
+    values: list[Any] = [flight.get("ident"), flight.get("ident_icao"), flight.get("ident_iata")]
+    for key in ("codeshares", "codeshares_iata"):
+        shared = flight.get(key)
+        if isinstance(shared, list):
+            values.extend(shared)
+    return {ident for ident in map(_normalised_ident, values) if ident is not None}
 
 
 def _airport_matches(ref: Any, iata: str) -> bool:
@@ -320,10 +406,14 @@ def _airport_matches(ref: Any, iata: str) -> bool:
 
 
 def select_match(flights: Iterable[Any], booking: Booking) -> dict[str, Any] | None:
-    """The returned leg nearest the booked departure, on the booked route, within ±6h."""
-    booked = booking.scheduled_departure_utc
-    if booked.tzinfo is None:
-        booked = booked.replace(tzinfo=UTC)
+    """The returned leg nearest the booked departure, on the booked route, within ±6h,
+    and carrying the booked flight number as its own ident or as a codeshare.
+
+    The ident check is what stops a lookup by designator matching a different flight
+    that happens to fly the same route at the same hour.
+    """
+    booked = ensure_utc(booking.scheduled_departure_utc)
+    wanted = _booking_idents(booking)
 
     best: tuple[timedelta, dict[str, Any]] | None = None
     for flight in flights:
@@ -331,7 +421,7 @@ def select_match(flights: Iterable[Any], booking: Booking) -> dict[str, Any] | N
             continue
         # A cancelled leg has no runway time, so gate-scheduled is the only field that is
         # reliably present on every flight we might be looking at.
-        scheduled = _parse_timestamp(flight.get("scheduled_out")) or _parse_timestamp(
+        scheduled = parse_instant(flight.get("scheduled_out")) or parse_instant(
             flight.get("scheduled_off")
         )
         if scheduled is None:
@@ -343,13 +433,15 @@ def select_match(flights: Iterable[Any], booking: Booking) -> dict[str, Any] | N
             continue
         if not _airport_matches(flight.get("destination"), booking.dest_iata):
             continue
+        if wanted.isdisjoint(_flight_idents(flight)):
+            continue
         if best is None or distance < best[0]:
             best = (distance, flight)
     return None if best is None else best[1]
 
 
 async def resolve_flight(
-    session: AsyncSession, booking: Booking, client: AeroAPIClient | None = None
+    booking: Booking, client: AeroAPIClient | None = None
 ) -> FlightMatch | None:
     """Turn a booking into a pinnable `fa_flight_id`, or nothing at all.
 
@@ -360,7 +452,7 @@ async def resolve_flight(
     ident = flight_ident(booking)
     # Without ident_type an ident is read as a registration "if possible", which is the
     # wrong guess for every commercial flight number.
-    payload = await client.flight_info(session, ident, ident_type="designator")
+    payload = await client.flight_info(ident, ident_type="designator")
     flights = payload.get("flights") or []
     flight = select_match(flights, booking)
     if flight is None:
@@ -381,15 +473,17 @@ async def resolve_flight(
 
 
 async def fetch_flight(
-    session: AsyncSession, booking: Booking, client: AeroAPIClient | None = None
+    booking: Booking, client: AeroAPIClient | None = None
 ) -> dict[str, Any] | None:
-    """One observation of a booking's flight, pinning the id on first success."""
+    """One observation of a booking's flight, pinning the id on first success.
+
+    The pin is written onto the booking object; the caller owns the transaction that
+    persists it, since no session is open while FlightAware is being asked.
+    """
     client = client or shared_client()
 
     if booking.aeroapi_fa_flight_id:
-        payload = await client.flight_info(
-            session, booking.aeroapi_fa_flight_id, ident_type="fa_flight_id"
-        )
+        payload = await client.flight_info(booking.aeroapi_fa_flight_id, ident_type="fa_flight_id")
         legs = [
             flight
             for flight in payload.get("flights") or []
@@ -407,20 +501,17 @@ async def fetch_flight(
         # departure is the leg still in the air.
         return max(legs, key=_leg_ordering)
 
-    match = await resolve_flight(session, booking, client)
+    match = await resolve_flight(booking, client)
     if match is None:
         return None
     booking.aeroapi_fa_flight_id = match.fa_flight_id
-    ident = match.flight.get("ident_icao") or match.flight.get("ident")
-    if isinstance(ident, str) and ident:
-        booking.aeroapi_ident = ident
     log.info("pinned booking %s to %s", booking.id, match.fa_flight_id)
     return match.flight
 
 
 def _leg_ordering(flight: dict[str, Any]) -> datetime:
     for key in ("actual_out", "estimated_out", "scheduled_out"):
-        parsed = _parse_timestamp(flight.get(key))
+        parsed = parse_instant(flight.get(key))
         if parsed is not None:
             return parsed
     return datetime.min.replace(tzinfo=UTC)
@@ -449,16 +540,6 @@ _TEXT_FIELDS = (
     "aircraft_type",
     "registration",
 )
-
-
-def _parse_timestamp(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed.astimezone(UTC) if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 def _as_text(value: Any) -> str | None:
@@ -498,7 +579,7 @@ def to_snapshot_fields(flight: dict[str, Any]) -> dict[str, Any]:
     for key in _TEXT_FIELDS:
         fields[key] = _as_text(flight.get(key))
     for key in _TIMESTAMP_FIELDS:
-        fields[key] = _parse_timestamp(flight.get(key))
+        fields[key] = parse_instant(flight.get(key))
     return fields
 
 

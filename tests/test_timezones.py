@@ -8,8 +8,18 @@ change, and one whose email states an offset that is not to be believed.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
-from flighter.timezones import format_local, same_local_date, to_local, to_utc
+import pytest
+
+from flighter.timezones import (
+    ensure_utc,
+    format_local,
+    parse_instant,
+    same_local_date,
+    to_local,
+    to_utc,
+)
 
 JFK = "America/New_York"
 LHR = "Europe/London"
@@ -104,3 +114,32 @@ def test_local_times_are_always_rendered_with_a_zone() -> None:
 def test_unknown_zone_falls_back_rather_than_raising() -> None:
     naive = datetime(2026, 6, 10, 8, 0)
     assert to_utc(naive, "Mars/Olympus_Mons") == naive.replace(tzinfo=UTC)
+
+
+def test_ensure_utc_reads_naive_as_utc_and_converts_the_rest() -> None:
+    """A naive value out of the database or the feed was UTC when it went in; an aware
+    one in another zone is the same instant restated."""
+    assert ensure_utc(datetime(2026, 9, 13, 3, 30)) == datetime(2026, 9, 13, 3, 30, tzinfo=UTC)
+    local = datetime(2026, 9, 12, 23, 30, tzinfo=ZoneInfo(JFK))
+    assert ensure_utc(local) == datetime(2026, 9, 13, 3, 30, tzinfo=UTC)
+    assert ensure_utc(local).tzinfo is UTC
+    assert ensure_utc(None) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("2026-09-12T18:40:00Z", datetime(2026, 9, 12, 18, 40, tzinfo=UTC)),
+        ("2026-09-12T18:40:00+00:00", datetime(2026, 9, 12, 18, 40, tzinfo=UTC)),
+        ("2026-09-12T14:40:00-04:00", datetime(2026, 9, 12, 18, 40, tzinfo=UTC)),
+        ("2026-09-12T18:40:00", datetime(2026, 9, 12, 18, 40, tzinfo=UTC)),
+        ("", None),
+        ("not a date", None),
+        (None, None),
+        (1757700000, None),
+    ],
+)
+def test_parse_instant_accepts_every_spelling_the_feeds_use(
+    text: object, expected: datetime | None
+) -> None:
+    assert parse_instant(text) == expected

@@ -10,6 +10,7 @@ is always right.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import overload
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 FALLBACK_TZ = "UTC"
@@ -17,6 +18,39 @@ FALLBACK_TZ = "UTC"
 # Gate and baggage claim are null far more often than not, so the placeholder is part of
 # the design rather than an error state.
 UNKNOWN = "-"
+
+
+@overload
+def ensure_utc(value: datetime) -> datetime: ...
+@overload
+def ensure_utc(value: None) -> None: ...
+def ensure_utc(value: datetime | None) -> datetime | None:
+    """An instant as aware UTC.
+
+    A naive datetime reaching here can only have come from a store or a feed that
+    dropped the zone on a value that was UTC when it went in; the database column and
+    AeroAPI both speak UTC and nothing else, so that is the only reading it can have.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def parse_instant(value: object) -> datetime | None:
+    """An ISO-8601 string as a UTC instant, or None for anything that is not one.
+
+    Total rather than raising: the strings come from AeroAPI and from our own event
+    rows, and a malformed one is a gap in the data, not a reason to lose the rest of it.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return ensure_utc(parsed)
 
 
 def to_utc(local: datetime, tz: str) -> datetime:

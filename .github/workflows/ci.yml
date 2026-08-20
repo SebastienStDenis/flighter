@@ -14,6 +14,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          python-version: "3.12"
 
       - run: uv sync --frozen --all-groups
 
@@ -37,6 +38,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          python-version: "3.12"
       - run: uv sync --frozen --all-groups
       # A migration that only ever runs forwards is a migration nobody can back out of.
       - name: upgrade, downgrade, upgrade
@@ -55,5 +57,18 @@ jobs:
         with:
           context: .
           push: false
+          load: true
+          tags: flighter:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # The image boots with an empty volume and no credentials, so a container that
+      # cannot come up on its own is caught here rather than by the home server.
+      - name: boot and probe /healthz
+        run: |
+          docker run -d --name flighter-ci -p 8000:8000 flighter:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/healthz; then exit 0; fi
+            sleep 2
+          done
+          docker logs flighter-ci
+          exit 1

@@ -10,6 +10,12 @@ aside, and only a person asking for it on the health page brings it back. A mess
 got as far as a decision is unflagged where it stands and never comes back. Either way
 the phone is told once, when there is nothing left to try, which is why the state already
 on file is read before the new one is written.
+
+No transaction is open while the model is reading an email. Every transaction here takes
+the database's one write lock the moment it begins, and a model call can take most of a
+minute, so a session held across it would hold every page of the web UI for as long.
+The row is read in one short transaction and written in another, with nothing locked
+between them.
 """
 
 from __future__ import annotations
@@ -23,18 +29,29 @@ from typing import NamedTuple
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import prefs
 from .airports import airport_tz
 from .bookings import create_booking, find_duplicate
 from .config import Settings, get_settings
 from .db import session_scope
 from .extract import Extraction, Segment, from_jsonld, from_model, looks_like_flight
-from .mail import RECONNECT_MAX_SECONDS, RECONNECT_MIN_SECONDS, Mailbox, Marked, Message
+from .mail import (
+    IDLE_CYCLE_SECONDS,
+    RECONNECT_MAX_SECONDS,
+    RECONNECT_MIN_SECONDS,
+    Mailbox,
+    Marked,
+    Message,
+)
 from .models import Booking, IngestLog
 from .notify import Notifier
 from .timezones import to_utc
 
 log = logging.getLogger(__name__)
+
+# Below this an extraction is booked for review rather than straight onto the board. The
+# model is asked to lower its confidence when a time or a code was inferred rather than
+# printed, and a flight that has to be checked is better than one that is quietly wrong.
+CONFIDENCE_THRESHOLD = 0.85
 
 # A message yields one outcome even when it carried several segments. Review wins over
 # a success because it is the one that still needs a person.
@@ -69,50 +86,88 @@ _SET_ASIDE_REASON = "It has been set aside. Try it again from the health page."
 
 
 class Ingested(NamedTuple):
-    """What one email came to: the ingest_log outcome, and the flights it points at."""
+    """What one email came to: the ingest_log outcome, and the flights it points at.
+
+    `settled` is whether the service is finished with it. Every decision is settled; a
+    failure is settled only once its last retry has been used up.
+    """
 
     outcome: str
     booking_ids: tuple[int, ...] = ()
     error: str | None = None
+    settled: bool = True
 
 
-async def process_message(
-    session: AsyncSession, message: Message, *, settings: Settings | None = None
-) -> Ingested:
-    """Handle one email and return what it was recorded as."""
+class Standing(NamedTuple):
+    """What the ingest log already says about a message, copied out of its row.
+
+    A copy rather than the row: the transaction it was read in has ended by the time it
+    is consulted, and the pipeline is about to write a new row in its place.
+    """
+
+    outcome: str
+    error: str | None
+    retry_at: datetime | None
+
+    @property
+    def due(self) -> bool:
+        """Whether a message that failed before is ready for another go."""
+        return self.retry_at is not None and self.retry_at <= datetime.now(UTC)
+
+
+async def _on_file(message_id: str) -> Standing | None:
+    async with session_scope() as session:
+        row = await session.get(IngestLog, message_id)
+        return None if row is None else Standing(row.outcome, row.error, row.retry_at)
+
+
+async def process_message(message: Message, *, settings: Settings | None = None) -> Ingested:
+    """Handle one email and return what it was recorded as.
+
+    Reads the email with nothing locked, then books and records in one transaction. Does
+    not consult the log first: whether the message is wanted at all is the sweep's call.
+    """
     settings = settings or get_settings()
-
-    existing = await session.get(IngestLog, message.id)
-    if existing is not None and existing.outcome != ERROR:
-        log.debug("%s is already in the ingest log (%s)", message.id, existing.outcome)
-        return Ingested(existing.outcome, error=existing.error)
-
-    extraction: Extraction | None = None
     try:
-        if not looks_like_flight(message):
-            return await _record(session, message, Ingested("no_flight"))
-
-        extraction = from_jsonld(message.text_html) or await from_model(message, settings=settings)
-        if extraction is None or not extraction.is_flight_confirmation or not extraction.segments:
-            return await _record(session, message, Ingested("no_flight"), extraction)
-
-        return await _record(
-            session, message, await _book(session, message, extraction), extraction
-        )
+        extraction = await _extract(message, settings)
     except Exception as exc:
-        log.exception("failed to ingest %s", message.id)
-        # Discard whatever this message had already written: a half-booked itinerary is
-        # worse than none, and after a database error the session cannot write the log
-        # row at all until it is rolled back.
-        await session.rollback()
-        return await _record(
-            session, message, Ingested(ERROR, error=f"{type(exc).__name__}: {exc}"), extraction
-        )
+        log.exception("failed to extract %s", message.id)
+        async with session_scope() as session:
+            return await _record(session, message, _failed(exc))
+
+    async with session_scope() as session:
+        try:
+            if (
+                extraction is None
+                or not extraction.is_flight_confirmation
+                or not extraction.segments
+            ):
+                return await _record(session, message, Ingested("no_flight"), extraction)
+            return await _record(
+                session, message, await _book(session, message, extraction), extraction
+            )
+        except Exception as exc:
+            log.exception("failed to book %s", message.id)
+            # Discard whatever this message had already written: a half-booked itinerary
+            # is worse than none, and after a database error the session cannot write
+            # the log row at all until it is rolled back.
+            await session.rollback()
+            return await _record(session, message, _failed(exc), extraction)
+
+
+async def _extract(message: Message, settings: Settings) -> Extraction | None:
+    """Cheapest tier first. None means the email holds no flight as far as we can tell."""
+    if not looks_like_flight(message):
+        return None
+    return from_jsonld(message.text_html) or await from_model(message, settings=settings)
+
+
+def _failed(exc: Exception) -> Ingested:
+    return Ingested(ERROR, error=f"{type(exc).__name__}: {exc}")
 
 
 async def _book(session: AsyncSession, message: Message, extraction: Extraction) -> Ingested:
-    confident = extraction.confidence >= prefs.current().extraction_confidence_threshold
-    status = "active" if confident else "pending_review"
+    status = "active" if extraction.confidence >= CONFIDENCE_THRESHOLD else "pending_review"
 
     booked = [
         await _book_segment(session, message, extraction, segment, status)
@@ -138,9 +193,9 @@ async def _book_segment(
         raise ValueError(f"segment {flight} has no readable departure time")
 
     # The zone comes from the airports table, which is also what create_booking will use
-    # a moment later. departure_tz_hint is deliberately not consulted here or anywhere
-    # else: airlines state it wrong often enough that trusting it moves real flights by
-    # hours, and the origin airport's IANA zone is always right.
+    # a moment later. Whatever zone the email stated is never consulted: airlines get it
+    # wrong often enough that trusting it moves real flights by hours, and the origin
+    # airport's IANA zone is always right.
     origin_tz = await airport_tz(session, segment.origin_iata)
     twin = await find_duplicate(
         session,
@@ -206,7 +261,7 @@ async def _record(
     row.attempts = (row.attempts or 0) + 1 if result.outcome == ERROR else 0
     row.retry_at = _next_attempt(row.attempts) if result.outcome == ERROR else None
     await session.flush()
-    return result
+    return result._replace(settled=row.retry_at is None)
 
 
 def _next_attempt(attempts: int) -> datetime | None:
@@ -219,11 +274,6 @@ def _next_attempt(attempts: int) -> datetime | None:
 def set_aside(row: IngestLog) -> bool:
     """Whether this message has been given up on and is waiting to be asked for again."""
     return row.outcome == ERROR and row.retry_at is None
-
-
-def _due(row: IngestLog) -> bool:
-    """Whether a message that failed before is ready for another go."""
-    return row.retry_at is not None and row.retry_at <= datetime.now(UTC)
 
 
 async def list_set_aside(session: AsyncSession) -> list[IngestLog]:
@@ -280,7 +330,7 @@ async def run_ingest_loop(stopping: asyncio.Event, *, settings: Settings | None 
             # the new one rather than waiting for a restart.
             while not stopping.is_set() and mailbox.current:
                 await ingest_once(mailbox, settings, notifier)
-                await mailbox.wait_for_mail(prefs.current().imap_idle_seconds)
+                await mailbox.wait_for_mail(IDLE_CYCLE_SECONDS)
         except Exception:
             log.exception("the mail connection failed; reconnecting in %.0fs", backoff)
             await mailbox.close()
@@ -297,10 +347,11 @@ async def ingest_once(mailbox: Mailbox, settings: Settings, notifier: Notifier) 
     everything already imported, and the flag is cleared only after its row is written.
     """
     outcomes = []
-    for marked in await mailbox.poll():
-        outcome = await _import(mailbox, marked, settings, notifier)
-        if outcome is not None:
-            outcomes.append(outcome)
+    async for marked_in_mailbox in mailbox.poll():
+        for marked in marked_in_mailbox:
+            outcome = await _import(mailbox, marked, settings, notifier)
+            if outcome is not None:
+                outcomes.append(outcome)
     if outcomes:
         log.info("imported %d message(s): %s", len(outcomes), _tally(outcomes))
     return outcomes
@@ -334,49 +385,52 @@ async def _import(
     the same as one that was looked at and came to nothing.
     """
     message = marked.message
-    async with session_scope() as session:
-        logged = await session.get(IngestLog, message.id)
-        if logged is not None and logged.outcome == ERROR and not _due(logged):
-            log.debug("%s is not due to be tried again yet", message.id)
-            return None
-        # Copied out rather than kept as a row: the pipeline is about to rewrite that
-        # very row, and the identity map would hand back the state it has just written.
-        was = _state(logged)
-        result = await process_message(session, message, settings=settings)
-        # The phone hears once, and only when there is nothing left for the service to
-        # do: a failure that is going to be retried in two minutes is not news, and a
-        # decision already on file was reported the first time it was reached.
-        row = await session.get(IngestLog, message.id)
-        if row is not None and row.retry_at is None and _state(row) != was:
-            await _announce(session, notifier, message, result)
+    before = await _on_file(message.id)
 
+    if before is not None and before.outcome != ERROR:
+        # Decided and reported on an earlier sweep. A crash between writing that row and
+        # clearing the flag is the one way back here, so all that is left is the flag.
+        log.debug("%s is already in the ingest log (%s)", message.id, before.outcome)
+        await mailbox.clear_mark(marked)
+        return before.outcome
+    if before is not None and not before.due:
+        log.debug("%s is not due to be tried again yet", message.id)
+        return None
+
+    result = await process_message(message, settings=settings)
+    # The phone hears once, and only when there is nothing left for the service to do: a
+    # failure that is going to be retried in two minutes is not news. Nothing that was
+    # already settled gets this far, so a settled result is always the first word.
+    if result.settled:
+        await _announce(notifier, message, result)
     if result.outcome != ERROR:
         await mailbox.clear_mark(marked)
     return result.outcome
 
 
-def _state(row: IngestLog | None) -> tuple[str, bool] | None:
-    """What has already been said about a message: its outcome, and whether that was final."""
-    return None if row is None else (row.outcome, row.retry_at is None)
+async def _announce(notifier: Notifier, message: Message, result: Ingested) -> None:
+    """Tell the phone what became of a flagged email, whichever way it went.
 
+    A push that cannot be sent is logged and let go. The row is already committed, so
+    retrying would mean re-reading an email whose answer is on file, and the flight is on
+    the board and the health page either way.
+    """
+    try:
+        if result.outcome in _FAILURES:
+            reason = result.error or _NO_FLIGHT_REASON
+            await notifier.mail_failed(
+                message_id=message.id,
+                subject=message.subject,
+                reason=f"{reason}\n{_SET_ASIDE_REASON}" if result.outcome == ERROR else reason,
+            )
+            return
 
-async def _announce(
-    session: AsyncSession, notifier: Notifier, message: Message, result: Ingested
-) -> None:
-    """Tell the phone what became of a flagged email, whichever way it went."""
-    if result.outcome in _FAILURES:
-        reason = result.error or _NO_FLIGHT_REASON
-        await notifier.mail_failed(
-            message_id=message.id,
-            subject=message.subject,
-            reason=f"{reason}\n{_SET_ASIDE_REASON}" if result.outcome == ERROR else reason,
-        )
-        return
-
-    bookings = [await session.get(Booking, booking_id) for booking_id in result.booking_ids]
-    await notifier.mail_imported(
-        [booking for booking in bookings if booking is not None], outcome=result.outcome
-    )
+        async with session_scope() as session:
+            found = [await session.get(Booking, booking_id) for booking_id in result.booking_ids]
+        bookings = [booking for booking in found if booking is not None]
+        await notifier.mail_imported(bookings, outcome=result.outcome)
+    except Exception:
+        log.exception("could not tell the phone what became of %s", message.id)
 
 
 async def _pause(stopping: asyncio.Event, seconds: float) -> None:
