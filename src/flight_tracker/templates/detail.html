@@ -7,7 +7,7 @@
 <div class="panel">
   <div class="flight-top">
     <span class="ident">{{ v.flight_number }}
-      <span class="when">{{ at(v.scheduled_departure, v.origin_tz, with_date=true) }}</span>
+      <span class="when">{{ day(v.scheduled_departure, v.origin_tz) }}</span>
     </span>
     {{ m.chip(v.status) }}
   </div>
@@ -15,10 +15,10 @@
   <div class="route-meta">
     {%- if v.progress_percent is not none -%}
       {{ v.progress_percent }}% flown
-    {%- elif v.delay.total_seconds() > 0 -%}
-      {{ duration(v.delay) }} behind schedule
+    {%- elif v.arrival -%}
+      {{ duration(v.arrival - v.departure) }} in the air
     {%- else -%}
-      {{ dash(v.passenger_name) }}
+      {{ v.passenger_name }}
     {%- endif -%}
   </div>
 </div>

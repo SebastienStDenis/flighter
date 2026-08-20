@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{% block title %}Flights{% endblock %}</title>
 <meta name="theme-color" content="#0a0c11">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Flights">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -21,7 +22,7 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         <path d="M21 15.5 13.5 11V4.2a1.5 1.5 0 0 0-3 0V11L3 15.5v2l7.5-2.2v4.4L8 21.3V23l4-1.2 4 1.2v-1.7l-2.5-1.6v-4.4l7.5 2.2z"/>
       </svg>
-      Flights
+      <span class="brand-name">Flights</span>
     </a>
     <nav>
       {% set here = request.url.path %}
@@ -39,7 +40,7 @@
   // The shell is cached so the app opens from the home screen with no network. Flight
   // data is never cached; see sw.js.
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/static/sw.js", { scope: "/" });
+    navigator.serviceWorker.register("/sw.js");
   }
 </script>
 </body>

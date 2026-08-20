@@ -13,9 +13,12 @@
       {{ '- polling paused' if budget.tripped else 'cap' }}</span>
   </div>
   <div class="tile">
-    <span class="label">Last status check</span>
+    <span class="label">Last poll</span>
     <span class="value">{{ at(last_snapshot, 'UTC') }}</span>
-    <span class="hint">{{ at(last_snapshot, 'UTC', with_date=true) }}</span>
+    <span class="hint">
+      {%- if last_snapshot %}{{ at(last_snapshot, 'UTC', with_date=true) }}
+      {%- else %}nothing polled yet{% endif -%}
+    </span>
   </div>
 </div>
 
@@ -24,7 +27,7 @@
   <dl class="facts">
     {% for status in ('active', 'pending_review', 'completed', 'cancelled', 'archived') %}
     <dt>{{ status.replace('_', ' ')|capitalize }}</dt>
-    <dd{% if not counts.get(status) %} class="empty"{% endif %}>{{ counts.get(status, 0) }}</dd>
+    <dd{% if not counts.get(status) %} class="blank"{% endif %}>{{ counts.get(status, 0) }}</dd>
     {% endfor %}
   </dl>
 </section>

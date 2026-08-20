@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from flight_tracker.bookings import to_booking_times
+from flight_tracker.bookings import _normalised, to_booking_times
 
 JFK = "America/New_York"
 LHR = "Europe/London"
@@ -57,3 +57,13 @@ def test_backwards_pair_is_never_corrected() -> None:
 def test_dst_boundary_departure() -> None:
     departure, _ = to_booking_times(datetime(2026, 3, 8, 9, 0), "America/Chicago", None, JFK)
     assert departure == datetime(2026, 3, 8, 14, 0, tzinfo=UTC)
+
+
+def test_edits_are_normalised_the_same_way_inserts_are() -> None:
+    # An edit writing a lower-case carrier or a zero-padded number would look like a
+    # different flight to the dedupe index than the same flight inserted fresh.
+    assert _normalised("marketing_carrier", " ac ") == "AC"
+    assert _normalised("marketing_number", "0871") == "871"
+    assert _normalised("origin_iata", "yul") == "YUL"
+    assert _normalised("seat", "14c") == "14c"
+    assert _normalised("marketing_number", None) is None

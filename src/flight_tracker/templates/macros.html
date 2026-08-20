@@ -7,7 +7,7 @@
   <div class="port">
     <div class="iata">{{ v.booking.origin_iata }}</div>
     <div class="port-time">{{ at(v.departure, v.origin_tz) }}</div>
-    {% if names %}<div class="port-name">{{ dash(v.origin.name if v.origin else none) }}</div>{% endif %}
+    {% if names and v.origin %}<div class="port-name">{{ v.origin.name }}</div>{% endif %}
   </div>
   <div class="line" aria-hidden="true">
     <span class="line-mark">
@@ -20,7 +20,7 @@
   <div class="port port--in">
     <div class="iata">{{ v.booking.dest_iata }}</div>
     <div class="port-time">{{ at(v.arrival, v.dest_tz) }}</div>
-    {% if names %}<div class="port-name">{{ dash(v.dest.name if v.dest else none) }}</div>{% endif %}
+    {% if names and v.dest %}<div class="port-name">{{ v.dest.name }}</div>{% endif %}
   </div>
 </div>
 {% endmacro %}
@@ -34,7 +34,7 @@
 <a class="flight flight--{{ status.tone }}" href="/f/{{ v.booking.id }}">
   <div class="flight-top">
     <span class="ident">{{ v.flight_number }}
-      <span class="when">{{ at(v.scheduled_departure, v.origin_tz, with_date=true) }}</span>
+      <span class="when">{{ day(v.scheduled_departure, v.origin_tz) }}</span>
     </span>
     {{ chip(status) }}
   </div>
@@ -45,5 +45,5 @@
 {# A row of the fact list. `tone` colours the value; the label always says what it is. #}
 {% macro fact(name, value, tone="") %}
 <dt>{{ name }}</dt>
-<dd class="{{ tone }}{% if value == missing %} empty{% endif %}">{{ value }}</dd>
+<dd class="{{ tone }}{{ ' blank' if value == missing }}">{{ value }}</dd>
 {% endmacro %}

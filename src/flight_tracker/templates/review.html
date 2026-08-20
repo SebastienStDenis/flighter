@@ -16,7 +16,7 @@
 <div class="panel" id="review-{{ v.booking.id }}">
   <div class="flight-top">
     <span class="ident">{{ v.flight_number }}
-      <span class="when">{{ at(v.scheduled_departure, v.origin_tz, with_date=true) }}</span>
+      <span class="when">{{ day(v.scheduled_departure, v.origin_tz) }}</span>
     </span>
     <span class="chip chip--signal">
       {% if v.booking.extraction_confidence is not none %}

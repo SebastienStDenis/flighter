@@ -2,10 +2,10 @@
      role="img" aria-label="Flights">
   <rect width="512" height="512" fill="#0a0c11"/>
   <g stroke="#7cc6ff" stroke-width="12" stroke-linecap="round">
-    <line x1="96" y1="256" x2="416" y2="256" opacity="0.3" stroke-dasharray="4 28"/>
-    <line x1="96" y1="256" x2="248" y2="256"/>
+    <line x1="72" y1="256" x2="440" y2="256" opacity="0.35" stroke-dasharray="4 30"/>
+    <line x1="72" y1="256" x2="238" y2="256"/>
   </g>
-  <g fill="#7cc6ff" transform="translate(300 256) rotate(90) scale(7) translate(-12 -12.9)">
+  <g fill="#7cc6ff" transform="translate(296 256) rotate(90) scale(9) translate(-12 -12.9)">
     <path d="M21 15.5 13.5 11V4.2a1.5 1.5 0 0 0-3 0V11L3 15.5v2l7.5-2.2v4.4L8 21.3V23l4-1.2 4 1.2v-1.7l-2.5-1.6v-4.4l7.5 2.2z"/>
   </g>
 </svg>

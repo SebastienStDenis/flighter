@@ -90,7 +90,7 @@ nav a {
   display: inline-flex;
   align-items: center;
   min-height: 34px;
-  padding: 0 .6rem;
+  padding: 0 .5rem;
   border-radius: 8px;
   color: var(--haze);
   font-size: .82rem;
@@ -254,9 +254,8 @@ a.flight:hover { border-color: #33405a; text-decoration: none; }
   display: flex;
   justify-content: center;
   font-family: var(--font-data);
-  font-size: .7rem;
-  letter-spacing: .1em;
-  text-transform: uppercase;
+  font-size: .72rem;
+  letter-spacing: .06em;
   color: var(--haze);
   margin-top: .5rem;
 }
@@ -299,11 +298,11 @@ a.flight:hover { border-color: #33405a; text-decoration: none; }
   font-variant-numeric: tabular-nums;
 }
 .facts dt:first-of-type, .facts dt:first-of-type + dd { border-top: none; }
-.facts dd.empty { color: var(--haze); opacity: .55; }
 .facts dd.text { font-family: var(--font-ui); font-size: .85rem; }
 .facts dd.strong { color: var(--chalk); font-weight: 600; }
 .facts dd.signal { color: var(--signal); }
 .facts dd.stop { color: var(--stop); }
+.facts dd.blank { color: var(--haze); opacity: .55; font-weight: 400; }
 
 /* ---- Timeline ----------------------------------------------------------------- */
 
@@ -508,6 +507,12 @@ pre.state {
 }
 .tile .value.signal { color: var(--signal); }
 .tile .value.stop { color: var(--stop); }
+
+/* The wordmark is the first thing to go: four destinations and a brand do not fit
+   across a small phone, and the mark alone still says where home is. */
+@media (max-width: 24rem) {
+  .brand-name { display: none; }
+}
 
 @media (max-width: 22rem) {
   .iata { font-size: 1.5rem; }

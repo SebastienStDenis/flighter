@@ -120,7 +120,7 @@ async def update_booking(
         raise ValueError(f"not booking columns: {', '.join(sorted(unknown))}")
 
     for name, value in fields.items():
-        setattr(booking, name, value)
+        setattr(booking, name, _normalised(name, value))
 
     # Reactivating a booking has to hand it back to the poller, or it sits untouched
     # until something else happens to write a next_poll_at.
@@ -213,3 +213,25 @@ def _number(number: str) -> str:
     cannot tell AA0100 from AA100 unless both are stored the same way."""
     stripped = number.strip()
     return stripped.lstrip("0") or stripped
+
+
+_NORMALISERS = {
+    "marketing_carrier": _carrier,
+    "operating_carrier": _carrier,
+    "marketing_number": _number,
+    "operating_number": _number,
+    "origin_iata": _code,
+    "dest_iata": _code,
+}
+
+
+def _normalised(name: str, value: object) -> object:
+    """Apply the same cleanup an insert would.
+
+    An edit that wrote `ac871` verbatim would read as a different airline to the dedupe
+    index than the `AC871` an insert stores, so the two paths have to agree.
+    """
+    normalise = _NORMALISERS.get(name)
+    if normalise is None or not isinstance(value, str):
+        return value
+    return normalise(value)
