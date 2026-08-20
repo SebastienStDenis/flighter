@@ -171,6 +171,20 @@
     left: var(--progress, 0%);
   }
 
+  /* The Apple Mail flag colours, drawn as Mail draws them. This is the one place in the
+     app where the colour is the information rather than the emphasis. */
+  .swatch {
+    @apply inline-block size-3.5 shrink-0 rounded-full ring-1 ring-black/15;
+    background: var(--flag);
+  }
+
+  .swatch[data-colour='orange'] { --flag: #ff9500; }
+  .swatch[data-colour='yellow'] { --flag: #ffcc00; }
+  .swatch[data-colour='green']  { --flag: #34c759; }
+  .swatch[data-colour='blue']   { --flag: #007aff; }
+  .swatch[data-colour='purple'] { --flag: #af52de; }
+  .swatch[data-colour='grey']   { --flag: #8e8e93; }
+
   /* The main action of every screen, inside the thumb's reach and clear of the home
      indicator. */
   .action-bar {

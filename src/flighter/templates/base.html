@@ -16,14 +16,12 @@
 <link rel="preload" href="/static/fonts/manrope-latin-var.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/jetbrains-mono-latin-var.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/flighter.css">
-<script src="/static/htmx.min.js" defer></script>
 <!-- The component registers itself with the core, so the core has to be first. -->
 <script src="/static/basecoat.min.js" defer></script>
 <script src="/static/basecoat-tabs.min.js" defer></script>
 </head>
 <body class="flex min-h-dvh flex-col">
 {% set here = request.url.path %}
-{% set review = review_count|default(0) %}
 <header class="sticky top-0 z-20 border-b bg-background/85 backdrop-blur"
         style="padding-top: env(safe-area-inset-top)">
   <nav class="mx-auto flex h-14 max-w-lg items-center gap-1 px-3" aria-label="Sections">
@@ -36,14 +34,6 @@
       </svg>
       Flights
     </a>
-    {% if review %}
-    <a class="btn" data-size="sm" href="/review"
-       data-variant="{{ 'secondary' if here.startswith('/review') else 'ghost' }}"
-       {% if here.startswith('/review') %}aria-current="page"{% endif %}>
-      Review
-      <span class="badge" data-variant="warn">{{ review }}</span>
-    </a>
-    {% endif %}
     <a class="btn ml-auto" data-size="sm" href="/settings"
        data-variant="{{ 'secondary' if here.startswith('/settings') else 'ghost' }}"
        {% if here.startswith('/settings') %}aria-current="page"{% endif %}>Settings</a>
@@ -70,15 +60,19 @@
     }
     function tick() {
       var now = Date.now();
+      var nearest = Infinity;
       document.querySelectorAll("time.countdown[data-to]").forEach(function (el) {
         var target = Date.parse(el.dataset.to);
         if (isNaN(target)) return;
+        nearest = Math.min(nearest, Math.abs(target - now));
         // A target in the past counts up: "20m ago" is a fact, "-20m" is arithmetic.
         el.textContent = figure(target - now) + (target < now ? " ago" : "");
       });
+      // Seconds are only on screen inside the last hour, so that is the only time this
+      // is allowed to wake the phone up every one of them.
+      setTimeout(tick, nearest < 3600000 ? 1000 : 60000);
     }
     tick();
-    setInterval(tick, 1000);
   })();
 
   // The shell is cached so the app opens from the home screen with no network. Flight

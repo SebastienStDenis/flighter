@@ -58,7 +58,7 @@ async def test_a_bad_value_is_refused_and_changes_nothing() -> None:
     before = prefs.current()
     session = FakeSession()
     with pytest.raises(ValidationError):
-        await prefs.save(session, {"aeroapi_rate_limit_per_minute": "lots"})  # type: ignore[arg-type]
+        await prefs.save(session, {"aeroapi_monthly_cap_usd": "lots"})  # type: ignore[arg-type]
     assert prefs.current() == before
 
 

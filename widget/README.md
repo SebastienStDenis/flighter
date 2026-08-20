@@ -23,9 +23,8 @@ script only changes when the layout changes.
    the widget to refresh. If it drops, the widget draws the last data it had rather than
    failing loudly.
 4. Run the script once inside the Scriptable app. It prompts for the widget token, which
-   is printed at the bottom of the server's settings page, and stores it in the iOS
-   Keychain. The token is never
-   written into the script and never leaves the Keychain.
+   is on the **Widget** tab of the server's settings page, and stores it in the iOS
+   Keychain. The token is never written into the script and never leaves the Keychain.
    After saving it, the same run renders a preview, which is how you check the hostname
    is right.
 5. Add the widget:

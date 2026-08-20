@@ -38,18 +38,9 @@ class Prefs(BaseModel):
     # Polling stops dead above this month-to-date estimate. The tier above Personal
     # carries a $100/month minimum, so the default leaves room under the $5 allowance.
     aeroapi_monthly_cap_usd: Decimal = Decimal("4.00")
-    # Documented limit is 10 result sets/minute; leave headroom for retries.
-    aeroapi_rate_limit_per_minute: int = 8
 
-    anthropic_model: str = "claude-sonnet-5"
-    # Below this an extraction lands in the review queue instead of the tracked list.
-    extraction_confidence_threshold: float = 0.85
-
-    # The Apple Mail flag colour that means "import this", and how often the IDLE that
-    # watches for it is re-issued. A silent connection is what an impatient server and a
-    # NAT table both drop, and five minutes is well inside what either tolerates.
+    # The Apple Mail flag colour that means "import this".
     imap_flag_colour: str = "grey"
-    imap_idle_seconds: int = 300
     # The collection URL of the iCloud calendar flights are written to, picked from the
     # ones the account offers on the settings page. The URL rather than the display name
     # because a calendar renamed in the Calendar app is still the same collection, and

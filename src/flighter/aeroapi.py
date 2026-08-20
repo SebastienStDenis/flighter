@@ -53,7 +53,7 @@ DEFAULT_PRICE_USD = Decimal("0.0050")
 # a hand-run check spends on top of the poller.
 RATE_LIMIT_PER_MINUTE = 8
 
-# Latch key in `kv`. The web app and the health page read this without touching AeroAPI.
+# Latch key in `kv`. The web app and the widget read this without touching AeroAPI.
 BREAKER_KEY = "aeroapi_budget_breaker"
 
 # How far a returned flight's scheduled departure may sit from the booking's before we
@@ -181,7 +181,7 @@ async def spend_month_to_date(session: AsyncSession) -> Decimal:
 
 
 async def budget_status(session: AsyncSession) -> BudgetStatus:
-    """What the health page, the UI banner and the widget all read.
+    """What the settings page, the UI banner and the widget all read.
 
     The latch is scoped to the month it was written in, which is the whole of the reset
     logic: on the 1st the stored month stops matching and the breaker is simply not
@@ -222,6 +222,17 @@ async def _trip(session: AsyncSession, status: BudgetStatus) -> None:
             },
         )
     )
+
+
+async def clear_breaker(session: AsyncSession) -> None:
+    """Let polling start again before the month turns over.
+
+    The latch is what keeps a restart stopped, so raising the cap without clearing it
+    would change the number on the settings page and nothing else.
+    """
+    row = await session.get(KV, BREAKER_KEY)
+    if row is not None:
+        await session.delete(row)
 
 
 async def budget_refusal(

@@ -50,6 +50,16 @@
 </div>
 {% endmacro %}
 
+{% macro save_row(forgettable) %}
+<div class="mt-4 flex">
+  <button class="btn" type="submit">Save</button>
+  {% if forgettable %}
+  <button class="btn ml-auto" data-variant="ghost" type="submit" name="forget" value="1">
+    Forget</button>
+  {% endif %}
+</div>
+{% endmacro %}
+
 {# One card, one service, one form: nothing is shown back, so each form covers exactly
    the credentials somebody is looking at when they press its button, and an empty box in
    it can only mean "leave this alone". #}
@@ -66,14 +76,13 @@
       {{ step(1, 'Apple ID', icloud_ready, 'The mailbox this reads and the calendar it writes') }}
       {{ step(2, 'FlightAware', flightaware_ready, 'Where the gate, the delay and the diversion come from') }}
       {{ step(3, 'Pushover', pushover_ready, 'How your phone is told when any of that changes') }}
-      {{ step(4, 'Calendar', calendar_ready, 'Which iCloud calendar to write to, under Preferences') }}
+      {{ step(4, 'Calendar', calendar_ready, 'Which iCloud calendar to write to, in the card below') }}
     </div>
   </section>
 </div>
 {% endif %}
 
-<form class="card" data-size="sm" method="post" action="/settings/credentials">
-  <input type="hidden" name="service" value="icloud">
+<div class="card" data-size="sm">
   <header>
     <h3>iCloud</h3>
     <div class="card-action">{{ status(icloud_ready) }}</div>
@@ -81,34 +90,57 @@
       the calendar they are written to.</p>
   </header>
   <section>
-    <fieldset class="fieldset gap-4">
-      <div role="group" class="field">
-        <label for="icloud_email">Apple ID</label>
-        <input type="email" id="icloud_email" name="icloud_email" class="font-mono"
-               autocomplete="username" placeholder="you@icloud.com"
-               value="{{ icloud_email }}">
-      </div>
-      <div role="group" class="field">
-        <label for="icloud_app_password">App-specific password</label>
-        {{ secret('icloud_app_password', connected['icloud_app_password'],
-                  'xxxx-xxxx-xxxx-xxxx') }}
-        <p id="icloud_app_password-help">Make one at
-          <a href="https://appleid.apple.com" target="_blank" rel="noopener">appleid.apple.com</a>
-          under <strong>Sign-In and Security &rarr; App-Specific Passwords</strong>. iCloud
-          refuses your Apple ID password on both mail and calendar, so this is not optional.
-          Changing your Apple ID password revokes every app-specific password, so make a new
-          one and enter it here when you do.</p>
-      </div>
-    </fieldset>
+    <form method="post" action="/settings/credentials">
+      <input type="hidden" name="service" value="icloud">
+      <fieldset class="fieldset gap-4">
+        <div role="group" class="field">
+          <label for="icloud_email">Apple ID</label>
+          <input type="email" id="icloud_email" name="icloud_email" class="font-mono"
+                 autocomplete="username" placeholder="you@icloud.com"
+                 value="{{ icloud_email }}">
+        </div>
+        <div role="group" class="field">
+          <label for="icloud_app_password">App-specific password</label>
+          {{ secret('icloud_app_password', connected['icloud_app_password'],
+                    'xxxx-xxxx-xxxx-xxxx') }}
+          <p id="icloud_app_password-help">Make one at
+            <a href="https://appleid.apple.com" target="_blank" rel="noopener">appleid.apple.com</a>
+            under <strong>Sign-In and Security &rarr; App-Specific Passwords</strong>. Make a
+            new one and paste it here whenever you change your Apple ID password.</p>
+        </div>
+      </fieldset>
+      {{ save_row(icloud_ready) }}
+    </form>
   </section>
-  <footer class="border-t">
-    <button class="btn" type="submit">Save</button>
-    {% if icloud_ready %}
-    <button class="btn ml-auto" data-variant="ghost" type="submit" name="forget" value="1">
-      Forget</button>
+  <section class="border-t pt-4">
+    {% if not icloud_ready %}
+    <p class="text-sm text-muted-foreground">Connect the Apple ID above to pick a calendar.</p>
+    {% elif calendar_error %}
+    <p class="text-sm text-muted-foreground">{{ calendar_error }} Whichever calendar was
+      picked before is still being written to.</p>
+    {% else %}
+    <form method="post" action="/settings">
+      <div role="group" class="field">
+        <label for="icloud_calendar_url">Calendar</label>
+        <select id="icloud_calendar_url" name="icloud_calendar_url"
+                aria-describedby="calendar-help">
+          <option value=""{{ ' selected' if not posted['icloud_calendar_url'] }}>
+            Do not write to a calendar</option>
+          {% for calendar in calendars %}
+          <option value="{{ calendar.url }}"
+                  {{- ' selected' if calendar.url == posted['icloud_calendar_url'] }}>
+            {{- calendar.name -}}</option>
+          {% endfor %}
+        </select>
+        <p id="calendar-help">Make one in the Calendar app first and give flights that one:
+          iCloud does not let this app create a calendar, and a bad sync is then undone by
+          deleting a calendar rather than by hunting among appointments.</p>
+      </div>
+      <div class="mt-4"><button class="btn" type="submit">Save calendar</button></div>
+    </form>
     {% endif %}
-  </footer>
-</form>
+  </section>
+</div>
 
 <form class="card mt-3" data-size="sm" method="post" action="/settings/credentials">
   <input type="hidden" name="service" value="flightaware">
@@ -123,10 +155,11 @@
       {{ secret('aeroapi_key', connected['aeroapi_key']) }}
       <p id="aeroapi_key-help">Sign up for the <strong>Personal</strong> tier at
         <a href="https://www.flightaware.com/aeroapi/signup/personal" target="_blank"
-           rel="noopener">flightaware.com/aeroapi</a>. It is free up to $5 a month; the tier
-        above it carries a $100 minimum, so the spend cap under Preferences is what stops
-        polling before you get there.</p>
+           rel="noopener">flightaware.com/aeroapi</a>, which is free up to $5 a month.</p>
     </div>
+    <p class="mt-3 text-sm {{ 'text-stop' if budget.tripped else 'text-muted-foreground' }}">
+      ${{ '%.2f'|format(budget.spend_usd) }} of ${{ '%.2f'|format(budget.cap_usd) }} this
+      month{{ ', so updates are paused' if budget.tripped }}.</p>
   </section>
   <footer class="border-t">
     <button class="btn" type="submit">Save</button>
@@ -151,15 +184,14 @@
         {{ secret('pushover_token', connected['pushover_token']) }}
         <p id="pushover_token-help">Register this service as an application at
           <a href="https://pushover.net/apps/build" target="_blank"
-             rel="noopener">pushover.net/apps/build</a> and copy the API token it hands back.</p>
+             rel="noopener">pushover.net/apps/build</a> and copy the API token.</p>
       </div>
       <div role="group" class="field">
         <label for="pushover_user_key">User key</label>
         {{ secret('pushover_user_key', connected['pushover_user_key']) }}
-        <p id="pushover_user_key-help">On the dashboard you land on after signing in at
+        <p id="pushover_user_key-help">On the dashboard at
           <a href="https://pushover.net" target="_blank" rel="noopener">pushover.net</a>.
-          Install the Pushover app on the phone and sign in as the same user; that is what
-          actually rings.</p>
+          Install the Pushover app on the phone and sign in as the same user.</p>
       </div>
     </fieldset>
   </section>
@@ -177,16 +209,16 @@
   <header>
     <h3>Anthropic</h3>
     <div class="card-action">{{ status(connected['anthropic_api_key'], 'Connected', 'Optional') }}</div>
-    <p>The fallback for airlines that embed no structured data. Everything else is parsed
-      for free, so leaving this empty costs you only those emails.</p>
+    <p>The fallback for airlines that embed no structured data. Leaving it empty costs you
+      only those emails.</p>
   </header>
   <section>
     <div role="group" class="field">
       <label for="anthropic_api_key">API key</label>
       {{ secret('anthropic_api_key', connected['anthropic_api_key']) }}
       <p id="anthropic_api_key-help">From
-        <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a>
-        under API keys. Only an email you flagged is ever sent.</p>
+        <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a>.
+        Only an email you flagged is ever sent.</p>
     </div>
   </section>
   <footer class="border-t">
@@ -201,39 +233,90 @@
 <div class="card mt-3" data-size="sm">
   <header>
     <h3>Checks</h3>
-    <p>Tries every connection in turn and names the one that is broken. The mail check
-      says how many emails are flagged and waiting; the Pushover check sends a real push.</p>
+    <p>Tries every connection in turn and names the one that is broken. The Pushover check
+      sends a real push.</p>
   </header>
   <section>
-    <button class="btn w-full" data-variant="outline" type="button" hx-post="/settings/checks"
-            hx-target="#checks" hx-swap="innerHTML" hx-indicator="#checks">Run checks</button>
+    <button class="btn w-full" data-variant="outline" type="button"
+            onclick="runChecks(this)">Run checks</button>
     <div id="checks"></div>
   </section>
 </div>
 
-<p class="mt-3 text-xs text-muted-foreground">Saved to
-  <code class="font-mono">data/secrets.env</code> in the volume, readable only by the app.
-  Nothing typed here is ever shown back: an empty box leaves what is stored alone, and
-  <strong>Forget</strong> is what clears it.</p>
+<p class="mt-3 text-xs text-muted-foreground">Nothing typed here is ever shown back: an
+  empty box leaves what is stored alone, and <strong>Forget</strong> is what clears it.</p>
 {% endset %}
 
 {% set preferences %}
 <form id="settings-form" method="post" action="/settings">
   <div class="card" data-size="sm">
-    <header><h3>This deployment</h3></header>
+    <header><h3>Address</h3></header>
     <section>
-      <fieldset class="fieldset gap-4">
+      <div role="group" class="field">
+        <label for="public_base_url">Public base URL</label>
+        <input type="url" id="public_base_url" name="public_base_url" required
+               class="font-mono" aria-describedby="url-help"
+               value="{{ posted['public_base_url'] }}">
+        <p id="url-help">The address your phone opens, from calendar entries, pushes and
+          the widget. It has to work when you are not at home.</p>
+      </div>
+    </section>
+  </div>
+
+  <div class="card mt-3" data-size="sm">
+    <header><h3>Import flag</h3></header>
+    <section>
+      <fieldset class="fieldset">
+        <legend class="sr-only">Import flag colour</legend>
+        <div class="grid grid-cols-3 gap-2">
+          {% for colour in flag_colours %}
+          <label class="flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-sm has-checked:border-primary has-checked:bg-accent">
+            <input type="radio" name="imap_flag_colour" value="{{ colour }}"
+                   {{- ' checked' if colour == posted['imap_flag_colour'] }}>
+            <span class="swatch" data-colour="{{ colour }}" aria-hidden="true"></span>
+            {{ colour|capitalize }}
+          </label>
+          {% endfor %}
+        </div>
+        <p class="text-sm text-muted-foreground">Give a booking email this colour of flag
+          and the flight appears on the board. Keep the colour for this and nothing else.</p>
+      </fieldset>
+      <div class="accordion mt-3">
+        <details>
+          <summary>
+            Why not red?
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m6 9 6 6 6-6"/>
+            </svg>
+          </summary>
+          <p class="text-sm text-muted-foreground">Red is the one colour Apple sends with
+            no marker at all, so it cannot be told apart from an ordinary flag. Apple also
+            documents that iOS Mail will not flag anything in the Promotions, Updates or
+            Transactions categories, and airline confirmations are Transactions; List View
+            has no such restriction.</p>
+        </details>
+      </div>
+    </section>
+  </div>
+
+  <div class="accordion mt-3 rounded-lg border px-3">
+    <details>
+      <summary>
+        Advanced
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m6 9 6 6 6-6"/>
+        </svg>
+      </summary>
+      <fieldset class="fieldset gap-4 pb-3">
         <div role="group" class="field">
-          <label for="public_base_url">Public base URL</label>
-          <input type="url" id="public_base_url" name="public_base_url" required
-                 class="font-mono" aria-describedby="url-help"
-                 value="{{ posted['public_base_url'] }}">
-          <p id="url-help">The address links in your calendar and on your phone open.
-            You are on <code class="font-mono">{{ this_origin }}</code>.
-            <button class="btn" data-variant="link" data-size="xs" type="button"
-                    onclick="document.getElementById('public_base_url').value = '{{ this_origin }}'">
-              Use that</button>
-          </p>
+          <label for="aeroapi_monthly_cap_usd">Monthly limit (USD)</label>
+          <input type="text" inputmode="decimal" class="font-mono" required
+                 id="aeroapi_monthly_cap_usd" name="aeroapi_monthly_cap_usd"
+                 aria-describedby="cap-help" value="{{ posted['aeroapi_monthly_cap_usd'] }}">
+          <p id="cap-help">Updates stop for the rest of the month once FlightAware costs
+            reach this.</p>
         </div>
         <div role="group" class="field">
           <label for="log_level">Log level</label>
@@ -244,117 +327,7 @@
           </select>
         </div>
       </fieldset>
-    </section>
-  </div>
-
-  <div class="card mt-3" data-size="sm">
-    <header>
-      <h3>Spend</h3>
-      <p>Updates stop for the rest of the month once FlightAware costs reach the limit.</p>
-    </header>
-    <section>
-      <div class="grid grid-cols-2 gap-3">
-        <div role="group" class="field">
-          <label for="aeroapi_monthly_cap_usd">Monthly limit (USD)</label>
-          <input type="text" inputmode="decimal" class="font-mono" required
-                 id="aeroapi_monthly_cap_usd" name="aeroapi_monthly_cap_usd"
-                 value="{{ posted['aeroapi_monthly_cap_usd'] }}">
-        </div>
-        <div role="group" class="field">
-          <label for="aeroapi_rate_limit_per_minute">Checks per minute</label>
-          <input type="number" min="1" max="10" class="font-mono" required
-                 id="aeroapi_rate_limit_per_minute" name="aeroapi_rate_limit_per_minute"
-                 value="{{ posted['aeroapi_rate_limit_per_minute'] }}">
-        </div>
-      </div>
-    </section>
-  </div>
-
-  <div class="card mt-3" data-size="sm">
-    <header>
-      <h3>Mail</h3>
-      <p>Only the emails you flag this colour are imported. Nothing else is read.</p>
-    </header>
-    <section>
-      <fieldset class="fieldset gap-4">
-        <div role="group" class="field">
-          <label for="imap_flag_colour">Import flag</label>
-          <select id="imap_flag_colour" name="imap_flag_colour" aria-describedby="flag-help">
-            {% for colour in flag_colours %}
-            <option value="{{ colour }}"{{ ' selected' if colour == posted['imap_flag_colour'] }}>
-              {{- colour|capitalize -}}</option>
-            {% endfor %}
-          </select>
-          <p id="flag-help">Give this colour to a booking email and the flight appears here.
-            On the iPhone: <strong>open the email, tap the More button, tap Flag</strong>, then
-            pick the colour. On the Mac: select the email and <strong>choose the colour from the
-            flag button in the toolbar</strong>. Once it is imported the flag comes off and the
-            email stays exactly where it was. Anything that failed keeps its flag, is tried twice
-            more and is then set aside on the health page for you to hand back; your phone is told
-            either way. Rename the flag to <em>flighter</em> in Mail on the Mac if you like - that
-            name is only a label on that Mac, and the colour is what this watches for. <strong>Red is not on the list</strong>: it is the one colour Apple
-            sends with no marker at all, so it cannot be told apart from an ordinary flag.</p>
-        </div>
-        <div class="grid grid-cols-3 gap-3">
-          <div role="group" class="field">
-            <label for="imap_idle_seconds">Check every (s)</label>
-            <input type="number" min="60" max="1740" id="imap_idle_seconds" class="font-mono"
-                   name="imap_idle_seconds" required value="{{ posted['imap_idle_seconds'] }}">
-          </div>
-          <div role="group" class="field">
-            <label for="extraction_confidence_threshold">Review below</label>
-            <input type="number" min="0" max="1" step="0.01" class="font-mono" required
-                   id="extraction_confidence_threshold" name="extraction_confidence_threshold"
-                   value="{{ posted['extraction_confidence_threshold'] }}">
-          </div>
-          <div role="group" class="field">
-            <label for="anthropic_model">Model</label>
-            <input type="text" id="anthropic_model" name="anthropic_model" required class="font-mono"
-                   value="{{ posted['anthropic_model'] }}">
-          </div>
-        </div>
-      </fieldset>
-    </section>
-  </div>
-
-  <div class="card mt-3" data-size="sm">
-    <header>
-      <h3>Calendar</h3>
-      <p>The iCloud calendar flights are written to. Make it in the Calendar app first;
-        iCloud does not let this app create one.</p>
-    </header>
-    <section>
-      <div role="group" class="field">
-        <label for="icloud_calendar_url">Calendar</label>
-        {% if calendar_error %}
-        <input type="hidden" name="icloud_calendar_url"
-               value="{{ posted['icloud_calendar_url'] }}">
-        <p class="text-sm text-destructive">{{ calendar_error }}</p>
-        <p id="calendar-help">The calendar cannot be listed, so it cannot be changed here
-          right now. Whichever one was picked before is still being written to. Fix the
-          connection under Connections and reload this page.</p>
-        {% else %}
-        <select id="icloud_calendar_url" name="icloud_calendar_url"
-                aria-describedby="calendar-help">
-          <option value=""{{ ' selected' if not posted['icloud_calendar_url'] }}>
-            Do not write to a calendar</option>
-          {% for calendar in calendars %}
-          <option value="{{ calendar.url }}"
-                  {{- ' selected' if calendar.url == posted['icloud_calendar_url'] }}>
-            {{- calendar.name -}}</option>
-          {% endfor %}
-          {% if posted['icloud_calendar_url'] and not calendar_name %}
-          <option value="{{ posted['icloud_calendar_url'] }}" selected>
-            The calendar that was picked, which is no longer on this account</option>
-          {% endif %}
-        </select>
-        <p id="calendar-help">Every calendar on the account that can hold events. Give
-          flights one of their own and a bad sync is undone by deleting one calendar
-          rather than hunting among appointments. Renaming it in the Calendar app is
-          safe: what is stored is the calendar itself, not what it is called.</p>
-        {% endif %}
-      </div>
-    </section>
+    </details>
   </div>
 
   <div class="action-bar">
@@ -370,8 +343,16 @@
     <p>Enter this the first time you run the widget on your phone.</p>
   </header>
   <section>
-    <pre class="overflow-x-auto rounded-md bg-muted p-3 font-mono text-sm">{{ widget_token }}</pre>
+    <pre id="widget-token"
+         class="overflow-x-auto rounded-md bg-muted p-3 font-mono text-sm">{{ widget_token }}</pre>
+    <button class="btn mt-3" data-variant="outline" data-size="sm" type="button"
+            onclick="copyToken(this)">Copy</button>
   </section>
+  <footer class="border-t">
+    <a class="btn" data-variant="link" data-size="sm" target="_blank" rel="noopener"
+       href="https://github.com/sebastienstdenis/flighter/blob/main/widget/README.md">
+      How to install it</a>
+  </footer>
 </div>
 {% endset %}
 
@@ -383,5 +364,24 @@
        {'tab': 'Preferences', 'panel': preferences},
        {'tab': 'Widget', 'panel': widget},
      ]) }}
+
+<script>
+  // The results are HTML the server already knows how to draw, so they are dropped in
+  // as they arrive rather than rebuilt here.
+  async function runChecks(button) {
+    button.disabled = true;
+    try {
+      const response = await fetch("/settings/checks", { method: "POST" });
+      document.getElementById("checks").innerHTML = await response.text();
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function copyToken(button) {
+    await navigator.clipboard.writeText(document.getElementById("widget-token").textContent.trim());
+    button.textContent = "Copied";
+  }
+</script>
 
 {% endblock %}

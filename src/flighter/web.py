@@ -1,55 +1,41 @@
-"""The pages a person actually looks at: the flight list, the flight, the queue.
+"""The pages a person actually looks at: the board, the flight, the settings.
 
 Everything is rendered on the server into one HTML response. The reader is standing in
-a terminal on hotel wifi wanting to know a gate number, so there is no framework to
-boot and nothing fetched after paint; htmx covers the handful of in-place mutations.
+a terminal on hotel wifi wanting to know a gate number, so there is no framework to boot
+and nothing fetched after paint. What a template is handed is built in `views`; this
+module is the routes and nothing else.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, fields
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import bookings as booking_repo
-from . import prefs
-from .aeroapi import budget_status
-from .airports import airport_tz, get_airport
-from .caldav import CalendarClient, CalendarUnavailable, Collection, calendar_link
+from . import ingest, prefs, views
+from .aeroapi import budget_status, clear_breaker
+from .airports import UnknownAirport
+from .caldav import CalendarClient, CalendarUnavailable, Collection
 from .checks import run_checks
 from .config import CREDENTIALS, SERVICES, Settings, write_secrets
 from .db import get_session
-from .ingest import list_set_aside
-from .ingest import retry as retry_ingest
 from .mail import FLAG_COLOURS
-from .models import KV, Airport, Booking, FlightEvent, FlightSnapshot
-from .phase import (
-    AIRBORNE,
-    DAY_OF,
-    DIVERTED,
-    LANDED,
-    TAXIING,
-    Phase,
-    arrival_estimate,
-    compute_phase,
-    departure_estimate,
-    landing_estimate,
-)
-from .timezones import format_local, to_local
-from .widget import countdown, phase_rank
+from .models import Booking, BookingSource, BookingStatus, FlightEvent
+from .phase import CANCELLED_NOTICE
+from .views import FlightView, build_views
 from .widget import router as widget_router
 
 log = logging.getLogger(__name__)
@@ -57,36 +43,21 @@ log = logging.getLogger(__name__)
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
 
-# What a value looks like when we simply do not have it. Gates and baggage belts stay
-# null until close to the event, so this is one of the most common things on the page.
-MISSING = "-"
+# What the board shows above the fold. Archived bookings are gone as far as the UI is
+# concerned, and a completed one belongs under Flown.
+BOARD_STATUSES = (BookingStatus.ACTIVE, BookingStatus.PENDING_REVIEW)
 
-# What the list shows. Archived bookings are gone as far as the UI is concerned, and
-# pending_review has a queue of its own.
-LISTED_STATUSES = ("active", "completed", "cancelled")
+# Flown flights are history, and history is not what this screen is for. Five is enough
+# to recognise the trip you just took and few enough to keep the query bounded.
+FLOWN_LIMIT = 5
 
-# The industry calls anything under a quarter hour on time, and so does its own on-time
-# statistic. Below this, a delay is noise nobody needs shouted at.
-DELAY_THRESHOLD = timedelta(minutes=15)
-
-# Flights this far apart are two journeys, not two legs of one. A same-day connection
-# and a red-eye that lands tomorrow both fall inside a day; a return a week later does
-# not, which is the split a person means by "trip".
-TRIP_GAP = timedelta(hours=24)
+# What the board's one-tap button adds to the monthly limit. Big enough to buy a few
+# hundred more polls, small enough that pressing it twice is not a surprise bill.
+LIMIT_STEP = Decimal("2.00")
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-
-
-async def review_count(request: Request, session: SessionDep) -> int:
-    """How many bookings are waiting to be checked. The nav shows it on every screen."""
-    pending = await booking_repo.list_bookings(session, statuses=("pending_review",))
-    request.state.review_count = len(pending)
-    return len(pending)
-
-
-ReviewDep = Annotated[int, Depends(review_count)]
 
 
 def _first_validation_message(exc: ValidationError) -> str:
@@ -94,392 +65,6 @@ def _first_validation_message(exc: ValidationError) -> str:
     error = exc.errors()[0]
     field = ".".join(str(part) for part in error["loc"]) or "value"
     return f"{field.replace('_', ' ')}: {error['msg']}"
-
-
-class Status(NamedTuple):
-    """A status is always a word plus a colour, never a colour on its own.
-
-    `tone` is the badge variant the templates hand to Basecoat: quiet, plan, live, ok,
-    warn or stop.
-    """
-
-    label: str
-    tone: str
-
-
-class Countdown(NamedTuple):
-    """A moment to count towards, and the words that go in front of it."""
-
-    label: str
-    target: datetime
-
-
-@dataclass(frozen=True)
-class FlightView:
-    """A booking, its newest snapshot and both airports, for a template.
-
-    Templates ask this for values rather than reaching into a snapshot, so "estimated
-    beats scheduled, actual beats estimated" is decided once instead of per page.
-    """
-
-    booking: Booking
-    snapshot: FlightSnapshot | None
-    origin: Airport | None
-    dest: Airport | None
-
-    @property
-    def flight_number(self) -> str:
-        return f"{self.booking.marketing_carrier}{self.booking.marketing_number}"
-
-    @property
-    def operating_flight(self) -> str | None:
-        booking = self.booking
-        if not booking.operating_carrier:
-            return None
-        return f"{booking.operating_carrier}{booking.operating_number or ''}"
-
-    @property
-    def origin_tz(self) -> str:
-        return self.origin.tz if self.origin else "UTC"
-
-    @property
-    def dest_tz(self) -> str:
-        return self.dest.tz if self.dest else "UTC"
-
-    @property
-    def scheduled_departure(self) -> datetime:
-        snap = self.snapshot
-        if snap is not None and snap.scheduled_out is not None:
-            return snap.scheduled_out
-        return self.booking.scheduled_departure_utc
-
-    @property
-    def scheduled_arrival(self) -> datetime | None:
-        snap = self.snapshot
-        if snap is not None and snap.scheduled_in is not None:
-            return snap.scheduled_in
-        return self.booking.scheduled_arrival_utc
-
-    @property
-    def departure(self) -> datetime:
-        snap = self.snapshot
-        if snap is not None:
-            return snap.actual_out or snap.estimated_out or self.scheduled_departure
-        return self.scheduled_departure
-
-    @property
-    def arrival(self) -> datetime | None:
-        snap = self.snapshot
-        if snap is not None:
-            return snap.actual_in or snap.estimated_in or self.scheduled_arrival
-        return self.scheduled_arrival
-
-    @property
-    def delay(self) -> timedelta:
-        return self.departure - self.scheduled_departure
-
-    @property
-    def departs(self) -> Timeline:
-        """The gate departure, resolved: what it is now and what it was booked as."""
-        snap = self.snapshot
-        return Timeline(
-            scheduled=self.scheduled_departure,
-            best=self.departure,
-            actual=snap.actual_out if snap else None,
-        )
-
-    @property
-    def arrives(self) -> Timeline:
-        """Gate arrival: the end of the trip, and what the calendar entry runs to."""
-        snap = self.snapshot
-        best = arrival_estimate(self.booking, snap)
-        return Timeline(
-            scheduled=self.scheduled_arrival,
-            best=best,
-            actual=snap.actual_in if snap else None,
-        )
-
-    @property
-    def lands(self) -> Timeline:
-        """Wheels down, which is the question once the doors are shut."""
-        snap = self.snapshot
-        return Timeline(
-            scheduled=snap.scheduled_on if snap else None,
-            best=landing_estimate(self.booking, snap) if snap else None,
-            actual=snap.actual_on if snap else None,
-        )
-
-    @property
-    def cancelled(self) -> bool:
-        snap = self.snapshot
-        return self.booking.status == "cancelled" or bool(snap is not None and snap.cancelled)
-
-    @property
-    def progress_percent(self) -> int | None:
-        return self.snapshot.progress_percent if self.snapshot else None
-
-    @property
-    def phase(self) -> Phase:
-        return compute_phase(self.booking, self.snapshot, datetime.now(UTC))
-
-    @property
-    def countdown(self) -> Countdown | None:
-        """The one number worth looking at, decided the same way the widget decides it."""
-        label, target = countdown(self.phase, self.booking, self.snapshot)
-        if label is None or target is None:
-            return None
-        return Countdown(label, target)
-
-    @property
-    def calendar_link(self) -> str | None:
-        """A way into the Calendar app, once this flight has an entry there.
-
-        Offered here rather than on the push about the import, which goes on pointing at
-        this page: the calendar entry is a copy of what was known when it was written,
-        and this page is where the gate and the delay are live.
-        """
-        if not self.booking.calendar_event_uid:
-            return None
-        return calendar_link(self.scheduled_departure, self.origin_tz)
-
-    @property
-    def gate(self) -> str | None:
-        """The gate to walk to now: the one it leaves from, then the one it arrives at."""
-        snap = self.snapshot
-        if snap is None:
-            return None
-        if self.phase in (AIRBORNE, DIVERTED, LANDED):
-            return snap.gate_destination
-        return snap.gate_origin
-
-    @property
-    def terminal(self) -> str | None:
-        snap = self.snapshot
-        if snap is None:
-            return None
-        if self.phase in (AIRBORNE, DIVERTED, LANDED):
-            return snap.terminal_destination
-        return snap.terminal_origin
-
-    @property
-    def status(self) -> Status:
-        snap = self.snapshot
-        if self.cancelled:
-            return Status("Cancelled", "stop")
-        if snap is not None and snap.diverted:
-            return Status("Diverted", "stop")
-        if self.booking.status == "pending_review":
-            return Status("Needs review", "warn")
-        if self.delay >= DELAY_THRESHOLD:
-            return Status(f"Delayed {duration(self.delay)}", "warn")
-        phase = self.phase
-        if phase == LANDED:
-            return Status("Landed", "ok")
-        if phase == AIRBORNE:
-            return Status("In the air", "live")
-        if self.booking.status == "completed":
-            return Status("Flown", "quiet")
-        if phase == TAXIING:
-            return Status("Taxiing", "live")
-        # Only a feed that has actually restated the departure can say it is on time;
-        # a booking on its own is just a plan.
-        if snap is not None and (snap.estimated_out or snap.scheduled_out):
-            return Status("On time", "ok")
-        if phase == DAY_OF:
-            return Status("Today", "plan")
-        return Status("Scheduled", "quiet")
-
-    @property
-    def ended(self) -> datetime:
-        """When this flight stopped being something to wait for.
-
-        The same rule `list_bookings(upcoming_only=True)` applies: a flight in the air
-        has departed but is still very much upcoming to the person meeting it.
-        """
-        arrival = self.arrival
-        if arrival is not None:
-            return arrival
-        # Nothing anywhere says when it lands, so assume the longest plausible hop
-        # rather than pinning a departed flight to the top of the list forever.
-        return self.departure + timedelta(hours=3)
-
-    def raw(self, *path: str) -> Any:
-        """A field out of the stored AeroAPI object, or None if it is not there.
-
-        Everything AeroAPI returns that is not worth its own column lives in `raw`, and
-        every one of those fields is optional in practice.
-        """
-        value: Any = self.snapshot.raw if self.snapshot else None
-        for key in path:
-            if not isinstance(value, dict):
-                return None
-            value = value.get(key)
-        return value
-
-
-@dataclass(frozen=True)
-class Timeline:
-    """One event's three-state answer, collapsed to what a reader needs to see.
-
-    Scheduled, estimated and actual describe the same moment at three levels of
-    certainty, so showing them as three rows makes a reader work out which is current.
-    This carries the best answer, and the original only when it is worth striking out.
-    """
-
-    scheduled: datetime | None
-    best: datetime | None
-    actual: datetime | None
-
-    @property
-    def confirmed(self) -> bool:
-        return self.actual is not None
-
-    @property
-    def moved(self) -> timedelta | None:
-        """How far the best answer has drifted from the schedule, when it matters."""
-        if self.scheduled is None or self.best is None:
-            return None
-        shift = self.best - self.scheduled
-        return shift if abs(shift) >= DELAY_THRESHOLD else None
-
-
-def duration(delta: timedelta) -> str:
-    """`45m`, `1h 20m`. Used for delays, so the caller carries the sign."""
-    minutes = int(abs(delta).total_seconds() // 60)
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
-
-
-def until(instant: datetime) -> str:
-    """A countdown as the server can render it, before the page's own clock takes over."""
-    return duration(instant - datetime.now(UTC))
-
-
-def day(instant: datetime, tz: str) -> str:
-    """`Sat 12 Sep`, the heading a trip is filed under."""
-    return to_local(instant, tz).strftime("%a %-d %b")
-
-
-def same_day(a: FlightView, b: FlightView) -> bool:
-    """Whether two flights leave on the same day, each read at its own airport."""
-    return (
-        to_local(a.scheduled_departure, a.origin_tz).date()
-        == to_local(b.scheduled_departure, b.origin_tz).date()
-    )
-
-
-def at(instant: datetime | None, tz: str, *, with_date: bool = False) -> str:
-    """A time at an airport, or the missing marker. Every time on every page uses it."""
-    if instant is None:
-        return MISSING
-    return format_local(instant, tz, with_date=with_date)
-
-
-def dash(value: Any) -> str:
-    if value is None or value == "":
-        return MISSING
-    return str(value)
-
-
-def altitude(value: Any) -> str:
-    """AeroAPI files altitude in hundreds of feet, which is to say a flight level."""
-    if not isinstance(value, int):
-        return MISSING
-    return f"FL{value:03d}" if value < 600 else f"{value:,} ft"
-
-
-def distance(value: Any) -> str:
-    """AeroAPI reports route distance in statute miles."""
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return MISSING
-    return f"{int(value):,} mi"
-
-
-def most_urgent(views: Sequence[FlightView]) -> int | None:
-    """The booking id the list leads with, ranked exactly as the lock screen ranks it."""
-    ranked = sorted(
-        views,
-        key=lambda view: (
-            phase_rank(view.phase),
-            departure_estimate(view.booking, view.snapshot),
-        ),
-    )
-    return ranked[0].booking.id if ranked else None
-
-
-def group_into_trips(views: Sequence[FlightView]) -> list[list[FlightView]]:
-    """Split departure-ordered flights into the runs that belong to one journey."""
-    trips: list[list[FlightView]] = []
-    for view in views:
-        if trips and view.departure - trips[-1][-1].ended <= TRIP_GAP:
-            trips[-1].append(view)
-        else:
-            trips.append([view])
-    return trips
-
-
-async def latest_snapshots(
-    session: AsyncSession, booking_ids: Sequence[int]
-) -> dict[int, FlightSnapshot]:
-    """The newest snapshot per booking, in one query.
-
-    Snapshots are append-only, so "newest row wins" is the whole of the read model.
-    """
-    if not booking_ids:
-        return {}
-    rows = await session.execute(
-        select(FlightSnapshot)
-        .where(FlightSnapshot.booking_id.in_(list(booking_ids)))
-        .order_by(FlightSnapshot.booking_id, FlightSnapshot.observed_at.desc())
-    )
-    newest: dict[int, FlightSnapshot] = {}
-    for snapshot in rows.scalars():
-        newest.setdefault(snapshot.booking_id, snapshot)
-    return newest
-
-
-async def build_views(session: AsyncSession, rows: Iterable[Booking]) -> list[FlightView]:
-    bookings = list(rows)
-    snapshots = await latest_snapshots(session, [booking.id for booking in bookings])
-
-    airports: dict[str, Airport | None] = {}
-    for booking in bookings:
-        for iata in (booking.origin_iata, booking.dest_iata):
-            if iata not in airports:
-                airports[iata] = await get_airport(session, iata)
-
-    views = [
-        FlightView(
-            booking=booking,
-            snapshot=snapshots.get(booking.id),
-            origin=airports.get(booking.origin_iata),
-            dest=airports.get(booking.dest_iata),
-        )
-        for booking in bookings
-    ]
-    views.sort(key=lambda view: view.scheduled_departure)
-    return views
-
-
-def local_input(instant: datetime | None, tz: str) -> str:
-    """A UTC instant as the wall clock its airport reads, for a datetime-local input.
-
-    The form never shows a UTC time. What the user typed is what the ticket says.
-    """
-    if instant is None:
-        return ""
-    return to_local(instant, tz).strftime("%Y-%m-%dT%H:%M")
-
-
-def parse_local(value: str) -> datetime | None:
-    """A datetime-local field as the naive wall clock it is. No zone is applied here."""
-    value = value.strip()
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
 
 
 @dataclass
@@ -498,11 +83,11 @@ class FlightForm:
 
     @property
     def departure(self) -> datetime | None:
-        return parse_local(self.departure_local)
+        return views.parse_local(self.departure_local)
 
     @property
     def arrival(self) -> datetime | None:
-        return parse_local(self.arrival_local)
+        return views.parse_local(self.arrival_local)
 
     def optional(self, name: str) -> str | None:
         value: str = getattr(self, name)
@@ -516,34 +101,45 @@ class FlightForm:
 FormDep = Annotated[FlightForm, Depends()]
 
 
+async def recently_flown(session: AsyncSession, limit: int) -> list[Booking]:
+    """The last few flights that have been taken, newest first and never more."""
+    rows = await session.execute(
+        select(Booking)
+        .where(Booking.status == BookingStatus.COMPLETED)
+        .order_by(Booking.scheduled_departure_utc.desc())
+        .limit(limit)
+    )
+    return list(rows.scalars())
+
+
 def create_app(settings: Settings) -> FastAPI:
-    app = FastAPI(title="flighter")
+    # Nothing here is an API anybody writes against, and a schema of every route is a
+    # map of the house for whatever reaches the port.
+    app = FastAPI(title="flighter", docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     app.include_router(widget_router)
 
     templates = Jinja2Templates(directory=str(TEMPLATES))
     templates.env.globals.update(
-        at=at,
-        dash=dash,
-        day=day,
-        same_day=same_day,
-        altitude=altitude,
-        distance=distance,
-        duration=duration,
-        local_input=local_input,
-        until=until,
-        missing=MISSING,
-        delay_threshold=DELAY_THRESHOLD,
+        at=views.at,
+        change_title=views.change_title,
+        change_value=views.change_value,
+        dash=views.dash,
+        day=views.day,
+        duration=views.duration,
+        local_input=views.local_input,
+        missing=views.MISSING,
+        same_day=views.same_day,
+        until=views.until,
     )
 
     def page(request: Request, name: str, context: dict[str, Any], **kwargs: Any) -> Response:
-        # The nav's Review item is on every screen, so it is filled in here rather than
-        # by each route. A page reached without the dependency simply does not show it.
-        context.setdefault("review_count", getattr(request.state, "review_count", 0))
         return templates.TemplateResponse(request, name, context, **kwargs)
 
-    def from_htmx(request: Request) -> bool:
-        return request.headers.get("HX-Request") == "true"
+    def error_page(request: Request, code: int, detail: str) -> Response:
+        if request.url.path.startswith(("/api/", "/healthz")):
+            return JSONResponse({"detail": detail}, status_code=code)
+        return page(request, "error.html", {"code": code, "detail": detail}, status_code=code)
 
     def flight_form_page(
         request: Request,
@@ -560,14 +156,17 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.exception_handler(HTTPException)
     async def on_http_error(request: Request, exc: HTTPException) -> Response:
-        if request.url.path.startswith(("/api/", "/healthz")):
-            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
-        return page(
-            request,
-            "error.html",
-            {"code": exc.status_code, "detail": exc.detail},
-            status_code=exc.status_code,
-        )
+        return error_page(request, exc.status_code, exc.detail)
+
+    @app.exception_handler(Exception)
+    async def on_unhandled_error(request: Request, exc: Exception) -> Response:
+        """A page rather than Starlette's plain text, and the traceback in the log.
+
+        Whatever broke is a bug here, so the reader gets a way back to the board and the
+        detail goes where it can be read: into the logs, not onto a screen in an airport.
+        """
+        log.exception("unhandled error serving %s", request.url.path)
+        return error_page(request, 500, "Something went wrong.")
 
     async def load(session: AsyncSession, booking_id: int) -> FlightView:
         booking = await booking_repo.get_booking(session, booking_id)
@@ -576,38 +175,69 @@ def create_app(settings: Settings) -> FastAPI:
         return (await build_views(session, [booking]))[0]
 
     @app.get("/")
-    async def index(request: Request, session: SessionDep, pending: ReviewDep) -> Response:
-        views = await build_views(
-            session, await booking_repo.list_bookings(session, statuses=LISTED_STATUSES)
+    async def board(request: Request, session: SessionDep) -> Response:
+        tracked = await build_views(
+            session, await booking_repo.list_bookings(session, statuses=BOARD_STATUSES)
         )
         now = datetime.now(UTC)
-        upcoming = [view for view in views if view.ended >= now]
-        past = [view for view in views if view.ended < now]
-        past.reverse()
+        upcoming = [view for view in tracked if view.ended >= now]
+        landed = [view for view in tracked if view.ended < now]
+        flown = await build_views(session, await recently_flown(session, FLOWN_LIMIT))
+        past = sorted(landed + flown, key=lambda view: view.scheduled_departure, reverse=True)
+        budget = await budget_status(session)
         return page(
             request,
             "index.html",
             {
-                "trips": group_into_trips(upcoming),
-                "past": past,
-                "pending": pending,
-                "urgent_id": most_urgent(upcoming),
-                "budget": await budget_status(session),
+                "trips": views.group_into_trips(upcoming),
+                "past": past[:FLOWN_LIMIT],
+                "urgent_id": views.most_urgent(upcoming),
+                "budget": budget,
+                "raised_cap": budget.cap_usd + LIMIT_STEP,
+                "set_aside": await ingest.list_set_aside(session),
                 # An empty board on a fresh deployment is not the same thing as an empty
                 # board on a working one, and only one of them is worth a signpost.
                 "set_up": settings.icloud_configured or settings.aeroapi_configured,
             },
         )
 
+    @app.post("/limit")
+    async def raise_limit(session: SessionDep) -> Response:
+        """Raise the monthly limit and start polling again, from the board.
+
+        The breaker latches so that a restart stays stopped, which means raising the cap
+        has to unlatch it too or nothing visibly happens.
+        """
+        cap = prefs.current().aeroapi_monthly_cap_usd + LIMIT_STEP
+        await prefs.save(session, {"aeroapi_monthly_cap_usd": str(cap)})
+        await clear_breaker(session)
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/mail/retry")
+    async def retry_message(session: SessionDep, message_id: Annotated[str, Form()]) -> Response:
+        """Hand one set-aside email back to the mail watcher.
+
+        Nothing is reprocessed here: the message is still flagged in Mail, so all this
+        does is clear the record of having given up and let the next sweep find it.
+        """
+        if await ingest.retry(session, message_id) is None:
+            raise HTTPException(status_code=404, detail="That email is not set aside.")
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/mail/ignore")
+    async def ignore_message(session: SessionDep, message_id: Annotated[str, Form()]) -> Response:
+        """Decide the email holds no flight, which is what takes its flag off in Mail."""
+        if await ingest.dismiss(session, message_id) is None:
+            raise HTTPException(status_code=404, detail="That email is not set aside.")
+        return RedirectResponse("/", status_code=303)
+
     # Declared before /f/{booking_id} so that "new" is never read as an id.
     @app.get("/f/new")
-    async def new_flight(request: Request, pending: ReviewDep) -> Response:
+    async def new_flight(request: Request) -> Response:
         return flight_form_page(request, view=None)
 
     @app.post("/f")
-    async def create_flight(
-        request: Request, session: SessionDep, form: FormDep, pending: ReviewDep
-    ) -> Response:
+    async def create_flight(request: Request, session: SessionDep, form: FormDep) -> Response:
         if form.departure is None:
             return flight_form_page(
                 request, None, "Departure needs a date and a time.", form.as_posted()
@@ -624,8 +254,10 @@ def create_app(settings: Settings) -> FastAPI:
                 confirmation_code=form.optional("confirmation_code"),
                 seat=form.optional("seat"),
                 notes=form.optional("notes"),
-                source="manual",
+                source=BookingSource.MANUAL,
             )
+        except UnknownAirport as exc:
+            return flight_form_page(request, None, _unknown_airport(exc), form.as_posted())
         except IntegrityError:
             # The dedupe index caught a flight already on the list. Roll back or every
             # query behind the re-rendered form fails too.
@@ -636,58 +268,51 @@ def create_app(settings: Settings) -> FastAPI:
         return RedirectResponse(f"/f/{booking.id}", status_code=303)
 
     @app.get("/f/{booking_id}")
-    async def detail(
-        request: Request, session: SessionDep, booking_id: int, pending: ReviewDep
-    ) -> Response:
+    async def detail(request: Request, session: SessionDep, booking_id: int) -> Response:
         view = await load(session, booking_id)
         events = await session.execute(
             select(FlightEvent)
             .where(FlightEvent.booking_id == booking_id)
             .order_by(FlightEvent.occurred_at.desc())
         )
-        return page(request, "detail.html", {"v": view, "events": list(events.scalars())})
+        return page(
+            request,
+            "detail.html",
+            {"v": view, "events": list(events.scalars()), "cancelled_notice": CANCELLED_NOTICE},
+        )
 
     @app.get("/f/{booking_id}/edit")
-    async def edit_flight(
-        request: Request, session: SessionDep, booking_id: int, pending: ReviewDep
-    ) -> Response:
+    async def edit_flight(request: Request, session: SessionDep, booking_id: int) -> Response:
         return flight_form_page(request, await load(session, booking_id))
 
     @app.post("/f/{booking_id}")
     async def update_flight(
-        request: Request, session: SessionDep, booking_id: int, form: FormDep, pending: ReviewDep
+        request: Request, session: SessionDep, booking_id: int, form: FormDep
     ) -> Response:
         view = await load(session, booking_id)
         if form.departure is None:
             return flight_form_page(
                 request, view, "Departure needs a date and a time.", form.as_posted()
             )
-        origin = form.origin_iata.strip().upper()
-        dest = form.dest_iata.strip().upper()
-        # update_booking takes column values verbatim, so the wall clock has to become
-        # UTC here - through the booking layer's own conversion, never by hand.
-        departure_utc, arrival_utc = booking_repo.to_booking_times(
-            form.departure,
-            await airport_tz(session, origin),
-            form.arrival,
-            await airport_tz(session, dest),
-        )
         try:
+            departure_utc, arrival_utc = await views.utc_times(
+                session, form.origin_iata, form.dest_iata, form.departure, form.arrival
+            )
             await booking_repo.update_booking(
                 session,
                 booking_id,
-                # Upper-cased to match what create_booking stores: the dedupe index
-                # compares these literally, and "aa" would read as another airline.
-                marketing_carrier=form.marketing_carrier.strip().upper(),
-                marketing_number=form.marketing_number.strip(),
-                origin_iata=origin,
-                dest_iata=dest,
+                marketing_carrier=form.marketing_carrier,
+                marketing_number=form.marketing_number,
+                origin_iata=form.origin_iata,
+                dest_iata=form.dest_iata,
                 scheduled_departure_utc=departure_utc,
                 scheduled_arrival_utc=arrival_utc,
                 confirmation_code=form.optional("confirmation_code"),
                 seat=form.optional("seat"),
                 notes=form.optional("notes"),
             )
+        except UnknownAirport as exc:
+            return flight_form_page(request, view, _unknown_airport(exc), form.as_posted())
         except IntegrityError:
             await session.rollback()
             return flight_form_page(
@@ -695,10 +320,20 @@ def create_app(settings: Settings) -> FastAPI:
             )
         return RedirectResponse(f"/f/{booking_id}", status_code=303)
 
+    @app.post("/f/{booking_id}/keep")
+    async def keep_flight(session: SessionDep, booking_id: int) -> Response:
+        """Confirm a booking we were unsure about, which is what starts it being polled."""
+        booking = await booking_repo.update_booking(
+            session, booking_id, status=BookingStatus.ACTIVE
+        )
+        if booking is None:
+            raise HTTPException(status_code=404, detail="No such flight.")
+        return RedirectResponse(f"/f/{booking_id}", status_code=303)
+
     # An HTML form can only send GET or POST, so removal is a POST to its own path
     # rather than DELETE /f/{id}.
     @app.post("/f/{booking_id}/delete")
-    async def delete_flight(request: Request, session: SessionDep, booking_id: int) -> Response:
+    async def delete_flight(session: SessionDep, booking_id: int) -> Response:
         booking = await booking_repo.get_booking(session, booking_id)
         if booking is None:
             raise HTTPException(status_code=404, detail="No such flight.")
@@ -707,42 +342,23 @@ def create_app(settings: Settings) -> FastAPI:
                 await CalendarClient(settings).delete(booking)
             except Exception:
                 # The booking still goes. An orphaned calendar event is worth less than
-                # a list that refuses to let go of a trip that is not happening.
+                # a board that refuses to let go of a trip that is not happening.
                 log.warning("could not delete the calendar event for booking %s", booking_id)
         await booking_repo.delete_booking(session, booking_id)
-        if from_htmx(request):
-            return Response(status_code=200)
         return RedirectResponse("/", status_code=303)
 
-    @app.get("/review")
-    async def review(request: Request, session: SessionDep, pending: ReviewDep) -> Response:
-        rows = await booking_repo.list_bookings(session, statuses=("pending_review",))
-        return page(request, "review.html", {"views": await build_views(session, rows)})
-
-    @app.post("/review/{booking_id}/accept")
-    async def accept(request: Request, session: SessionDep, booking_id: int) -> Response:
-        if await booking_repo.update_booking(session, booking_id, status="active") is None:
-            raise HTTPException(status_code=404, detail="No such flight.")
-        if from_htmx(request):
-            return Response(status_code=200)
-        return RedirectResponse("/review", status_code=303)
-
-    @app.post("/review/{booking_id}/reject")
-    async def reject(request: Request, session: SessionDep, booking_id: int) -> Response:
-        # Archived rather than deleted, the same as any other removal: the dedupe index
-        # skips archived rows, so the same email may be extracted again later.
-        if await booking_repo.delete_booking(session, booking_id) is None:
-            raise HTTPException(status_code=404, detail="No such flight.")
-        if from_htmx(request):
-            return Response(status_code=200)
-        return RedirectResponse("/review", status_code=303)
-
-    async def settings_context(request: Request) -> dict[str, Any]:
+    async def settings_context(request: Request, session: AsyncSession) -> dict[str, Any]:
         current = prefs.current()
-        calendars, calendar_error = await offered_calendars()
+        this_origin = str(request.base_url).rstrip("/")
+        posted = current.model_dump(mode="json")
+        # Whatever the page was opened on is almost always the right answer, so a
+        # deployment nobody has told yet is shown that rather than the default.
+        if current.public_base_url == prefs.Prefs.model_fields["public_base_url"].default:
+            posted["public_base_url"] = this_origin
+        calendars, calendar_error = await offered_calendars(settings.icloud_configured)
         return {
             "prefs": current,
-            "posted": current.model_dump(mode="json"),
+            "posted": posted,
             # Booleans, never values: a stored credential is never rendered back into the
             # page. The Apple ID is the exception, because it names the account rather
             # than proving anything about it.
@@ -753,66 +369,62 @@ def create_app(settings: Settings) -> FastAPI:
             "flag_colours": tuple(FLAG_COLOURS),
             "calendars": calendars,
             "calendar_error": calendar_error,
-            "calendar_name": next(
-                (c.name for c in calendars if c.url == current.icloud_calendar_url), ""
-            ),
-            # What the browser is talking to right now, offered as the public base URL
-            # because on a first visit it is almost always the right answer.
-            "this_origin": str(request.base_url).rstrip("/"),
+            "budget": await budget_status(session),
             "saved": "saved" in request.query_params,
             "error": None,
         }
 
-    async def offered_calendars() -> tuple[list[Collection], str | None]:
+    async def offered_calendars(configured: bool) -> tuple[list[Collection], str | None]:
         """The account's calendars for the picker, or why there are none to offer.
 
-        Discovery is a network call on a page render, so it is allowed to fail: a
-        settings page that says iCloud cannot be reached is worth far more than one that
-        will not open, and every other preference on it is still editable.
+        Discovery is a network call on a page render, so it is only made once there are
+        credentials for it to use, and it is allowed to fail: a settings page that says
+        iCloud cannot be reached is worth far more than one that will not open.
         """
+        if not configured:
+            return [], None
         try:
             return await CalendarClient(settings).calendars(), None
-        except CalendarUnavailable as exc:
-            return [], str(exc)
-        except Exception as exc:
+        except CalendarUnavailable:
             log.warning("could not list the iCloud calendars", exc_info=True)
-            return [], f"{type(exc).__name__}: {exc}"
+            return [], "iCloud did not answer, so its calendars cannot be listed right now."
+        except Exception:
+            log.warning("could not list the iCloud calendars", exc_info=True)
+            return [], "Something went wrong listing the calendars on this account."
 
     @app.get("/settings")
-    async def settings_page(request: Request, pending: ReviewDep) -> Response:
-        return page(request, "settings.html", await settings_context(request))
+    async def settings_page(request: Request, session: SessionDep) -> Response:
+        return page(request, "settings.html", await settings_context(request, session))
 
     @app.post("/settings")
     async def save_settings(
         request: Request,
         session: SessionDep,
-        public_base_url: Annotated[str, Form()],
-        log_level: Annotated[str, Form()],
-        aeroapi_monthly_cap_usd: Annotated[str, Form()],
-        aeroapi_rate_limit_per_minute: Annotated[str, Form()],
-        anthropic_model: Annotated[str, Form()],
-        extraction_confidence_threshold: Annotated[str, Form()],
-        imap_flag_colour: Annotated[str, Form()],
-        imap_idle_seconds: Annotated[str, Form()],
-        icloud_calendar_url: Annotated[str, Form()] = "",
+        public_base_url: Annotated[str | None, Form()] = None,
+        log_level: Annotated[str | None, Form()] = None,
+        aeroapi_monthly_cap_usd: Annotated[str | None, Form()] = None,
+        imap_flag_colour: Annotated[str | None, Form()] = None,
+        icloud_calendar_url: Annotated[str | None, Form()] = None,
     ) -> Response:
-        posted = {
-            "public_base_url": public_base_url.strip(),
-            "log_level": log_level.strip().upper(),
-            "aeroapi_monthly_cap_usd": aeroapi_monthly_cap_usd.strip(),
-            "aeroapi_rate_limit_per_minute": aeroapi_rate_limit_per_minute.strip(),
-            "anthropic_model": anthropic_model.strip(),
-            "extraction_confidence_threshold": extraction_confidence_threshold.strip(),
-            "imap_flag_colour": imap_flag_colour.strip(),
-            "imap_idle_seconds": imap_idle_seconds.strip(),
-            "icloud_calendar_url": icloud_calendar_url.strip(),
+        """Save whichever preferences were posted.
+
+        Each card is its own form, so what arrives is a slice rather than the lot, and
+        a field nobody sent is one nobody touched.
+        """
+        entered = {
+            "public_base_url": public_base_url,
+            "log_level": log_level.upper() if log_level is not None else None,
+            "aeroapi_monthly_cap_usd": aeroapi_monthly_cap_usd,
+            "imap_flag_colour": imap_flag_colour,
+            "icloud_calendar_url": icloud_calendar_url,
         }
+        posted = {name: value.strip() for name, value in entered.items() if value is not None}
         try:
             updated = await prefs.save(session, posted)
         except ValidationError as exc:
-            context = await settings_context(request)
+            context = await settings_context(request, session)
             context["error"] = _first_validation_message(exc)
-            context["posted"] = posted
+            context["posted"] = context["posted"] | posted
             return page(request, "settings.html", context, status_code=400)
         # Applied here rather than only at boot, so turning the logs up to find out what
         # is going wrong does not need the restart that would clear the evidence.
@@ -847,58 +459,14 @@ def create_app(settings: Settings) -> FastAPI:
             "pushover_token": pushover_token,
             "pushover_user_key": pushover_user_key,
         }
-        if forget:
-            write_secrets(dict.fromkeys(found.fields, ""))
-        else:
-            # An empty box means "leave this one alone", because the page never shows a
-            # stored credential back for it to have been left in. Forget is what clears.
-            changed = {
-                name: entered[name].strip() for name in found.fields if entered[name].strip()
-            }
-            if changed:
-                write_secrets(changed)
+        changed = _merged(found.fields, entered, forget=bool(forget))
+        if changed:
+            write_secrets(changed)
         return RedirectResponse("/settings?saved=1", status_code=303)
 
     @app.post("/settings/checks")
     async def run_checks_now(request: Request) -> Response:
         return page(request, "checks.html", {"results": await run_checks(settings)})
-
-    @app.get("/health")
-    async def health(request: Request, session: SessionDep, pending: ReviewDep) -> Response:
-        counts = await session.execute(
-            select(Booking.status, func.count()).group_by(Booking.status)
-        )
-        last_snapshot = await session.scalar(select(func.max(FlightSnapshot.observed_at)))
-        state = await session.execute(select(KV).order_by(KV.key))
-        return page(
-            request,
-            "health.html",
-            {
-                "counts": {status: count for status, count in counts.all()},
-                "last_snapshot": last_snapshot,
-                "budget": await budget_status(session),
-                # The poller and the mail watcher each own their own keys in here, so the
-                # page reports what is in the table rather than asserting a shape.
-                "state": [
-                    (row.key, json.dumps(row.value, indent=2, default=str))
-                    for row in state.scalars()
-                ],
-                "set_aside": await list_set_aside(session),
-                "settings": settings,
-                "prefs": prefs.current(),
-            },
-        )
-
-    @app.post("/health/retry")
-    async def retry_message(session: SessionDep, message_id: Annotated[str, Form()]) -> Response:
-        """Hand one set-aside email back to the mail watcher.
-
-        Nothing is reprocessed here: the message is still flagged in Mail, so all this
-        does is clear the record of having given up and let the next sweep find it.
-        """
-        if await retry_ingest(session, message_id) is None:
-            raise HTTPException(status_code=404, detail="That email is not set aside.")
-        return RedirectResponse("/health", status_code=303)
 
     # A service worker may only control paths below its own, so this one is served from
     # the root even though it lives with the rest of the static files.
@@ -912,3 +480,18 @@ def create_app(settings: Settings) -> FastAPI:
         return JSONResponse({"status": "ok"})
 
     return app
+
+
+def _unknown_airport(exc: UnknownAirport) -> str:
+    return f"{exc.iata} is not an airport we know."
+
+
+def _merged(names: tuple[str, ...], entered: dict[str, str], *, forget: bool) -> dict[str, str]:
+    """What to write for one service: what was typed, or blanks to clear it.
+
+    An empty box means "leave this one alone", because the page never shows a stored
+    credential back for it to have been left in. Forget is what clears.
+    """
+    if forget:
+        return dict.fromkeys(names, "")
+    return {name: entered[name].strip() for name in names if entered[name].strip()}

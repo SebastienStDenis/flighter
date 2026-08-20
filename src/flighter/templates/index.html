@@ -2,6 +2,8 @@
 {% import "macros.html" as m %}
 {% block content %}
 
+<h1 class="sr-only">Flights</h1>
+
 {% if budget.tripped %}
 <div class="alert mb-3" data-variant="destructive" role="status">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -9,21 +11,40 @@
     <path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/>
   </svg>
   <strong>Updates paused</strong>
-  <section><p>Times below are the last ones we saw. Raise the monthly limit in Settings to
-    start them again.</p></section>
+  <section>
+    <p>FlightAware spend hit ${{ '%.2f'|format(budget.spend_usd) }} this month, so the
+      times below are the last ones we saw.</p>
+    <form method="post" action="/limit">
+      <button class="btn mt-2" data-variant="outline" data-size="sm" type="submit">
+        Raise limit to ${{ '%.2f'|format(raised_cap) }}</button>
+    </form>
+  </section>
 </div>
 {% endif %}
 
-{% if pending %}
-<a class="alert mb-3 transition-colors hover:bg-muted" href="/review">
+{% for row in set_aside %}
+<div class="alert mb-3" data-variant="destructive" role="status">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="10"/>
   </svg>
-  <strong>{{ pending }} booking{{ 's' if pending != 1 }} to check</strong>
-  <section><p>Tap to look them over.</p></section>
-</a>
-{% endif %}
+  <strong>Could not read {{ row.subject or 'an email' }}</strong>
+  <section>
+    <p>It still carries its flag in Mail.</p>
+    <div class="mt-2 flex gap-2">
+      <form method="post" action="/mail/retry">
+        <input type="hidden" name="message_id" value="{{ row.message_id }}">
+        <button class="btn" data-variant="outline" data-size="sm" type="submit">
+          Try again</button>
+      </form>
+      <form method="post" action="/mail/ignore">
+        <input type="hidden" name="message_id" value="{{ row.message_id }}">
+        <button class="btn" data-variant="ghost" data-size="sm" type="submit">Ignore</button>
+      </form>
+    </div>
+  </section>
+</div>
+{% endfor %}
 
 {% if not trips and not past %}
 <section class="empty mt-8">

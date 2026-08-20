@@ -10,12 +10,14 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from flighter import widget
 from flighter.aeroapi import BREAKER_KEY, month_key
 from flighter.config import Settings, get_settings
 from flighter.db import get_session
-from flighter.models import KV, Booking, FlightSnapshot
+from flighter.models import KV, Airport, Booking, FlightSnapshot
+from flighter.phase import CANCELLED_NOTICE
 from flighter.widget import (
     FlightRow,
     authorize,
@@ -56,6 +58,11 @@ def payload(rows: Sequence[FlightRow], settings: Settings, **kwargs: Any) -> dic
     return built.model_dump(mode="json")
 
 
+def _id(flight: dict[str, Any]) -> int:
+    """Which booking a row is about. The script follows the link rather than an id."""
+    return int(flight["detail_url"].rsplit("/", 1)[1])
+
+
 # --- payload shaping ------------------------------------------------------------------
 
 
@@ -63,7 +70,6 @@ def test_upcoming_flight(settings: Settings) -> None:
     far = booking(scheduled_departure_utc=NOW + timedelta(days=6))
     flight = payload([(far, None)], settings)["flights"][0]
     assert flight == {
-        "id": 42,
         "detail_url": "https://flights.example.com/f/42",
         "phase": "upcoming",
         "title": "DL1234  JFK → LAX",
@@ -153,9 +159,10 @@ def test_landed_shows_the_carousel_and_no_countdown(settings: Settings) -> None:
 
 
 def test_cancelled_has_nothing_to_count_down_to(settings: Settings) -> None:
+    """FlightAware's flag means "no longer tracked", so the widget says who said it."""
     flight = payload([(booking(), snapshot(cancelled=True))], settings)["flights"][0]
     assert flight["phase"] == "cancelled"
-    assert flight["subtitle"] == "Cancelled"
+    assert flight["subtitle"] == CANCELLED_NOTICE
     assert flight["countdown_label"] is None
     assert flight["countdown_to"] is None
 
@@ -197,7 +204,7 @@ def test_every_instant_is_utc_with_a_z(settings: Settings) -> None:
     ]
     body = payload(rows, settings)
     found = list(_instants(body))
-    assert len(found) == 4  # generated_at plus one countdown per flight
+    assert len(found) == 3  # one countdown per flight
     assert all(instant.endswith("Z") for instant in found)
 
 
@@ -228,7 +235,7 @@ def test_in_progress_first_then_soonest_capped_at_three(settings: Settings) -> N
     body = payload(rows, settings)
     # Airborne, then departing in ten minutes, then tomorrow. The landed flight and the
     # one three days out lose their seats.
-    assert [flight["id"] for flight in body["flights"]] == [3, 5, 1]
+    assert [_id(flight) for flight in body["flights"]] == [3, 5, 1]
 
 
 def test_landed_sinks_below_what_is_still_coming(settings: Settings) -> None:
@@ -239,7 +246,7 @@ def test_landed_sinks_below_what_is_still_coming(settings: Settings) -> None:
         ),
         (booking(id=2, scheduled_departure_utc=NOW + timedelta(days=3)), None),
     ]
-    assert [flight["id"] for flight in payload(rows, settings)["flights"]] == [2, 4]
+    assert [_id(flight) for flight in payload(rows, settings)["flights"]] == [2, 4]
 
 
 def test_refresh_slows_down_when_nothing_is_close(settings: Settings) -> None:
@@ -358,7 +365,6 @@ def test_bearer_header_is_accepted(client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["flights"][0]["title"] == "DL1234  JFK → LAX"
-    assert body["generated_at"].endswith("Z")
 
 
 def test_query_token_is_accepted(client: TestClient) -> None:
@@ -427,3 +433,34 @@ def test_a_late_pushback_stops_counting_once_the_flight_is_off_the_ground(
     )
     flight = payload([(booking(), recovered)], settings)["flights"][0]
     assert flight["delayed"] is False
+
+
+# --- the query ------------------------------------------------------------------------
+
+
+async def test_the_widget_reads_the_newest_snapshot_of_each_flight(
+    database: async_sessionmaker[AsyncSession],
+) -> None:
+    """Snapshots are append-only, and SQLite has no DISTINCT ON to lean on."""
+    async with database() as session:
+        session.add_all(
+            [
+                Airport(iata="JFK", name="JFK", latitude=0.0, longitude=0.0, tz="UTC"),
+                Airport(iata="LAX", name="LAX", latitude=0.0, longitude=0.0, tz="UTC"),
+            ]
+        )
+        session.add(booking(departure_local_date=DEPARTURE.date()))
+        await session.flush()
+        session.add_all(
+            [
+                snapshot(observed_at=NOW - timedelta(hours=3), gate_origin="B1"),
+                snapshot(observed_at=NOW - timedelta(minutes=5), gate_origin="B22"),
+            ]
+        )
+        await session.flush()
+
+        rows = await widget.load_flight_rows(session, NOW)
+
+    assert [(row.id, latest.gate_origin if latest else None) for row, latest in rows] == [
+        (42, "B22")
+    ]
