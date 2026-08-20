@@ -301,6 +301,23 @@ async def retry(session: AsyncSession, message_id: str) -> IngestLog | None:
     return row
 
 
+async def dismiss(session: AsyncSession, message_id: str) -> IngestLog | None:
+    """Give up on a set-aside message for good, from the page rather than from Mail.
+
+    Recording it as holding no flight is what makes the next sweep take the flag off
+    without reading the email again: a decided row is never re-extracted.
+    """
+    row = await session.get(IngestLog, message_id)
+    if row is None or not set_aside(row):
+        return None
+    row.outcome = "no_flight"
+    row.error = None
+    row.attempts = 0
+    row.retry_at = None
+    await session.flush()
+    return row
+
+
 # -- the loop ------------------------------------------------------------------------
 
 
