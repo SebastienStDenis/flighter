@@ -108,11 +108,21 @@ git clone https://github.com/sebastienstdenis/flight-tracker
 cd flight-tracker
 cp .env.example .env
 $EDITOR .env
+docker compose pull          # fetch the published image instead of compiling it here
 docker compose up -d
 docker compose exec app flight-tracker migrate
 docker compose exec app flight-tracker seed-airports
 docker compose exec app flight-tracker check
 ```
+
+Pushing to `main` publishes a multi-arch image to
+`ghcr.io/sebastienstdenis/flight-tracker:latest`, so updating the home stack is
+`docker compose pull && docker compose up -d`. The package GitHub creates on the first
+publish is **private**: either flip it to public in the package settings, or run
+`docker login ghcr.io` once on the desktop with a token carrying `read:packages`, or the
+pull fails with an unhelpful "denied".
+
+To build locally instead of pulling, `docker compose build` still works from a checkout.
 
 `check` exercises Postgres, AeroAPI, Gmail, Google Calendar and ntfy in turn and tells you
 which one is broken, which is the question you will actually have.
