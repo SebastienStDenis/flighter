@@ -17,6 +17,8 @@
 <link rel="preload" href="/static/fonts/jetbrains-mono-latin-var.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/flighter.css">
 <script src="/static/htmx.min.js" defer></script>
+<!-- The component registers itself with the core, so the core has to be first. -->
+<script src="/static/basecoat.min.js" defer></script>
 <script src="/static/basecoat-tabs.min.js" defer></script>
 </head>
 <body class="flex min-h-dvh flex-col">

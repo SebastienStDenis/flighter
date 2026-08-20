@@ -3,10 +3,11 @@
 // worse than a page that says it could not reach the server, so every navigation and
 // every API call goes to the network and is never stored.
 
-const SHELL = "shell-v3";
+const SHELL = "shell-v4";
 const ASSETS = [
   "/static/flighter.css",
   "/static/htmx.min.js",
+  "/static/basecoat.min.js",
   "/static/basecoat-tabs.min.js",
   "/static/fonts/manrope-latin-var.woff2",
   "/static/fonts/jetbrains-mono-latin-var.woff2",
