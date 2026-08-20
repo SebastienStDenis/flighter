@@ -2,7 +2,7 @@
 
 Tests here are deliberately database-free: everything worth testing in this project is a
 pure function over data (timezone normalisation, poll cadence, snapshot diffing, payload
-shaping), and a suite that needs a live Postgres is a suite that stops being run.
+shaping), and a suite that needs a database on disk is a suite that stops being run.
 """
 
 from __future__ import annotations

@@ -162,7 +162,12 @@ async def poll_once() -> int:
 
 
 async def _claim_due(session: AsyncSession, now: datetime) -> list[Booking]:
-    """Lock a small batch so a second worker, or a second tick, cannot double-spend."""
+    """The next small batch of bookings that are due.
+
+    No row locking, and none needed: the whole tick is one write transaction, and SQLite
+    admits one writer at a time, so a second tick cannot read this batch until the first
+    has finished rescheduling it and committed.
+    """
     result = await session.scalars(
         select(Booking)
         .where(
@@ -172,7 +177,6 @@ async def _claim_due(session: AsyncSession, now: datetime) -> list[Booking]:
         )
         .order_by(Booking.next_poll_at)
         .limit(BATCH_SIZE)
-        .with_for_update(skip_locked=True)
     )
     return list(result)
 

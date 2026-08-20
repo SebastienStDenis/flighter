@@ -8,14 +8,15 @@ would silently erase events.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import (
-    BigInteger,
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
+    Dialect,
     Float,
     ForeignKey,
     Index,
@@ -23,10 +24,10 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    TypeDecorator,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 BOOKING_STATUSES = ("pending_review", "active", "completed", "cancelled", "archived")
@@ -38,8 +39,41 @@ class Base(DeclarativeBase):
     pass
 
 
+class UtcDateTime(TypeDecorator[datetime]):
+    """A timestamp that is UTC on both sides of the connection, or it does not go in.
+
+    SQLite has no `timestamptz`. It stores whatever wall clock it is handed and returns
+    it naive, so an aware value in another zone would be written with its offset silently
+    discarded and a naive one would be read back as though it were local time. Every
+    instant in this database is UTC; this is where that stops being a convention held by
+    every call site and becomes a rule the column enforces.
+
+    A naive datetime is refused rather than assumed to be UTC. In this codebase a naive
+    datetime is a wall-clock reading at an airport, and guessing at which airport is the
+    class of bug the whole timezone policy exists to prevent.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            raise ValueError(
+                "refusing to store a naive datetime: it is a wall-clock reading, not an "
+                "instant. Convert it with timezones.to_utc() first."
+            )
+        return value.astimezone(UTC).replace(tzinfo=None)
+
+    def process_result_value(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        return None if value is None else value.replace(tzinfo=UTC)
+
+
 def _created_at() -> Any:
-    return mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    # `func.now()` is CURRENT_TIMESTAMP, which SQLite computes in UTC, so the default
+    # lands in the same frame as everything written through the type above.
+    return mapped_column(UtcDateTime, nullable=False, server_default=func.now())
 
 
 class Airport(Base):
@@ -69,23 +103,25 @@ class Booking(Base):
         # Archived rows are excluded so a deleted-and-re-added booking is allowed.
         # The departure *date* rather than the instant: the same booking re-sent with a
         # slightly different time must collide, and a genuine second flight on the same
-        # route the same day is not a thing anyone does.
+        # route the same day is not a thing anyone does. `date()` reads the stored text
+        # directly, and every instant in the column is UTC, so the day it yields is the
+        # UTC calendar day with no zone conversion to get wrong.
         Index(
             "bookings_dedupe",
             "marketing_carrier",
             "marketing_number",
-            text("(scheduled_departure_utc AT TIME ZONE 'UTC')::date"),
+            text("date(scheduled_departure_utc)"),
             unique=True,
-            postgresql_where=text("status != 'archived'"),
+            sqlite_where=text("status != 'archived'"),
         ),
         Index(
             "bookings_poll",
             "next_poll_at",
-            postgresql_where=text("status = 'active' AND next_poll_at IS NOT NULL"),
+            sqlite_where=text("status = 'active' AND next_poll_at IS NOT NULL"),
         ),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     source: Mapped[str] = mapped_column(Text, nullable=False)
     source_message_id: Mapped[str | None] = mapped_column(Text)
 
@@ -100,10 +136,8 @@ class Booking(Base):
 
     origin_iata: Mapped[str] = mapped_column(String(3), ForeignKey("airports.iata"), nullable=False)
     dest_iata: Mapped[str] = mapped_column(String(3), ForeignKey("airports.iata"), nullable=False)
-    scheduled_departure_utc: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    scheduled_arrival_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    scheduled_departure_utc: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    scheduled_arrival_utc: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
     confirmation_code: Mapped[str | None] = mapped_column(Text)
     seat: Mapped[str | None] = mapped_column(Text)
@@ -112,10 +146,10 @@ class Booking(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
     extraction_confidence: Mapped[float | None] = mapped_column(Float)
     calendar_event_uid: Mapped[str | None] = mapped_column(Text)
-    next_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_poll_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        UtcDateTime, nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
     snapshots: Mapped[list[FlightSnapshot]] = relationship(
@@ -132,12 +166,12 @@ class FlightSnapshot(Base):
     __tablename__ = "flight_snapshots"
     __table_args__ = (Index("flight_snapshots_latest", "booking_id", text("observed_at DESC")),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     booking_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False
     )
     observed_at: Mapped[datetime] = _created_at()
-    raw: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    raw: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
 
     # Denormalised out of `raw` so diffing and list queries never parse JSON.
     status_text: Mapped[str | None] = mapped_column(Text)
@@ -148,18 +182,18 @@ class FlightSnapshot(Base):
     terminal_origin: Mapped[str | None] = mapped_column(Text)
     terminal_destination: Mapped[str | None] = mapped_column(Text)
     baggage_claim: Mapped[str | None] = mapped_column(Text)
-    scheduled_out: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    estimated_out: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    actual_out: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    actual_off: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    scheduled_out: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    estimated_out: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    actual_out: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    actual_off: Mapped[datetime | None] = mapped_column(UtcDateTime)
     # Runway arrival, kept alongside the gate times because "when do we land" is the
     # question in the air, and it is not the same question as "when are we at the gate".
-    scheduled_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    estimated_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    scheduled_in: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    estimated_in: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    actual_in: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    actual_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    scheduled_on: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    estimated_on: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    scheduled_in: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    estimated_in: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    actual_in: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    actual_on: Mapped[datetime | None] = mapped_column(UtcDateTime)
     progress_percent: Mapped[int | None] = mapped_column(Integer)
     aircraft_type: Mapped[str | None] = mapped_column(Text)
     registration: Mapped[str | None] = mapped_column(Text)
@@ -172,9 +206,9 @@ class FlightEvent(Base):
 
     __tablename__ = "flight_events"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     booking_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     old_value: Mapped[str | None] = mapped_column(Text)
@@ -182,8 +216,8 @@ class FlightEvent(Base):
     occurred_at: Mapped[datetime] = _created_at()
     # Null means "not yet delivered"; each consumer claims its own column, so a failing
     # calendar never blocks a push and neither is ever delivered twice.
-    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    calendar_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notified_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    calendar_synced_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
     booking: Mapped[Booking] = relationship(back_populates="events")
 
@@ -210,10 +244,10 @@ class IngestLog(Base):
     # Kept because a Message-ID names nothing a person recognises, and the set-aside list
     # on the health page has to say which email it is talking about.
     subject: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
-    raw_extraction: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    raw_extraction: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     error: Mapped[str | None] = mapped_column(Text)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retry_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
 
 class ApiUsage(Base):
@@ -221,17 +255,17 @@ class ApiUsage(Base):
 
     __tablename__ = "api_usage"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     called_at: Mapped[datetime] = _created_at()
     endpoint: Mapped[str] = mapped_column(Text, nullable=False)
     result_sets: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    est_cost_usd: Mapped[float] = mapped_column(Numeric(10, 6), nullable=False)
+    est_cost_usd: Mapped[float] = mapped_column(Numeric(10, 6, asdecimal=False), nullable=False)
 
 
 class Preferences(Base):
     """The settings page, as one row.
 
-    One deployment means one row, and the JSONB blob means a new knob costs a field on
+    One deployment means one row, and the JSON blob means a new knob costs a field on
     `Prefs` rather than a migration. Credentials are deliberately absent: they live in
     the environment and the app never writes them here.
     """
@@ -240,9 +274,9 @@ class Preferences(Base):
     __table_args__ = (CheckConstraint("id = 1", name="preferences_singleton"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-    values: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    values: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, server_default="{}")
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        UtcDateTime, nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -252,4 +286,4 @@ class KV(Base):
     __tablename__ = "kv"
 
     key: Mapped[str] = mapped_column(Text, primary_key=True)
-    value: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    value: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)

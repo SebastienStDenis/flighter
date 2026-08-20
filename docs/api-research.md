@@ -952,7 +952,7 @@ categories-view restriction in §6.4 still holds on current iOS.
 ## 7. Library versions
 
 Latest stable releases on PyPI, read from `https://pypi.org/pypi/<name>/json` (`info.version`) on
-2026-08-19, except `icalendar`, read on 2026-08-20.
+2026-08-19, except `icalendar` and `aiosqlite`, read on 2026-08-20.
 
 | Package | Version |
 | --- | --- |
@@ -960,7 +960,7 @@ Latest stable releases on PyPI, read from `https://pypi.org/pypi/<name>/json` (`
 | uvicorn | 0.52.4 |
 | sqlalchemy | 2.0.52 |
 | alembic | 1.19.1 |
-| asyncpg | 0.31.0 |
+| aiosqlite | 0.22.1 |
 | jinja2 | 3.1.6 |
 | httpx | 0.28.1 |
 | pydantic | 2.13.4 |

@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 import airportsdata
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Airport
@@ -20,7 +20,7 @@ from .timezones import FALLBACK_TZ
 
 log = logging.getLogger(__name__)
 
-# Postgres caps a statement at 65535 bind parameters and each row spends eight of them.
+# SQLite caps a statement at 32766 bind parameters and each row spends eight of them.
 _SEED_CHUNK_ROWS = 500
 
 _tz_cache: dict[str, str] = {}

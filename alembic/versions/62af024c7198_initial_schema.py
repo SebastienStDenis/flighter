@@ -1,8 +1,8 @@
 """Initial schema.
 
-Revision ID: 74ca7df96720
+Revision ID: 62af024c7198
 Revises:
-Create Date: 2026-08-19 19:41:12.998279
+Create Date: 2026-08-20 09:02:38.084142
 
 """
 
@@ -12,9 +12,8 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
 
-revision: str = "74ca7df96720"
+revision: str = "62af024c7198"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -35,52 +34,59 @@ def upgrade() -> None:
     )
     op.create_table(
         "api_usage",
-        sa.Column("id", sa.BigInteger(), nullable=False),
+        sa.Column("id", sa.Integer(), nullable=False),
         sa.Column(
-            "called_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "called_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
+            nullable=False,
         ),
         sa.Column("endpoint", sa.Text(), nullable=False),
         sa.Column("result_sets", sa.Integer(), nullable=False),
-        sa.Column("est_cost_usd", sa.Numeric(precision=10, scale=6), nullable=False),
+        sa.Column(
+            "est_cost_usd", sa.Numeric(precision=10, scale=6, asdecimal=False), nullable=False
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_table(
         "ingest_log",
-        sa.Column("gmail_message_id", sa.Text(), nullable=False),
+        sa.Column("message_id", sa.Text(), nullable=False),
         sa.Column(
             "processed_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
             nullable=False,
         ),
         sa.Column("outcome", sa.Text(), nullable=False),
-        sa.Column("raw_extraction", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("subject", sa.Text(), server_default="", nullable=False),
+        sa.Column("raw_extraction", sa.JSON(), nullable=True),
         sa.Column("error", sa.Text(), nullable=True),
-        sa.PrimaryKeyConstraint("gmail_message_id"),
+        sa.Column("attempts", sa.Integer(), server_default="0", nullable=False),
+        sa.Column("retry_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("message_id"),
     )
     op.create_table(
         "kv",
         sa.Column("key", sa.Text(), nullable=False),
-        sa.Column("value", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("value", sa.JSON(), nullable=False),
         sa.PrimaryKeyConstraint("key"),
     )
     op.create_table(
-        "passengers",
-        sa.Column("id", sa.BigInteger(), nullable=False),
-        sa.Column("display_name", sa.Text(), nullable=False),
-        sa.Column("is_self", sa.Boolean(), nullable=False),
+        "preferences",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("values", sa.JSON(), server_default="{}", nullable=False),
         sa.Column(
-            "created_at",
+            "updated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
             nullable=False,
         ),
+        sa.CheckConstraint("id = 1", name="preferences_singleton"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_table(
         "bookings",
-        sa.Column("id", sa.BigInteger(), nullable=False),
-        sa.Column("passenger_id", sa.BigInteger(), nullable=False),
+        sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("source", sa.Text(), nullable=False),
         sa.Column("source_message_id", sa.Text(), nullable=True),
         sa.Column("marketing_carrier", sa.Text(), nullable=False),
@@ -98,18 +104,18 @@ def upgrade() -> None:
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("status", sa.Text(), nullable=False),
         sa.Column("extraction_confidence", sa.Float(), nullable=True),
-        sa.Column("gcal_event_id", sa.Text(), nullable=True),
+        sa.Column("calendar_event_uid", sa.Text(), nullable=True),
         sa.Column("next_poll_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
             nullable=False,
         ),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
             nullable=False,
         ),
         sa.CheckConstraint("source IN ('email', 'manual')", name="bookings_source_check"),
@@ -117,52 +123,38 @@ def upgrade() -> None:
             "status IN ('pending_review', 'active', 'completed', 'cancelled', 'archived')",
             name="bookings_status_check",
         ),
-        sa.ForeignKeyConstraint(
-            ["dest_iata"],
-            ["airports.iata"],
-        ),
-        sa.ForeignKeyConstraint(
-            ["origin_iata"],
-            ["airports.iata"],
-        ),
-        sa.ForeignKeyConstraint(
-            ["passenger_id"],
-            ["passengers.id"],
-        ),
+        sa.ForeignKeyConstraint(["dest_iata"], ["airports.iata"]),
+        sa.ForeignKeyConstraint(["origin_iata"], ["airports.iata"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    # The whole expression needs its own parentheses: without them Postgres reads the
-    # cast as closing the index element and rejects the statement.
+    # Every instant in the column is UTC, so `date()` reading the stored text gives the
+    # UTC calendar day with no conversion to get wrong. Archived rows are excluded, which
+    # is what lets a removed booking be added again.
     op.create_index(
         "bookings_dedupe",
         "bookings",
-        [
-            "passenger_id",
-            "marketing_carrier",
-            "marketing_number",
-            sa.literal_column("((scheduled_departure_utc AT TIME ZONE 'UTC')::date)"),
-        ],
+        ["marketing_carrier", "marketing_number", sa.text("date(scheduled_departure_utc)")],
         unique=True,
-        postgresql_where=sa.text("status != 'archived'"),
+        sqlite_where=sa.text("status != 'archived'"),
     )
     op.create_index(
         "bookings_poll",
         "bookings",
         ["next_poll_at"],
         unique=False,
-        postgresql_where=sa.text("status = 'active' AND next_poll_at IS NOT NULL"),
+        sqlite_where=sa.text("status = 'active' AND next_poll_at IS NOT NULL"),
     )
     op.create_table(
         "flight_events",
-        sa.Column("id", sa.BigInteger(), nullable=False),
-        sa.Column("booking_id", sa.BigInteger(), nullable=False),
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("booking_id", sa.Integer(), nullable=False),
         sa.Column("kind", sa.Text(), nullable=False),
         sa.Column("old_value", sa.Text(), nullable=True),
         sa.Column("new_value", sa.Text(), nullable=True),
         sa.Column(
             "occurred_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
             nullable=False,
         ),
         sa.Column("notified_at", sa.DateTime(timezone=True), nullable=True),
@@ -172,15 +164,15 @@ def upgrade() -> None:
     )
     op.create_table(
         "flight_snapshots",
-        sa.Column("id", sa.BigInteger(), nullable=False),
-        sa.Column("booking_id", sa.BigInteger(), nullable=False),
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("booking_id", sa.Integer(), nullable=False),
         sa.Column(
             "observed_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
             nullable=False,
         ),
-        sa.Column("raw", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("raw", sa.JSON(), nullable=False),
         sa.Column("status_text", sa.Text(), nullable=True),
         sa.Column("cancelled", sa.Boolean(), nullable=True),
         sa.Column("diverted", sa.Boolean(), nullable=True),
@@ -193,6 +185,8 @@ def upgrade() -> None:
         sa.Column("estimated_out", sa.DateTime(timezone=True), nullable=True),
         sa.Column("actual_out", sa.DateTime(timezone=True), nullable=True),
         sa.Column("actual_off", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("scheduled_on", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("estimated_on", sa.DateTime(timezone=True), nullable=True),
         sa.Column("scheduled_in", sa.DateTime(timezone=True), nullable=True),
         sa.Column("estimated_in", sa.DateTime(timezone=True), nullable=True),
         sa.Column("actual_in", sa.DateTime(timezone=True), nullable=True),
@@ -206,7 +200,7 @@ def upgrade() -> None:
     op.create_index(
         "flight_snapshots_latest",
         "flight_snapshots",
-        ["booking_id", sa.literal_column("observed_at DESC")],
+        ["booking_id", sa.text("observed_at DESC")],
         unique=False,
     )
 
@@ -218,13 +212,13 @@ def downgrade() -> None:
     op.drop_index(
         "bookings_poll",
         table_name="bookings",
-        postgresql_where=sa.text("status = 'active' AND next_poll_at IS NOT NULL"),
+        sqlite_where=sa.text("status = 'active' AND next_poll_at IS NOT NULL"),
     )
     op.drop_index(
-        "bookings_dedupe", table_name="bookings", postgresql_where=sa.text("status != 'archived'")
+        "bookings_dedupe", table_name="bookings", sqlite_where=sa.text("status != 'archived'")
     )
     op.drop_table("bookings")
-    op.drop_table("passengers")
+    op.drop_table("preferences")
     op.drop_table("kv")
     op.drop_table("ingest_log")
     op.drop_table("api_usage")
