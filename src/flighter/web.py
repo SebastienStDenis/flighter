@@ -743,8 +743,6 @@ def create_app(settings: Settings) -> FastAPI:
         extraction_confidence_threshold: Annotated[str, Form()],
         imap_folder: Annotated[str, Form()],
         imap_idle_seconds: Annotated[str, Form()],
-        ntfy_url: Annotated[str, Form()],
-        ntfy_topic: Annotated[str, Form()],
         gcal_calendar_id: Annotated[str, Form()] = "",
     ) -> Response:
         posted = {
@@ -756,8 +754,6 @@ def create_app(settings: Settings) -> FastAPI:
             "extraction_confidence_threshold": extraction_confidence_threshold.strip(),
             "imap_folder": imap_folder.strip(),
             "imap_idle_seconds": imap_idle_seconds.strip(),
-            "ntfy_url": ntfy_url.strip(),
-            "ntfy_topic": ntfy_topic.strip(),
             "gcal_calendar_id": gcal_calendar_id.strip(),
         }
         try:

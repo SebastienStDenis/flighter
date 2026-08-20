@@ -11,7 +11,7 @@ IDLE            JSON-LD                     cadence tightens    append-only    d
                 review queue                approaches                             │
                                                                          ┌─────────┴─────────┐
                                                                          ▼                   ▼
-                                                                    ntfy push        Google Calendar
+                                                                   Pushover push     Google Calendar
                                                                          │
                                                    web UI  ←─────────────┘─────→  Scriptable widget
                                                    flight detail                  live countdown
@@ -58,9 +58,9 @@ useless in an airport.
 
 **Credentials and preferences live in different places, and never both.** A credential is
 set once by hand in `.env`, is never handed back out by the UI, and the app never writes
-it. Everything else - the public URL, the spend cap, the watched folder, the ntfy topic,
-the calendar - is a preference: it has a working default, it is edited at `/settings`,
-and the database is the only place it lives. No value has two homes, so there is never a
+it. Everything else - the public URL, the spend cap, the watched folder, the calendar -
+is a preference: it has a working default, it is edited at `/settings`, and the database
+is the only place it lives. No value has two homes, so there is never a
 question of which one wins.
 
 The one file the app writes for itself is `data/secrets.env`, holding the credentials it
@@ -69,7 +69,7 @@ widget token generated on first boot. Those keys never appear in `.env` either.
 
 ## Prerequisites
 
-Four accounts and an Apple ID you already have, and only two of them involve a form.
+Five accounts and an Apple ID you already have, and only three of them involve a form.
 
 ### Tailscale
 
@@ -144,6 +144,23 @@ email carrying schema.org `FlightReservation` JSON-LD is parsed exactly and for 
 most airlines embed it because Gmail and Outlook read it. The model is for the ones that
 do not.
 
+### Pushover
+
+Pushes reach the phone through [Pushover](https://pushover.net), which is hosted, so
+there is no notification server in the stack to keep alive.
+
+1. Sign up at [pushover.net](https://pushover.net). Your **user key** is on the dashboard
+   you land on; that is `PUSHOVER_USER_KEY`.
+2. Register this service as an application at
+   [pushover.net/apps/build](https://pushover.net/apps/build) - a name is all it asks
+   for. The **API token** it hands back is `PUSHOVER_TOKEN`.
+3. Install the Pushover app on the phone and sign in as the same user. That is what
+   actually rings.
+
+Sending is free, at 10,000 messages a month per application, which a flight tracker
+never comes near. The phone app is the cost: free for 30 days, then a one-time purchase
+of around $5 per platform, with no subscription behind it.
+
 ## Run it
 
 ```sh
@@ -156,16 +173,15 @@ docker compose up -d
 ```
 
 That is the whole install. On first boot the app runs its own migrations, seeds the
-airport table with its timezones, generates a widget token and an ntfy topic, and starts
-serving.
+airport table with its timezones, generates the widget token, and starts serving.
 
 Open `https://flighter.<your-tailnet>.ts.net/settings` and finish there:
 
 1. Set the **public base URL** - the page offers the address you opened it on.
 2. **Connect Google**, once. Sign in, accept the calendar scope, and the app stores the
    refresh token and creates a calendar called *Flights* to write into.
-3. **Run checks**. It exercises Postgres, AeroAPI, iCloud, Calendar and ntfy in turn and
-   names the broken one, which is the question you will actually have.
+3. **Run checks**. It exercises Postgres, AeroAPI, iCloud, Calendar and Pushover in turn
+   and names the broken one, which is the question you will actually have.
 
 Then add a passenger for yourself on the **People** page, and either add a flight by hand
 or let the mail loop find one.

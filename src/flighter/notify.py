@@ -1,4 +1,4 @@
-"""Phone pushes via ntfy: flight changes worth interrupting someone for, and budget alarms."""
+"""Phone pushes via Pushover: flight changes worth interrupting someone for, and budget alarms."""
 
 from __future__ import annotations
 
@@ -28,37 +28,51 @@ from .timezones import FALLBACK_TZ, format_local
 
 log = logging.getLogger(__name__)
 
-# ntfy takes its parameters as HTTP headers. Canonical spellings are X-Title, X-Priority,
-# X-Tags and X-Click; the docs state parameter names are case-insensitive as headers and
-# must be lowercase only as query params, so the canonical form is used throughout.
-# https://docs.ntfy.sh/publish/#list-of-all-parameters
-TITLE_HEADER = "X-Title"
-PRIORITY_HEADER = "X-Priority"
-TAGS_HEADER = "X-Tags"
-CLICK_HEADER = "X-Click"
+# One form-encoded POST, with the application token and the user key as ordinary fields.
+# https://pushover.net/api
+MESSAGES_URL = "https://api.pushover.net/1/messages.json"
 
-# The default server refuses a body over 4KB outright; better a truncated push than none.
-MAX_MESSAGE_LENGTH = 4000
+# An over-long field is rejected rather than trimmed at the far end, so every value is cut
+# here first: a truncated push beats no push.
+# https://pushover.net/api#limits
+MAX_MESSAGE_LENGTH = 1024
+MAX_TITLE_LENGTH = 250
+MAX_URL_LENGTH = 512
 
-PRIORITY_HIGH = "high"
-PRIORITY_DEFAULT = "default"
+# The scale runs -2 (no notification at all) to 2 (repeats until acknowledged).
+#
+# Priority 1 is the only one that sounds during the quiet hours a person has set, so it is
+# reserved for the changes that cost you the flight if you sleep through them: a gate
+# change, a cancellation, a diversion. Everything else - an assigned gate, a delay, a
+# landing, a bag belt - is news you act on when you next look at the phone, so it goes out
+# at 0 and respects quiet hours.
+#
+# Nothing here uses 2: emergency priority re-alerts every few minutes until the phone is
+# unlocked and the notification acknowledged, and none of this is an outage page. Even a
+# cancellation is read once and then acted on with the airline.
+PRIORITY_HIGH = 1
+PRIORITY_NORMAL = 0
+PRIORITY_QUIET = -1
 
-# Only a change that costs you the flight if you miss it gets to break through.
 _HIGH_PRIORITY_KINDS = frozenset({CANCELLED, DIVERTED, GATE_CHANGED})
 
-_TAGS = {
-    GATE_ASSIGNED: "door",
-    GATE_CHANGED: "warning,door",
-    TERMINAL_CHANGED: "warning,office",
-    DEPARTURE_DELAYED: "hourglass",
-    DEPARTURE_MOVED_EARLIER: "fast_forward",
-    ARRIVAL_TIME_CHANGED: "clock3",
-    DEPARTED: "flight_departure",
-    LANDED: "flight_arrival",
-    BAGGAGE_CLAIM_ASSIGNED: "luggage",
-    CANCELLED: "x",
-    DIVERTED: "warning",
+# The lock screen shows the title above the message, so each kind leads with one glyph
+# that says what happened before a word of it is read.
+_EMOJI = {
+    GATE_ASSIGNED: "🚪",
+    GATE_CHANGED: "⚠️",
+    TERMINAL_CHANGED: "⚠️",
+    DEPARTURE_DELAYED: "⏳",
+    DEPARTURE_MOVED_EARLIER: "⏩",
+    ARRIVAL_TIME_CHANGED: "🕒",
+    DEPARTED: "🛫",
+    LANDED: "🛬",
+    BAGGAGE_CLAIM_ASSIGNED: "🧳",
+    CANCELLED: "❌",
+    DIVERTED: "⚠️",
 }
+DEFAULT_EMOJI = "✈️"
+BUDGET_EMOJI = "💸"
 
 
 def flight_label(booking: Booking) -> str:
@@ -144,9 +158,9 @@ def event_message(event: FlightEvent, *, origin_tz: str, dest_tz: str) -> str:
 
 
 class Notifier:
-    """Fire-and-forget pushes; a no-op until an ntfy topic is configured.
+    """Fire-and-forget pushes; a no-op until Pushover credentials are set.
 
-    Delivery is strictly best-effort: an ntfy outage must never stall or fail a poll, so
+    Delivery is strictly best-effort: a Pushover outage must never stall or fail a poll, so
     send failures are logged and swallowed. The caller decides when a send counts as
     delivered, and only a clean return says so.
     """
@@ -165,26 +179,27 @@ class Notifier:
         origin_tz: str = FALLBACK_TZ,
         dest_tz: str = FALLBACK_TZ,
     ) -> None:
-        priority = PRIORITY_HIGH if event.kind in _HIGH_PRIORITY_KINDS else PRIORITY_DEFAULT
+        priority = PRIORITY_HIGH if event.kind in _HIGH_PRIORITY_KINDS else PRIORITY_NORMAL
+        emoji = _EMOJI.get(event.kind, DEFAULT_EMOJI)
         await self._send(
-            title=flight_label(booking),
+            title=f"{emoji} {flight_label(booking)}",
             message=event_message(event, origin_tz=origin_tz, dest_tz=dest_tz),
             priority=priority,
-            tags=_TAGS.get(event.kind, "airplane"),
-            click=f"{prefs.current().public_base_url}/f/{booking.id}",
+            url=f"{prefs.current().public_base_url}/f/{booking.id}",
+            url_title="Open the flight",
         )
 
     async def budget_tripped(self, spend: Decimal, cap: Decimal) -> None:
         """The AeroAPI breaker has latched: tracking is stale until someone raises the cap."""
         await self._send(
-            title="AeroAPI budget reached",
+            title=f"{BUDGET_EMOJI} AeroAPI budget reached",
             message=(
                 f"Spent ${spend:.2f} of the ${cap:.2f} monthly cap. "
                 "Flight polling is paused until the cap is raised or the month rolls over."
             ),
             priority=PRIORITY_HIGH,
-            tags="money_with_wings",
-            click=prefs.current().public_base_url,
+            url=prefs.current().public_base_url,
+            url_title="Open flighter",
         )
 
     async def _send(
@@ -192,26 +207,27 @@ class Notifier:
         *,
         title: str,
         message: str,
-        priority: str,
-        tags: str,
-        click: str | None = None,
+        priority: int,
+        url: str | None = None,
+        url_title: str | None = None,
     ) -> None:
         settings = self._settings
-        channel = prefs.current()
-        if not channel.ntfy_configured:
+        if not settings.pushover_configured:
             return
-        headers = {TITLE_HEADER: title, PRIORITY_HEADER: priority, TAGS_HEADER: tags}
-        if click:
-            headers[CLICK_HEADER] = click
-        if settings.ntfy_token:
-            headers["Authorization"] = f"Bearer {settings.ntfy_token}"
+        data = {
+            "token": settings.pushover_token,
+            "user": settings.pushover_user_key,
+            "title": title[:MAX_TITLE_LENGTH],
+            "message": message[:MAX_MESSAGE_LENGTH],
+            "priority": str(priority),
+        }
+        if url:
+            data["url"] = url[:MAX_URL_LENGTH]
+            if url_title:
+                data["url_title"] = url_title
         try:
             async with httpx.AsyncClient(transport=self._transport, timeout=10) as client:
-                response = await client.post(
-                    f"{channel.ntfy_url}/{channel.ntfy_topic}",
-                    content=message[:MAX_MESSAGE_LENGTH].encode(),
-                    headers=headers,
-                )
+                response = await client.post(MESSAGES_URL, data=data)
                 response.raise_for_status()
         except Exception:
-            log.warning("ntfy notification failed", exc_info=True)
+            log.warning("Pushover notification failed", exc_info=True)

@@ -185,7 +185,7 @@ class FlightSnapshot(Base):
 
 
 class FlightEvent(Base):
-    """A material change, fanned out to ntfy and Google Calendar independently."""
+    """A material change, fanned out to Pushover and Google Calendar independently."""
 
     __tablename__ = "flight_events"
 

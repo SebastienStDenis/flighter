@@ -17,6 +17,7 @@ from .aeroapi import BASE_URL
 from .config import Settings
 from .db import session_scope
 from .models import Airport
+from .notify import MESSAGES_URL, PRIORITY_QUIET
 
 log = logging.getLogger(__name__)
 
@@ -64,24 +65,36 @@ async def _check_aeroapi(settings: Settings) -> CheckResult:
     return CheckResult("aeroapi", True, f"{len(flights)} flights returned for UAL4")
 
 
-async def _check_ntfy(settings: Settings) -> CheckResult:
-    channel = prefs.current()
-    if not channel.ntfy_configured:
-        return CheckResult("ntfy", False, "no ntfy topic")
-    headers = {"Title": "Flight tracker", "Priority": "low", "Tags": "white_check_mark"}
-    if settings.ntfy_token:
-        headers["Authorization"] = f"Bearer {settings.ntfy_token}"
+async def _check_pushover(settings: Settings) -> CheckResult:
+    """Sends a real push, quietly, because a token that is never spent proves nothing."""
+    if not settings.pushover_configured:
+        return CheckResult(
+            "pushover", False, "PUSHOVER_TOKEN and PUSHOVER_USER_KEY are not set in .env"
+        )
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
             response = await client.post(
-                f"{channel.ntfy_url}/{channel.ntfy_topic}",
-                content=b"Checks ran and this arrived.",
-                headers=headers,
+                MESSAGES_URL,
+                data={
+                    "token": settings.pushover_token,
+                    "user": settings.pushover_user_key,
+                    "title": "Flight tracker",
+                    "message": "Checks ran and this arrived.",
+                    "priority": str(PRIORITY_QUIET),
+                },
             )
-            response.raise_for_status()
     except Exception as exc:
-        return CheckResult("ntfy", False, str(exc))
-    return CheckResult("ntfy", True, "test push sent; check your phone")
+        return CheckResult("pushover", False, str(exc))
+    # A rejection carries a JSON body naming the field it refused, which is the difference
+    # between a bad application token and a bad user key.
+    try:
+        body = response.json()
+    except ValueError:
+        return CheckResult("pushover", False, f"HTTP {response.status_code}: {response.text[:200]}")
+    if body.get("status") != 1:
+        errors = "; ".join(body.get("errors", [])) or f"HTTP {response.status_code}"
+        return CheckResult("pushover", False, errors)
+    return CheckResult("pushover", True, "test push sent; check your phone")
 
 
 async def _check_mail(settings: Settings) -> CheckResult:
@@ -122,5 +135,5 @@ async def run_checks(settings: Settings) -> list[CheckResult]:
         await _check_aeroapi(settings),
         await _check_mail(settings),
         await _check_calendar(settings),
-        await _check_ntfy(settings),
+        await _check_pushover(settings),
     ]

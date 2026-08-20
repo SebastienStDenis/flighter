@@ -61,24 +61,8 @@ services:
       timeout: 5s
       retries: 5
 
-  ntfy:
-    image: binwiederhier/ntfy
-    restart: unless-stopped
-    command: serve
-    environment:
-      # The phone subscribes over the tailnet on port 8443; the app posts to it over the
-      # compose network. Both names have to be spelled the way each side reaches it.
-      NTFY_BASE_URL: ${NTFY_BASE_URL}
-      NTFY_CACHE_FILE: /var/cache/ntfy/cache.db
-      NTFY_AUTH_DEFAULT_ACCESS: write-only
-    volumes:
-      - ntfy-cache:/var/cache/ntfy
-      - ntfy-config:/etc/ntfy
-
 volumes:
   app-data:
   db-data:
   backups:
-  ntfy-cache:
-  ntfy-config:
   tailscale-state:

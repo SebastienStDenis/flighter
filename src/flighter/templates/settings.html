@@ -32,6 +32,11 @@
     </dd>
     <dt>Calendar</dt>
     <dd class="text">{{ prefs.gcal_calendar_id or 'created when you connect' }}</dd>
+    <dt>Pushover</dt>
+    <dd class="text">
+      {{- 'token and user key set' if settings.pushover_configured
+          else 'PUSHOVER_TOKEN and PUSHOVER_USER_KEY are not set' -}}
+    </dd>
   </dl>
   {% if settings.google_configured %}
   <div class="actions">
@@ -46,8 +51,9 @@
 
 <section class="panel">
   <span class="label">Checks</span>
-  <p class="panel-note">Exercises Postgres, AeroAPI, iCloud, Calendar and ntfy in turn, and
-    names the broken one. The AeroAPI check spends one result set, and ntfy sends a real push.</p>
+  <p class="panel-note">Exercises Postgres, AeroAPI, iCloud, Calendar and Pushover in turn, and
+    names the broken one. The AeroAPI check spends one result set, and Pushover sends a real
+    push.</p>
   <div class="actions">
     <button class="btn" hx-post="/settings/checks" hx-target="#checks" hx-swap="innerHTML"
             hx-indicator="#checks">Run checks</button>
@@ -77,22 +83,6 @@
         {% endfor %}
       </select>
     </div>
-  </section>
-
-  <section class="panel">
-    <span class="label">Push</span>
-    <div class="row">
-      <div class="field">
-        <label for="ntfy_url">ntfy server</label>
-        <input type="text" id="ntfy_url" name="ntfy_url" required value="{{ posted['ntfy_url'] }}">
-      </div>
-      <div class="field">
-        <label for="ntfy_topic">Topic</label>
-        <input type="text" id="ntfy_topic" name="ntfy_topic" value="{{ posted['ntfy_topic'] }}">
-      </div>
-    </div>
-    <p class="hint">Subscribe to this topic in the ntfy app. The name is the only thing in front
-      of the stream, so it is generated rather than chosen. Empty means no pushes at all.</p>
   </section>
 
   <section class="panel">

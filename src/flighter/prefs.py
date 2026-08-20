@@ -12,8 +12,6 @@ default in the same breath.
 
 from __future__ import annotations
 
-import logging
-import secrets
 from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
@@ -22,8 +20,6 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Preferences
-
-log = logging.getLogger(__name__)
 
 SINGLETON_ID = 1
 
@@ -58,19 +54,10 @@ class Prefs(BaseModel):
     # by the consent flow rather than looked up by hand.
     gcal_calendar_id: str = ""
 
-    ntfy_url: str = "http://ntfy:80"
-    # The topic name is the secret in front of the push stream, so it is generated
-    # rather than invented.
-    ntfy_topic: str = ""
-
-    @field_validator("public_base_url", "ntfy_url")
+    @field_validator("public_base_url")
     @classmethod
     def _strip_trailing_slash(cls, value: str) -> str:
         return value.rstrip("/")
-
-    @property
-    def ntfy_configured(self) -> bool:
-        return bool(self.ntfy_topic)
 
     @property
     def calendar_configured(self) -> bool:
@@ -114,16 +101,3 @@ async def save(session: AsyncSession, values: Mapping[str, Any]) -> Prefs:
     await session.flush()
     _current = updated
     return updated
-
-
-async def ensure_defaults(session: AsyncSession) -> Prefs:
-    """Fill in what can be generated rather than asked for.
-
-    Only ever writes what is still empty: a topic regenerated on a restart is a phone
-    that quietly stops receiving pushes.
-    """
-    prefs = await load(session)
-    if not prefs.ntfy_topic:
-        prefs = await save(session, {"ntfy_topic": f"flights-{secrets.token_hex(8)}"})
-        log.info("generated an ntfy topic")
-    return prefs

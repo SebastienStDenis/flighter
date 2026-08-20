@@ -1,4 +1,4 @@
-"""Preferences: the merge, the validation, and what is generated rather than asked for."""
+"""Preferences: the merge, the validation, and the defaults a fresh deployment runs on."""
 
 from __future__ import annotations
 
@@ -37,12 +37,12 @@ async def test_a_missing_row_is_created_with_the_defaults() -> None:
 
 
 async def test_saving_one_field_leaves_the_others_alone() -> None:
-    session = FakeSession(Preferences(id=1, values={"ntfy_topic": "flights-abc"}))
+    session = FakeSession(Preferences(id=1, values={"imap_folder": "Travel"}))
     saved = await prefs.save(session, {"log_level": "DEBUG"})  # type: ignore[arg-type]
     assert saved.log_level == "DEBUG"
-    assert saved.ntfy_topic == "flights-abc"
+    assert saved.imap_folder == "Travel"
     assert session.row is not None
-    assert session.row.values["ntfy_topic"] == "flights-abc"
+    assert session.row.values["imap_folder"] == "Travel"
 
 
 async def test_a_saved_value_becomes_the_live_one() -> None:
@@ -67,11 +67,3 @@ async def test_a_trailing_slash_never_reaches_a_generated_link() -> None:
         session, {"public_base_url": "https://flighter.tailnet.ts.net/"}
     )
     assert saved.public_base_url == "https://flighter.tailnet.ts.net"
-
-
-async def test_the_ntfy_topic_is_generated_once_and_then_left_alone() -> None:
-    session = FakeSession()
-    first = await prefs.ensure_defaults(session)  # type: ignore[arg-type]
-    assert first.ntfy_topic.startswith("flights-")
-    again = await prefs.ensure_defaults(session)  # type: ignore[arg-type]
-    assert again.ntfy_topic == first.ntfy_topic

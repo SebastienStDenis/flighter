@@ -24,6 +24,8 @@ def settings() -> Settings:
         google_client_id="client-id",
         google_client_secret="client-secret",
         google_refresh_token="refresh-token",
+        pushover_token="app-token",
+        pushover_user_key="user-key",
     )
 
 
@@ -36,7 +38,6 @@ def preferences(monkeypatch: pytest.MonkeyPatch) -> Prefs:
     """
     configured = Prefs(
         public_base_url="https://flights.example.com",
-        ntfy_topic="flights",
         gcal_calendar_id="cal-id",
     )
     monkeypatch.setattr(prefs, "_current", configured)

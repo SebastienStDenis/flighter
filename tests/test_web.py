@@ -59,8 +59,6 @@ SETTINGS_FORM = {
     "extraction_confidence_threshold": "0.85",
     "imap_folder": "INBOX",
     "imap_idle_seconds": "300",
-    "ntfy_url": "http://ntfy:80",
-    "ntfy_topic": "flights",
     "gcal_calendar_id": "cal-id",
 }
 

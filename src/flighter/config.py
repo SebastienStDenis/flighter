@@ -55,8 +55,11 @@ class Settings(BaseSettings):
     # Minted by the consent flow at /settings/google/connect, not typed by anyone.
     google_refresh_token: str = Field(default="", repr=False)
 
-    # --- ntfy -------------------------------------------------------------------------
-    ntfy_token: str = Field(default="", repr=False)
+    # --- Pushover, the phone ----------------------------------------------------------
+    # The token belongs to the application registered at pushover.net; the user key
+    # identifies the account every device of yours is signed in to.
+    pushover_token: str = Field(default="", repr=False)
+    pushover_user_key: str = Field(default="", repr=False)
 
     # --- Widget -----------------------------------------------------------------------
     # Generated on first boot. The only authentication in front of the flight data.
@@ -77,6 +80,10 @@ class Settings(BaseSettings):
     @property
     def aeroapi_configured(self) -> bool:
         return bool(self.aeroapi_key)
+
+    @property
+    def pushover_configured(self) -> bool:
+        return bool(self.pushover_token and self.pushover_user_key)
 
 
 @lru_cache

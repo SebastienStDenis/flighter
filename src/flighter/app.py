@@ -27,7 +27,7 @@ DISPATCH_INTERVAL_SECONDS = 20
 
 
 async def _dispatch_loop(settings: Settings, stopping: asyncio.Event) -> None:
-    """Drain undelivered events to ntfy and Google Calendar.
+    """Drain undelivered events to Pushover and Google Calendar.
 
     Kept apart from the poller so a Google outage delays notifications instead of
     stalling the polling that produces them.
@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     async with session_scope() as session:
         count = await seed_airports(session)
-        await prefs.ensure_defaults(session)
+        await prefs.load(session)
     log.info("airports seeded: %d", count)
     # Logging was configured before the database existed, so the stored level is only
     # applied once there is a row to read it from.
