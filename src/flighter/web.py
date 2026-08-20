@@ -747,7 +747,7 @@ def create_app(settings: Settings) -> FastAPI:
         aeroapi_rate_limit_per_minute: Annotated[str, Form()],
         anthropic_model: Annotated[str, Form()],
         extraction_confidence_threshold: Annotated[str, Form()],
-        imap_folder: Annotated[str, Form()],
+        imap_import_folder: Annotated[str, Form()],
         imap_idle_seconds: Annotated[str, Form()],
         icloud_calendar_name: Annotated[str, Form()] = "",
     ) -> Response:
@@ -758,7 +758,7 @@ def create_app(settings: Settings) -> FastAPI:
             "aeroapi_rate_limit_per_minute": aeroapi_rate_limit_per_minute.strip(),
             "anthropic_model": anthropic_model.strip(),
             "extraction_confidence_threshold": extraction_confidence_threshold.strip(),
-            "imap_folder": imap_folder.strip(),
+            "imap_import_folder": imap_import_folder.strip(),
             "imap_idle_seconds": imap_idle_seconds.strip(),
             "icloud_calendar_name": icloud_calendar_name.strip(),
         }

@@ -45,10 +45,10 @@ class Prefs(BaseModel):
     # Below this an extraction lands in the review queue instead of the tracked list.
     extraction_confidence_threshold: float = 0.85
 
-    # The folder the IMAP watcher idles on, and how often that IDLE is re-issued. A
-    # silent connection is what an impatient server and a NAT table both drop, and five
-    # minutes is well inside what either tolerates.
-    imap_folder: str = "INBOX"
+    # The mailbox you move a flight email into to have it imported, and how often the
+    # IDLE that watches it is re-issued. A silent connection is what an impatient server
+    # and a NAT table both drop, and five minutes is well inside what either tolerates.
+    imap_import_folder: str = "flighter"
     imap_idle_seconds: int = 300
     # The display name of the iCloud calendar flights are written to, found by name
     # because iCloud will not let a client create one. A calendar of its own, so a bad

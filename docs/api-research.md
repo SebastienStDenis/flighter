@@ -742,7 +742,132 @@ enough key across renames in the Calendar app.
 
 ---
 
-## 6. Library versions
+## 6. iCloud Mail over IMAP, and marking a message for import
+
+The service imports the emails you tell it to rather than everything that arrives, so the
+question is what a "tell it to" can be that survives the trip from an iPhone or a Mac, through
+iCloud, to an IMAP client. Three candidates, and only one of them works.
+
+### 6.1 A custom keyword named `flighter` - not settable from any Apple client
+
+RFC 3501 §2.3.2 allows server-defined keywords and says a server advertises `\*` in
+`PERMANENTFLAGS` when it will accept new ones
+(<https://datatracker.ietf.org/doc/html/rfc3501#section-2.3.2>). Whether iCloud advertises `\*`
+is not documented by Apple and is not established here.
+
+It does not matter, because nothing on the user's side can set such a keyword. Apple Mail's flag
+control offers seven fixed colours, which travel as the keywords `$MailFlagBit0`, `$MailFlagBit1`
+and `$MailFlagBit2`, which together encode a colour index 0-6: red `0,0,0`, blue `0,0,1`, yellow
+`0,1,0`, grey `0,1,1`, orange `1,0,0`, purple `1,0,1`, green `1,1,0`. The keywords are registered
+in an Internet-Draft written by an Apple engineer
+(<https://www.ietf.org/archive/id/draft-eggert-mailflagcolors-00.html>), and a plain `\Flagged`
+with none of the three set is the red one, which is why a colour flag cannot be told apart from
+ordinary flagging on a non-Apple client. Renaming a flag in Mail
+on the Mac - "click the flag name, click it again, and type a new name" - changes a label held on
+that Mac and nothing on the server
+(<https://support.apple.com/guide/mail/mlhlp1052/mac>,
+<https://discussions.apple.com/thread/255689889>). A user who renames the orange flag to
+`flighter` has still set `$MailFlagBit0`, and no client offers a field for an arbitrary keyword.
+
+**Ruled out.** The owner's word for it survives; the mechanism does not.
+
+### 6.2 One specific colour flag - settable, but broken for exactly this mail
+
+Colours are settable on both platforms. On the iPhone, "Swipe left over the email message. Tap
+Flag", and for a colour, "Tap the Reply button. Tap Flag, then select the color you want to use
+for that flag" (<https://support.apple.com/en-us/104971>). Flags sync to every device signed in to
+the same Apple Account.
+
+Two problems, one of them fatal:
+
+- The same Apple page states: "If you use the categories view for Mail in iOS 18.2, **you cannot
+  flag emails that have been categorized as Promotions, Updates, or Transactions**"
+  (<https://support.apple.com/en-us/104971>). Airline confirmations are precisely what Mail files
+  under *Transactions*, and categories view is the default. The one gesture this design rests on
+  is the one iOS withholds for this class of mail.
+- No colour is the default on both platforms, so "flag it orange" is a colour the user has to pick
+  deliberately and remember, and it collides with any other use they already make of flags.
+
+**Ruled out**, on the first point alone.
+
+### 6.3 A mailbox the message is moved into - the one that works
+
+Creating the mailbox, on the iPhone: "In the Mailboxes list, tap Edit in the upper-right corner,
+then tap New Mailbox. Give your mailbox a name ... tap Mailbox Location and choose the account
+where you want to create a mailbox." Moving mail into it: "Tap Select in the upper-right corner.
+Select the email messages, then tap the Folder button. Choose a mailbox to move the email messages
+to." (<https://support.apple.com/en-us/104971>)
+
+The same page settles the categories question the other way: "**You can still move individual
+email messages into specific mailboxes when you use the categories layout.**" Moving works where
+flagging does not.
+
+On the Mac, `Mailbox > New Mailbox`, and the guide is explicit that the location decides whether it
+travels: "Mailboxes you create in On My Mac are local ... while mailboxes created on your email
+account's Mail server can be accessed on any computer or device where you use the account"
+(<https://support.apple.com/guide/mail/create-or-delete-mailboxes-mlhlp1021/mac>). On iCloud.com,
+folders are created and messages moved from the Mail sidebar
+(<https://support.apple.com/guide/icloud/organize-email-with-folders-mm6b1a6730/icloud>).
+
+**Chosen.** It is one mailbox called `flighter`, made once, and thereafter one move per email from
+whichever device is in hand. It carries the owner's own word for it, it cannot be confused with
+any other use of the mailbox, and it needs no scripting anywhere.
+
+The unmark is the reverse move. iCloud ships an Archive folder among its seven defaults - Inbox,
+VIP, Drafts, Sent, Archive, Trash and Junk
+(<https://support.apple.com/guide/icloud/organize-email-with-folders-mm6b1a6730/icloud>) - and the
+client finds it by the RFC 6154 `\Archive` attribute on the `LIST` reply rather than by name, so a
+non-English account still lands in the right place
+(<https://datatracker.ietf.org/doc/html/rfc6154>).
+
+### 6.4 `MOVE`, and the risk in relying on it
+
+Clearing a mark is `UID MOVE` (RFC 6851, <https://datatracker.ietf.org/doc/html/rfc6851>). Apple's
+own TN3191 lists `MOVE` among the extensions Mail uses and says it "will use this to efficiently
+move messages between mailboxes. This notably improves message deletion, as messages are generally
+moved to Trash when the user deletes them"
+(<https://developer.apple.com/documentation/technotes/tn3191-imap-extensions-supported-by-mail>).
+That is Apple describing its client, not its server, and it is the strongest evidence available
+short of an account to test against.
+
+Third-party reports of iCloud's post-login `CAPABILITY` line disagree with each other on `MOVE`,
+so this is the one assumption in the design that is not settled. The failure is benign and loud
+rather than silent: a refused `MOVE` raises, the message keeps its mark, the ingest log already
+holds its outcome so nothing is imported twice and nothing is pushed twice, and `flighter check`
+reports the message still sitting in the folder.
+
+### 6.5 `message:` URLs, for the link on a failure push
+
+A push about an email that did not import links back to the email. Apple Mail registers the
+`message:` scheme on both platforms; the structure is "the 'message:' scheme, followed by the
+message-id of the message, enclosed in angle brackets", and "the double slashes after the
+'message:' are optional, and the angle brackets surrounding the message-id value can be literal or
+URL-encoded" (<https://daringfireball.net/2007/12/message_urls_leopard_mail>). `%3C` and `%3E` are
+the percent-encodings of `<` and `>`, so `message://%3C{message-id}%3E` is one of the four working forms.
+
+NSHipster confirms the behaviour on current systems - "The stock Mail client on both iOS and macOS
+will attempt to open URLs with the custom message: scheme ... The only trick here is to
+percent-encode the Message ID in the URL" - and adds two caveats: the message has to be present in
+Mail already, and on macOS a link to a message Mail has not loaded raises an alert rather than
+opening (<https://nshipster.com/message-id/>). Neither matters here: the link is only ever sent
+about a message the user marked minutes earlier and which is still on the server.
+
+Pushover carries it as the supplementary URL, capped at 512 characters
+(<https://pushover.net/api>). Pushover advises against app-specific URL schemes "in public plugins,
+websites, and apps" because handling varies by platform; this is a single-user deployment on Apple
+devices, where `message:` is handled by a system app.
+
+### 6.6 Not verified
+
+Without a real iCloud account to run against, four things rest on documentation alone: that iCloud
+advertises `MOVE` after login (§6.4); the exact `LIST` reply shape for the account, including
+whether the archive really carries `\Archive`; whether `IDLE` on the import folder reports a move
+*into* it promptly enough to matter, or whether the periodic sweep is doing all the real work; and
+whether iCloud advertises `\*` in `PERMANENTFLAGS`, which is now moot.
+
+---
+
+## 7. Library versions
 
 Latest stable releases on PyPI, read from `https://pypi.org/pypi/<name>/json` (`info.version`) on
 2026-08-19, except `icalendar`, read on 2026-08-20.

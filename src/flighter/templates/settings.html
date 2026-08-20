@@ -121,23 +121,29 @@
   <div class="card mt-3" data-size="sm">
     <header>
       <h3>Mail</h3>
-      <p>Your mailbox is only ever read, never changed.</p>
+      <p>Only the emails you move into this mailbox are imported. Nothing else is read.</p>
     </header>
     <section>
       <fieldset class="fieldset gap-4">
-        <div class="grid grid-cols-2 gap-3">
+        <div role="group" class="field">
+          <label for="imap_import_folder">Import mailbox</label>
+          <input type="text" id="imap_import_folder" name="imap_import_folder" required
+                 class="font-mono" aria-describedby="folder-help"
+                 value="{{ posted['imap_import_folder'] }}">
+          <p id="folder-help">Make a mailbox with this name in your iCloud account, then move a
+            booking email into it and the flight appears here. On the iPhone:
+            <strong>Mailboxes &rarr; Edit &rarr; New Mailbox</strong>, give it this name, set
+            <strong>Mailbox Location</strong> to iCloud; then swipe an email and tap
+            <strong>More &rarr; Move Message</strong>. On the Mac, drag the email into the same
+            mailbox. Imported mail is moved to Archive; anything that failed stays where it is
+            and is tried again, and your phone is told either way.</p>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
           <div role="group" class="field">
-            <label for="imap_folder">Watched folder</label>
-            <input type="text" id="imap_folder" name="imap_folder" required class="font-mono"
-                   value="{{ posted['imap_folder'] }}">
-          </div>
-          <div role="group" class="field">
-            <label for="imap_idle_seconds">Check every (seconds)</label>
+            <label for="imap_idle_seconds">Check every (s)</label>
             <input type="number" min="60" max="1740" id="imap_idle_seconds" class="font-mono"
                    name="imap_idle_seconds" required value="{{ posted['imap_idle_seconds'] }}">
           </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
           <div role="group" class="field">
             <label for="extraction_confidence_threshold">Review below</label>
             <input type="number" min="0" max="1" step="0.01" class="font-mono" required

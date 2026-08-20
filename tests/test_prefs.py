@@ -37,12 +37,12 @@ async def test_a_missing_row_is_created_with_the_defaults() -> None:
 
 
 async def test_saving_one_field_leaves_the_others_alone() -> None:
-    session = FakeSession(Preferences(id=1, values={"imap_folder": "Travel"}))
+    session = FakeSession(Preferences(id=1, values={"imap_import_folder": "Travel"}))
     saved = await prefs.save(session, {"log_level": "DEBUG"})  # type: ignore[arg-type]
     assert saved.log_level == "DEBUG"
-    assert saved.imap_folder == "Travel"
+    assert saved.imap_import_folder == "Travel"
     assert session.row is not None
-    assert session.row.values["imap_folder"] == "Travel"
+    assert session.row.values["imap_import_folder"] == "Travel"
 
 
 async def test_a_saved_value_becomes_the_live_one() -> None:

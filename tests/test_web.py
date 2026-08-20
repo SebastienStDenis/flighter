@@ -54,7 +54,7 @@ SETTINGS_FORM = {
     "aeroapi_rate_limit_per_minute": "8",
     "anthropic_model": "claude-sonnet-5",
     "extraction_confidence_threshold": "0.85",
-    "imap_folder": "INBOX",
+    "imap_import_folder": "flighter",
     "imap_idle_seconds": "300",
     "icloud_calendar_name": "Flights",
 }

@@ -1,16 +1,15 @@
-"""iCloud over IMAP: one connection, the UID cursor, and raw messages out.
+"""iCloud over IMAP: one connection, one folder, and raw messages out.
 
-It knows nothing about flights, and it never writes to the mailbox. Everything is read
-with `BODY.PEEK[]`, so nothing is marked read, flagged or moved: how far we have got is
-our own state rather than a flag on somebody else's server, and the mailbox looks the
-same afterwards as a phone left it.
+It knows nothing about flights. The folder *is* the queue: an email you have moved into
+it is work waiting to be done, and moving it back out is what says the work is finished.
+Nothing is scanned, ranked or guessed at, so there is no cursor to keep and no window to
+re-scan - what is in the folder is what is pending, and an empty folder means there is
+nothing to do.
 
-The cursor is the whole difficulty. A UID only means anything inside the UIDVALIDITY it
-was issued under, so the two are stored together, and a UIDVALIDITY that has changed
-throws the position away and scans the recent window again rather than trusting a number
-that now points somewhere else. Advancing it is a promise that everything before it has
-been dealt with, so it is written by the caller once a batch has been processed rather
-than when the batch is handed over.
+Bodies are read with `BODY.PEEK[]`, so an email is never silently marked as read. The
+mark itself is a write, and the only one: a message that came out the far end of the
+pipeline is moved to the archive folder, and a message that failed is left exactly where
+it stands so the next sweep tries it again.
 """
 
 from __future__ import annotations
@@ -20,20 +19,16 @@ import contextlib
 import logging
 import re
 from collections.abc import Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime
 from email import message_from_bytes, policy
 from email.utils import parsedate_to_datetime
-from itertools import batched
 from typing import Any, NamedTuple
 
 from aioimaplib import IMAP4_SSL
 from pydantic import BaseModel
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import prefs
 from .config import Settings
-from .models import KV, IngestLog
 
 log = logging.getLogger(__name__)
 
@@ -45,43 +40,24 @@ IMAP_PORT = 993
 # rather than as a mail loop that is alive and has not fetched anything for a week.
 COMMAND_TIMEOUT_SECONDS = 30.0
 
-CURSOR_KEY = "imap_cursor"
-
-# How far back a first run, or a mailbox whose UIDVALIDITY has changed, looks. Wide
-# enough to cover a long outage, and the ingest log is what keeps the overlap from being
-# processed a second time.
-RESCAN_DAYS = 14
-
-# How many Message-ID headers are asked for in one command. A UID set is spelled out in
-# full, and a server that truncates an over-long command line does it silently.
-HEADER_BATCH = 200
-
 # iCloud allows about five simultaneous connections per account, and the phone and the
 # desktop are already holding some of them. A refused connection is answered by waiting
 # rather than by asking again immediately, which is how an account gets locked out.
 RECONNECT_MIN_SECONDS = 15.0
 RECONNECT_MAX_SECONDS = 900.0
 
+# Where a finished message goes. `\Archive` is what the account itself calls its archive
+# whatever the display language is; the last resort is the inbox, which is somewhere the
+# user will certainly look.
+ARCHIVE_ATTRIBUTE = "\\archive"
+ARCHIVE_FALLBACKS = ("Archive", "INBOX")
+
 _UIDVALIDITY_RE = re.compile(rb"\[UIDVALIDITY (\d+)\]")
-_UIDNEXT_RE = re.compile(rb"\[UIDNEXT (\d+)\]")
 _EXISTS_RE = re.compile(rb"^(\d+) EXISTS")
 _UID_RE = re.compile(rb"UID (\d+)")
-
-# IMAP dates are spelled in English whatever the machine's locale says.
-_MONTHS = (
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-)
+# `(\HasNoChildren \Archive) "/" "Archive"`: attributes, the hierarchy delimiter, a name
+# that is quoted only when the server feels like quoting it.
+_LIST_RE = re.compile(r'^\(([^)]*)\)\s+(?:"[^"]*"|NIL)\s+(?:"((?:[^"\\]|\\.)*)"|(\S+))\s*$')
 
 
 class Message(BaseModel):
@@ -95,11 +71,18 @@ class Message(BaseModel):
     text_html: str = ""
 
 
-class Cursor(NamedTuple):
-    """Where we have got to. The UID is meaningless without the UIDVALIDITY beside it."""
+class Marked(NamedTuple):
+    """One message waiting in the folder, with the UID that clears its mark."""
 
-    uidvalidity: int
-    last_uid: int
+    uid: int
+    message: Message
+
+
+class Listed(NamedTuple):
+    """One line of a LIST reply."""
+
+    attributes: frozenset[str]
+    name: str
 
 
 # -- message parsing -----------------------------------------------------------------
@@ -152,7 +135,7 @@ def _parse_date(value: object) -> datetime | None:
 
 
 class Mailbox:
-    """One IMAP connection to the watched folder.
+    """One IMAP connection to the folder you move flight emails into.
 
     Held open and idling rather than reopened every few minutes: a login costs Apple
     more than an IDLE does, and the connection budget is shared with every other client
@@ -162,11 +145,10 @@ class Mailbox:
     def __init__(self, settings: Settings, client: Any | None = None) -> None:
         self._settings = settings
         self._client = client
-        self.folder = prefs.current().imap_folder
-        self.message_count = 0
+        self.folder = prefs.current().imap_import_folder
+        self.archive = ARCHIVE_FALLBACKS[-1]
+        self.waiting = 0
         self._uidvalidity = 0
-        self._uidnext = 0
-        self._pending: Cursor | None = None
 
     async def connect(self) -> None:
         """Open the connection, log in, and select the folder."""
@@ -181,19 +163,26 @@ class Mailbox:
             ),
             "login",
         )
-        response = _ok(await self._client.select(_quote(self.folder)), f"select {self.folder}")
 
+        listed = _listed(_ok(await self._client.list('""', '"*"'), "list").lines)
+        if self.folder not in {entry.name for entry in listed}:
+            raise RuntimeError(
+                f"there is no mailbox called {self.folder}. Make one in Mail and move the "
+                f"flight emails you want imported into it."
+            )
+        self.archive = _archive(listed)
+
+        response = _ok(await self._client.select(_quote(self.folder)), f"select {self.folder}")
         uidvalidity = _first(_UIDVALIDITY_RE, response.lines)
         if uidvalidity is None:
             raise RuntimeError(f"{self.folder} was selected without a UIDVALIDITY")
         self._uidvalidity = uidvalidity
-        self._uidnext = _first(_UIDNEXT_RE, response.lines) or 0
-        self.message_count = _first(_EXISTS_RE, response.lines) or 0
+        self.waiting = _first(_EXISTS_RE, response.lines) or 0
         log.info(
-            "watching %s: %d message(s), UIDVALIDITY %d",
+            "watching %s: %d message(s) marked, finished mail goes to %s",
             self.folder,
-            self.message_count,
-            self._uidvalidity,
+            self.waiting,
+            self.archive,
         )
 
     async def close(self) -> None:
@@ -204,63 +193,41 @@ class Mailbox:
         with contextlib.suppress(Exception):
             await client.logout()
 
-    async def poll(self, session: AsyncSession) -> list[Message]:
-        """Everything that has arrived since the stored cursor, already de-duplicated.
+    async def poll(self) -> list[Marked]:
+        """Everything sitting in the folder right now, oldest first.
 
-        The new position is held back until commit_cursor is called, so a crash part way
-        through a batch replays the batch instead of skipping the rest of it.
+        No de-duplication and no cursor: the folder holds only what is still to be done,
+        and anything already dealt with was moved out of it by `clear_mark`.
         """
-        stored = await _read_cursor(session)
-        if stored is not None and stored.uidvalidity == self._uidvalidity:
-            found = await self._search_since(stored.last_uid)
-            uids = [uid for uid in found if uid > stored.last_uid]
-            floor = stored.last_uid
-        else:
-            if stored is not None:
-                log.warning(
-                    "UIDVALIDITY changed from %d to %d; rescanning the last %d days",
-                    stored.uidvalidity,
-                    self._uidvalidity,
-                    RESCAN_DAYS,
-                )
-            else:
-                log.info("no cursor yet; seeding from the last %d days", RESCAN_DAYS)
-            uids = await self._search_recent(RESCAN_DAYS)
-            floor = 0
+        response = _ok(await self._require_client().uid_search("ALL", charset=None), "search")
+        uids = _uids(response.lines)
+        self.waiting = len(uids)
 
-        # Nothing in the window still moves the cursor forward, to the last UID the
-        # folder holds: leaving it where it was would hand the whole mailbox to the next
-        # poll, which reads `n:*` as "at least the newest message" whatever n is.
-        position = max(uids) if uids else max(self._uidnext - 1, floor)
-        self._pending = Cursor(self._uidvalidity, position)
-        return await self._collect(session, uids)
+        marked = []
+        for uid in uids:
+            for _, raw in await self._fetch(uid, "(BODY.PEEK[])"):
+                message_id = _message_id(raw, self._uidvalidity, uid)
+                marked.append(Marked(uid, parse_message(raw, message_id)))
+        return marked
 
-    async def backfill(self, session: AsyncSession, days: int = 30) -> list[Message]:
-        """A one-off sweep of recent mail, for the CLI.
+    async def clear_mark(self, uid: int) -> None:
+        """Move a finished message to the archive, which is what unmarks it.
 
-        Leaves the cursor alone: a backfill is a catch-up over old mail and must not
-        move a live watcher's position, forwards or backwards.
+        Only ever called once the pipeline has written the message's ingest_log row, so a
+        crash between the two leaves the message marked and the next sweep replays it.
         """
-        return await self._collect(session, await self._search_recent(days))
-
-    async def commit_cursor(self, session: AsyncSession) -> None:
-        """Advance the stored position. Only ever called once a batch is fully processed."""
-        if self._pending is None:
-            return
-        await session.merge(
-            KV(
-                key=CURSOR_KEY,
-                value={
-                    "uidvalidity": self._pending.uidvalidity,
-                    "last_uid": self._pending.last_uid,
-                },
-            )
+        _ok(
+            await self._require_client().uid("move", str(uid), _quote(self.archive)),
+            f"move {uid} to {self.archive}",
         )
-        log.debug("cursor advanced to %s", self._pending)
-        self._pending = None
 
     async def wait_for_mail(self, seconds: float) -> None:
         """Idle until the server has something to say, or the cycle is up.
+
+        Marking a message *is* moving it into the selected folder, so IDLE reports it as
+        an arrival and the next sweep runs within a second or two. The timeout is the
+        floor under that: a move made while the connection was being re-established is
+        never announced to anybody, and only the sweep finds it.
 
         Cycled rather than left open indefinitely because a silent IDLE is what a NAT
         table and an impatient server both drop, and neither tells the client.
@@ -280,54 +247,8 @@ class Mailbox:
             raise RuntimeError("the mailbox is not connected")
         return self._client
 
-    async def _search_since(self, last_uid: int) -> list[int]:
-        response = _ok(
-            await self._require_client().uid_search(f"UID {last_uid + 1}:*", charset=None),
-            "search",
-        )
-        return _uids(response.lines)
-
-    async def _search_recent(self, days: int) -> list[int]:
-        since = _imap_date(datetime.now(UTC).date() - timedelta(days=days))
-        response = _ok(
-            await self._require_client().uid_search(f"SINCE {since}", charset=None), "search"
-        )
-        return _uids(response.lines)
-
-    async def _collect(self, session: AsyncSession, uids: Sequence[int]) -> list[Message]:
-        """Fetch the bodies of everything the ingest log has not already recorded.
-
-        The Message-ID headers are read first, in one command: they are what the log is
-        keyed on, and reading a few hundred bytes each is what stops a re-scan from
-        pulling down a fortnight of mail it has already decided about.
-        """
-        if not uids:
-            return []
-
-        identified: list[tuple[int, str]] = []
-        for batch in batched(uids, HEADER_BATCH):
-            identified.extend(
-                (uid, _message_id(raw, self._uidvalidity, uid))
-                for uid, raw in await self._fetch(batch, "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
-            )
-        seen = await _already_ingested(session, [message_id for _, message_id in identified])
-        fresh = [(uid, message_id) for uid, message_id in identified if message_id not in seen]
-        if len(fresh) != len(identified):
-            log.info(
-                "skipping %d message(s) already in the ingest log", len(identified) - len(fresh)
-            )
-
-        messages = []
-        for uid, message_id in fresh:
-            for _, raw in await self._fetch([uid], "(BODY.PEEK[])"):
-                messages.append(parse_message(raw, message_id))
-        return messages
-
-    async def _fetch(self, uids: Sequence[int], parts: str) -> list[tuple[int, bytes]]:
-        uid_set = ",".join(str(uid) for uid in uids)
-        response = _ok(
-            await self._require_client().uid("fetch", uid_set, parts), f"fetch {uid_set}"
-        )
+    async def _fetch(self, uid: int, parts: str) -> list[tuple[int, bytes]]:
+        response = _ok(await self._require_client().uid("fetch", str(uid), parts), f"fetch {uid}")
         return _fetched(response.lines)
 
 
@@ -379,11 +300,33 @@ def _fetched(lines: Sequence[Any]) -> list[tuple[int, bytes]]:
     return fetched
 
 
+def _listed(lines: Sequence[Any]) -> list[Listed]:
+    """The mailboxes out of a LIST reply, one per line, plus a completion line to ignore."""
+    entries = []
+    for line in lines:
+        if isinstance(line, bytearray):
+            continue
+        match = _LIST_RE.match(bytes(line).decode(errors="replace").strip())
+        if match:
+            attributes = frozenset(flag.lower() for flag in match.group(1).split())
+            entries.append(Listed(attributes, _unquote(match.group(2) or match.group(3))))
+    return entries
+
+
+def _archive(listed: Sequence[Listed]) -> str:
+    for entry in listed:
+        if ARCHIVE_ATTRIBUTE in entry.attributes:
+            return entry.name
+    names = {entry.name for entry in listed}
+    return next((name for name in ARCHIVE_FALLBACKS if name in names), ARCHIVE_FALLBACKS[-1])
+
+
 def _message_id(raw: bytes, uidvalidity: int, uid: int) -> str:
     """The RFC822 Message-ID, which is what survives a message being moved or re-filed.
 
-    A UID does not: it belongs to one folder and one UIDVALIDITY, so keying the ingest
-    log on it would re-process every message the day either of those changed.
+    A UID does not: it belongs to one folder and one UIDVALIDITY, and clearing a mark
+    moves the message to another folder, so keying the ingest log on it would make every
+    finished message look new again.
     """
     header = message_from_bytes(raw, policy=policy.default).get("Message-ID")
     value = str(header).strip() if header else ""
@@ -395,28 +338,5 @@ def _quote(folder: str) -> str:
     return f'"{escaped}"'
 
 
-def _imap_date(day: date) -> str:
-    return f"{day.day:02d}-{_MONTHS[day.month - 1]}-{day.year}"
-
-
-# -- stored state --------------------------------------------------------------------
-
-
-async def _already_ingested(session: AsyncSession, message_ids: Sequence[str]) -> set[str]:
-    if not message_ids:
-        return set()
-    rows = await session.execute(
-        select(IngestLog.message_id).where(IngestLog.message_id.in_(list(message_ids)))
-    )
-    return set(rows.scalars().all())
-
-
-async def _read_cursor(session: AsyncSession) -> Cursor | None:
-    row = await session.get(KV, CURSOR_KEY)
-    if row is None:
-        return None
-    uidvalidity = row.value.get("uidvalidity")
-    last_uid = row.value.get("last_uid")
-    if uidvalidity is None or last_uid is None:
-        return None
-    return Cursor(int(uidvalidity), int(last_uid))
+def _unquote(name: str) -> str:
+    return name.replace('\\"', '"').replace("\\\\", "\\")

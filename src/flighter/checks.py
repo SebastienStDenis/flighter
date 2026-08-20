@@ -98,7 +98,11 @@ async def _check_pushover(settings: Settings) -> CheckResult:
 
 
 async def _check_mail(settings: Settings) -> CheckResult:
-    """Logs in and selects the folder, which is everything the watcher needs to work."""
+    """Logs in, finds the import folder and counts what is waiting in it.
+
+    That is the whole sweep short of doing the work, so it answers both questions at
+    once: can the mark be seen at all, and is anything sitting there unimported.
+    """
     if not settings.icloud_configured:
         return CheckResult(
             "mail", False, "ICLOUD_EMAIL and ICLOUD_APP_PASSWORD are not set in .env"
@@ -112,7 +116,7 @@ async def _check_mail(settings: Settings) -> CheckResult:
         return CheckResult("mail", False, str(exc))
     finally:
         await mailbox.close()
-    return CheckResult("mail", True, f"{mailbox.message_count} message(s) in {mailbox.folder}")
+    return CheckResult("mail", True, f"{mailbox.waiting} message(s) marked in {mailbox.folder}")
 
 
 async def _check_calendar(settings: Settings) -> CheckResult:

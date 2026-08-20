@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
+from urllib.parse import quote
 
 import httpx
 
@@ -73,6 +75,14 @@ _EMOJI = {
 }
 DEFAULT_EMOJI = "✈️"
 BUDGET_EMOJI = "💸"
+IMPORT_FAILED_EMOJI = "📭"
+
+# What each import outcome is called on the lock screen, and the sentence under it.
+_IMPORTED = {
+    "created": ("Flight added", "{flights}"),
+    "review": ("Flight needs a look", "{flights} - the extraction was not confident enough."),
+    "duplicate": ("Already tracked", "{flights} was already on the list; nothing was added."),
+}
 
 
 def flight_label(booking: Booking) -> str:
@@ -81,6 +91,15 @@ def flight_label(booking: Booking) -> str:
         f"{booking.marketing_carrier}{booking.marketing_number} "
         f"{booking.origin_iata} -> {booking.dest_iata}"
     )
+
+
+def message_url(message_id: str) -> str:
+    """A link that opens the email itself, in Mail, on the phone and on the Mac.
+
+    The angle brackets around a Message-ID have to be percent-encoded or Mail ignores the
+    URL entirely; what sits between them is left as it stands.
+    """
+    return f"message://%3C{quote(message_id.strip().strip('<>'), safe='@')}%3E"
 
 
 def _parse(value: str | None) -> datetime | None:
@@ -189,6 +208,39 @@ class Notifier:
             url_title="Open the flight",
         )
 
+    async def mail_imported(self, bookings: Sequence[Booking], *, outcome: str) -> None:
+        """A marked email became flights.
+
+        Priority 0: knowing the import worked is worth a glance at the phone, never worth
+        waking somebody up, and the flight page is the link because it carries the live
+        gate and status. iCloud publishes no web address for a single calendar event, so
+        there is nothing to link to on that side even when one has been written.
+        """
+        title, body = _IMPORTED[outcome]
+        flights = ", ".join(flight_label(booking) for booking in bookings)
+        await self._send(
+            title=f"{DEFAULT_EMOJI} {title}",
+            message=body.format(flights=flights or "The flight"),
+            priority=PRIORITY_NORMAL,
+            url=self._flight_url(bookings),
+            url_title="Open the flight",
+        )
+
+    async def mail_failed(self, *, message_id: str, subject: str, reason: str) -> None:
+        """Nothing came of an email that was marked.
+
+        Priority 0 as well: an import that did not happen costs nobody a flight. The link
+        opens the email itself in Mail, on the phone or on the Mac, which is where the
+        next move is made either way.
+        """
+        await self._send(
+            title=f"{IMPORT_FAILED_EMOJI} Nothing imported",
+            message=f"{subject}\n{reason}" if subject else reason,
+            priority=PRIORITY_NORMAL,
+            url=message_url(message_id),
+            url_title="Open the email",
+        )
+
     async def budget_tripped(self, spend: Decimal, cap: Decimal) -> None:
         """The AeroAPI breaker has latched: tracking is stale until someone raises the cap."""
         await self._send(
@@ -201,6 +253,11 @@ class Notifier:
             url=prefs.current().public_base_url,
             url_title="Open flighter",
         )
+
+    @staticmethod
+    def _flight_url(bookings: Sequence[Booking]) -> str:
+        base = prefs.current().public_base_url
+        return f"{base}/f/{bookings[0].id}" if bookings else base
 
     async def _send(
         self,

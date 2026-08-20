@@ -76,14 +76,14 @@ def _cmd_seed_airports(settings: Settings, _args: argparse.Namespace) -> int:
     return asyncio.run(run())
 
 
-def _cmd_backfill(settings: Settings, args: argparse.Namespace) -> int:
-    """One-off catch-up over recent mail, for a first run or after a long outage."""
-    from .ingest import backfill
+def _cmd_import(settings: Settings, _args: argparse.Namespace) -> int:
+    """Sweep the import folder now instead of waiting for the watcher's next pass."""
+    from .ingest import import_marked
 
     async def run() -> int:
         async with _database(settings):
-            outcomes = await backfill(days=args.days, settings=settings)
-        print(f"processed {len(outcomes)} message(s)")
+            outcomes = await import_marked(settings=settings)
+        print(f"imported {len(outcomes)} message(s)")
         return 0
 
     return asyncio.run(run())
@@ -138,10 +138,9 @@ def main(argv: list[str] | None = None) -> int:
     subparsers.add_parser("check", help="exercise every external dependency").set_defaults(
         func=_cmd_check
     )
-
-    backfill = subparsers.add_parser("backfill", help="ingest recent mail once")
-    backfill.add_argument("--days", type=int, default=30)
-    backfill.set_defaults(func=_cmd_backfill)
+    subparsers.add_parser("import", help="import every marked email now").set_defaults(
+        func=_cmd_import
+    )
 
     args = parser.parse_args(argv)
     settings = get_settings()

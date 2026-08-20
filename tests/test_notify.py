@@ -21,7 +21,7 @@ from flighter.events import (
     LANDED,
 )
 from flighter.models import Booking, FlightEvent
-from flighter.notify import MESSAGES_URL, Notifier
+from flighter.notify import MESSAGES_URL, Notifier, message_url
 
 ORIGIN_TZ = "America/New_York"
 DEST_TZ = "America/Los_Angeles"
@@ -143,3 +143,59 @@ async def test_budget_alert_is_high_priority(settings: Settings) -> None:
     assert sent["priority"] == "1"
     assert sent["title"].endswith("AeroAPI budget reached")
     assert "$4.12 of the $4.00 monthly cap" in sent["message"]
+
+
+# -- importing a marked email --------------------------------------------------------
+
+
+async def imported(settings: Settings, outcome: str) -> dict[str, str]:
+    recorder = Recorder()
+    await Notifier(settings, transport=recorder.transport).mail_imported(
+        [booking()], outcome=outcome
+    )
+    return recorder.only
+
+
+async def test_an_import_links_to_the_flight_page(settings: Settings) -> None:
+    """Not the calendar: iCloud publishes no web address for one event, and the flight
+    page carries the live gate and status anyway."""
+    sent = await imported(settings, "created")
+
+    assert sent["title"].endswith("Flight added")
+    assert sent["message"] == "DL1234 JFK -> LAX"
+    assert sent["url"] == "https://flights.example.com/f/7"
+    assert sent["priority"] == "0"
+
+
+@pytest.mark.parametrize(
+    ("outcome", "title"),
+    [("review", "Flight needs a look"), ("duplicate", "Already tracked")],
+)
+async def test_every_import_outcome_has_its_own_words(
+    settings: Settings, outcome: str, title: str
+) -> None:
+    sent = await imported(settings, outcome)
+    assert sent["title"].endswith(title)
+    assert "DL1234 JFK -> LAX" in sent["message"]
+
+
+async def test_a_failed_import_links_back_to_the_email(settings: Settings) -> None:
+    recorder = Recorder()
+    await Notifier(settings, transport=recorder.transport).mail_failed(
+        message_id="<abc.123@mail.example.com>",
+        subject="Your itinerary",
+        reason="RuntimeError: the model timed out",
+    )
+    sent = recorder.only
+
+    # Mail opens this on the phone and on the Mac; the brackets have to be encoded.
+    assert sent["url"] == "message://%3Cabc.123@mail.example.com%3E"
+    assert sent["priority"] == "0"
+    assert "the model timed out" in sent["message"]
+    assert "Your itinerary" in sent["message"]
+
+
+@pytest.mark.parametrize("message_id", ["<abc@x.example>", "abc@x.example"])
+def test_a_message_url_is_encoded_the_same_either_way(message_id: str) -> None:
+    """The log stores whatever the header said, brackets or not."""
+    assert message_url(message_id) == "message://%3Cabc@x.example%3E"
