@@ -13,6 +13,7 @@ nothing is a completion line and nothing else, and the numbers in it are not UID
 
 from __future__ import annotations
 
+import contextlib
 import imaplib
 import os
 from pathlib import Path
@@ -189,7 +190,7 @@ class FakeServer:
 
 
 class FakeSocket:
-    """What imaplib reads and writes through.
+    """What imaplib reads and writes through: the socket and the file it makes of it.
 
     Bytes are handed over in memory, but IDLE waits on the descriptor itself rather than
     on a read, so readiness is a real pipe that only an announced line ever writes to.
@@ -200,6 +201,7 @@ class FakeSocket:
         self._out = bytearray(GREETING)
         self._sent = bytearray()
         self._ready_out, self._ready_in = os.pipe()
+        os.set_blocking(self._ready_out, False)
         self._timeout: float | None = None
 
     def reply(self, data: bytes) -> None:
@@ -217,8 +219,28 @@ class FakeSocket:
             self._sent = bytearray(rest)
             self._server.command(line.decode(), self)
 
-    def recv(self, size: int) -> bytes:
+    def makefile(self, mode: str) -> FakeSocket:
+        return self
+
+    def read(self, size: int) -> bytes:
+        return self._take(size)
+
+    def readline(self, limit: int = -1) -> bytes:
+        end = self._out.find(b"\n")
+        size = len(self._out) if end < 0 else end + 1
+        return self._take(size if limit < 0 else min(size, limit))
+
+    def _take(self, size: int) -> bytes:
+        if not self._out:
+            # imap_tools drains an IDLE with the socket non-blocking and stops at the
+            # timeout; anywhere else an empty buffer is the server having hung up.
+            if self._timeout == 0:
+                raise TimeoutError
+            return b""
         taken, self._out = bytes(self._out[:size]), self._out[size:]
+        if not self._out:
+            with contextlib.suppress(BlockingIOError):
+                os.read(self._ready_out, 64)
         return taken
 
     def fileno(self) -> int:
@@ -244,7 +266,8 @@ class FakeIMAP4(imaplib.IMAP4):
 
     def open(self, host: str = "", port: int = 993, timeout: float | None = None) -> None:
         self.host, self.port = host, port
-        self.sock = FakeSocket(self._server)
+        self.sock = FakeSocket(self._server)  # type: ignore[assignment]
+        self.file = self.sock.makefile("rb")
 
     def shutdown(self) -> None:
         self.sock.close()

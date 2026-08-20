@@ -210,6 +210,26 @@ async def test_model_request_pins_the_schema_and_the_configured_model(
     assert schema["properties"].keys() >= {"is_flight_confirmation", "confidence", "segments"}
 
 
+def test_schema_carries_no_constraints_structured_outputs_reject() -> None:
+    """Numeric bounds and string limits are rejected by the API with a 400, not ignored."""
+    rejected = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"}
+    rejected |= {"minLength", "maxLength", "minItems", "maxItems"}
+    assert not rejected & _keys(Extraction.model_json_schema())
+
+
+def _keys(node: object) -> set[str]:
+    if isinstance(node, dict):
+        return set(node) | {key for value in node.values() for key in _keys(value)}
+    if isinstance(node, list):
+        return {key for item in node for key in _keys(item)}
+    return set()
+
+
+def test_confidence_outside_the_unit_interval_is_clamped_rather_than_refused() -> None:
+    assert Extraction(is_flight_confirmation=True, confidence=1.4, segments=[]).confidence == 1.0
+    assert Extraction(is_flight_confirmation=True, confidence=-0.2, segments=[]).confidence == 0.0
+
+
 async def test_prompt_carries_the_sent_date_so_relative_dates_resolve(
     settings: Settings,
 ) -> None:

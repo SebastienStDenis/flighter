@@ -18,7 +18,7 @@ from typing import Any
 from anthropic import AsyncAnthropic
 from bs4 import BeautifulSoup
 from bs4.element import Tag
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from . import prefs
 from .config import Settings, get_settings
@@ -77,8 +77,15 @@ class Extraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     is_flight_confirmation: bool
-    confidence: float = Field(ge=0.0, le=1.0)
+    # Unbounded in the schema: structured outputs reject numeric minimum/maximum, so the
+    # range is enforced here rather than declared there.
+    confidence: float
     segments: list[Segment]
+
+    @field_validator("confidence")
+    @classmethod
+    def _clamp(cls, value: float) -> float:
+        return min(max(value, 0.0), 1.0)
 
 
 # -- tier 1: the free prefilter ------------------------------------------------------
