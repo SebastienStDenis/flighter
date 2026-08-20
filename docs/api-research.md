@@ -967,7 +967,7 @@ Latest stable releases on PyPI, read from `https://pypi.org/pypi/<name>/json` (`
 | pydantic-settings | 2.15.0 |
 | anthropic | 0.125.0 |
 | icalendar | 7.3.0 |
-| aioimaplib | 2.0.1 |
+| imap-tools | 1.15.0 |
 | airportsdata | 20260803 |
 | python-multipart | 0.0.32 |
 | pytest | 9.1.1 |
@@ -978,9 +978,9 @@ Latest stable releases on PyPI, read from `https://pypi.org/pypi/<name>/json` (`
 Note: `airportsdata` uses a date-stamped version scheme (`YYYYMMDD`), not semver - pin it
 explicitly or it will move under you on every rebuild.
 
-Note: `aioimaplib` is **GPLv3**, and it is the only maintained async IMAP client with real RFC 2177
-IDLE support. Nothing conflicts today because this repository declares no licence, but the
-published image links it, so it constrains any future non-GPL licensing.
+Note: `imap-tools` is **Apache-2.0**, which the published image can link under any licence this
+repository later takes. It is synchronous, over the standard library's `imaplib`, and it covers
+RFC 2177 IDLE; the async clients in this space are GPLv3 and would have constrained that choice.
 
 ---
 

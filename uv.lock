@@ -8,15 +8,6 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "aioimaplib"
-version = "2.0.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ee/da/a454c47fb8522e607425e15bf1f49ccfdb3d75f4071f40b63ebd49573495/aioimaplib-2.0.1.tar.gz", hash = "sha256:5a494c3b75f220977048f5eb2c7ba9c0570a3148aaf38bee844e37e4d7af8648", size = 35555, upload-time = "2025-01-16T10:38:23.14Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/13/52/48aaa287fb3c4c995edcb602370b10d182dc5c48371df7cb3a404356733f/aioimaplib-2.0.1-py3-none-any.whl", hash = "sha256:727e00c35cf25106bd34611dddd6e2ddf91a5f1a7e72d9269f3ce62486b31e14", size = 34729, upload-time = "2025-01-16T10:38:20.427Z" },
-]
-
-[[package]]
 name = "aiosqlite"
 version = "0.22.1"
 source = { registry = "https://pypi.org/simple" }
@@ -244,7 +235,6 @@ name = "flighter"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "aioimaplib" },
     { name = "aiosqlite" },
     { name = "airportsdata" },
     { name = "alembic" },
@@ -253,6 +243,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "icalendar" },
+    { name = "imap-tools" },
     { name = "jinja2" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -271,7 +262,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aioimaplib", specifier = ">=2.0.1" },
     { name = "aiosqlite", specifier = ">=0.20" },
     { name = "airportsdata", specifier = ">=20250909" },
     { name = "alembic", specifier = ">=1.16" },
@@ -280,6 +270,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.118" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "icalendar", specifier = ">=7.0" },
+    { name = "imap-tools", specifier = ">=1.15" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pydantic-settings", specifier = ">=2.10" },
@@ -457,6 +448,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5f/f7/abb373e5757eaec4b922b92f97ec8d6d7e057cf06778247604fbc4e7c3f3/idna-3.19.tar.gz", hash = "sha256:5e0811a4383b21dc5838069f801c4fb62113b7447663d2530d2bd6e77b49bf15", size = 215237, upload-time = "2026-08-18T05:14:24.27Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/57/b0/0e52c878c53f245edd3a11020f20979b3f490f245af532c7cae3027754b5/idna-3.19-py3-none-any.whl", hash = "sha256:815e7be7a7806d54abb586dc943addc79e8b2ee16915059658cbeff4b1b43bf4", size = 68550, upload-time = "2026-08-18T05:14:22.343Z" },
+]
+
+[[package]]
+name = "imap-tools"
+version = "1.15.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/4e/acf9a7d59932548bc749fe0f5ae852e6da00b640303ed72786f697944b69/imap_tools-1.15.0.tar.gz", hash = "sha256:a90f948549ab000d96caf17c90e63b114f8788ba4a0d3f9274a96c0e108c3805", size = 48497, upload-time = "2026-08-06T10:25:26.567Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/eb/a4ad6ec962af2806c3484adb1869c24a04d8ef8c2034f2dd2b0f48459b0a/imap_tools-1.15.0-py3-none-any.whl", hash = "sha256:7bb0003c8bf124b80968c7bef786e4577d8365e9afb6551dc15b13161b688bdc", size = 36512, upload-time = "2026-08-06T10:25:24.377Z" },
 ]
 
 [[package]]
