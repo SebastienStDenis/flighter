@@ -137,8 +137,7 @@ Flag**, then pick the colour. On the Mac, select it and choose the colour from t
 button in the toolbar**. Within a few seconds you get a push naming the flight and linking
 to its page here, and the flag comes off - the email itself does not move. If nothing could
 be read out of it you get a push saying so, with a link that opens the email in Mail, and
-the flag stays on so the next pass tries again - except when there was simply no flight in
-it, which is an answer that will not change, so that one is unflagged too.
+the flag stays on so the next pass tries again.
 
 An email the extraction was not confident about - a time or an airport inferred rather
 than printed - still lands on the board, wearing a **Check this** badge. Its flight page
@@ -149,9 +148,10 @@ Something that fails for a passing reason - the model, iCloud, the network - is 
 again after two minutes and again after ten. If it still fails, your phone is told once
 and the email is set aside: it keeps its flag, so it is still where you left it in Mail,
 and it sits at the top of the flight board with **Try again** and **Ignore** beside it.
-Unflagging it in Mail drops it too. An email naming an airport code the app has no row
-for skips the retries and is set aside straight away, because a mis-read code reads the
-same way every time and the push says which one it was.
+Unflagging it in Mail drops it too. Two things skip the retries and are set aside at once,
+because reading them again reads them the same way: an email naming an airport code the app
+has no row for, where the push names the code, and an email with no flight in it at all.
+Neither loses its flag on its own - **Ignore** is what takes it off.
 
 Rename the flag to `flighter` in Mail on the Mac if you want your own word for it -
 **click the flag name in the sidebar, click it again, and type**. That name is a label on

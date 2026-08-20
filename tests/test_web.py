@@ -275,12 +275,13 @@ def test_raising_the_limit_also_lets_polling_start_again(client: TestClient) -> 
     assert client.session.deleted == [latch]  # type: ignore[attr-defined]
 
 
-def test_the_board_says_which_email_could_not_be_read(client: TestClient) -> None:
+def test_the_board_says_which_email_was_set_aside_and_why(client: TestClient) -> None:
     client.session.rows["IngestLog"] = [set_aside_row()]  # type: ignore[attr-defined]
 
     body = client.get("/").text
 
-    assert "Could not read Your booking is confirmed" in body
+    assert "Nothing added from Your booking is confirmed" in body
+    assert "the model timed out" in body
     assert "Try again" in body
     assert "Ignore" in body
 

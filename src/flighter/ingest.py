@@ -6,8 +6,9 @@ being processed twice. One bad email is never allowed to stop the loop.
 
 The flag is the queue, so the row is also the retry state. A message that failed keeps
 its flag and is swept again a couple of times, minutes apart; if it still fails it is set
-aside, and only a person asking for it on the board brings it back. A message that
-got as far as a decision is unflagged where it stands and never comes back. Either way
+aside, and only a person asking for it on the board brings it back. An email that held no
+flight is set aside at once, because reading it again reads it the same way. A message
+that reached the board is unflagged where it stands and never comes back. Either way
 the phone is told once, when there is nothing left to try, which is why the state already
 on file is read before the new one is written.
 
@@ -58,9 +59,9 @@ CONFIDENCE_THRESHOLD = 0.85
 _OUTCOME_PRECEDENCE = (IngestOutcome.REVIEW, IngestOutcome.CREATED, IngestOutcome.DUPLICATE)
 
 # The only outcome that keeps its flag, and so the only one that is ever tried again.
-# Everything else has been decided, including an email that turned out to hold no flight:
-# leaving that one flagged would retry a message whose answer cannot change, every few
-# minutes, for as long as the service runs.
+# Everything else reached the board and is finished with. An email that held no flight is
+# recorded as one of these too: there is nothing to try again, but the flag stays on so
+# that the email does not quietly lose it with nothing to show for it.
 ERROR = IngestOutcome.ERROR
 
 # How long to wait before each retry of a message that failed. One failure more than
@@ -74,9 +75,6 @@ RETRY_DELAYS = (timedelta(minutes=2), timedelta(minutes=10))
 # rather than minutes because no connection is open to cost anybody anything, and because
 # somebody who has just typed an Apple ID into the settings page is watching for it.
 UNCONFIGURED_PAUSE_SECONDS = 5.0
-
-# Outcomes the user is told about as a failure rather than as a flight.
-_FAILURES = frozenset({ERROR, IngestOutcome.NO_FLIGHT})
 
 _NO_FLIGHT_REASON = "There was no flight in it, so nothing was added."
 
@@ -144,9 +142,7 @@ async def process_message(message: Message, *, settings: Settings | None = None)
                 or not extraction.is_flight_confirmation
                 or not extraction.segments
             ):
-                return await _record(
-                    session, message, Ingested(IngestOutcome.NO_FLIGHT), extraction
-                )
+                return await _record(session, message, _no_flight(), extraction)
             return await _record(
                 session, message, await _book(session, message, extraction), extraction
             )
@@ -172,6 +168,16 @@ async def _extract(message: Message, settings: Settings) -> Extraction | None:
 
 def _failed(exc: Exception) -> Ingested:
     return Ingested(ERROR, error=f"{type(exc).__name__}: {exc}")
+
+
+def _no_flight() -> Ingested:
+    """An answer, but not one that takes the flag off.
+
+    Reading the email again reads it the same way, so there is nothing to retry. The flag
+    stays on all the same: the email is still where the person left it, and the board asks
+    them whether it really held nothing rather than deciding that on its own.
+    """
+    return Ingested(ERROR, error=_NO_FLIGHT_REASON, retryable=False)
 
 
 def _unknown_airport(exc: UnknownAirport) -> Ingested:
@@ -463,12 +469,13 @@ async def _announce(notifier: Notifier, message: Message, result: Ingested) -> N
     of it is on the board either way.
     """
     try:
-        if result.outcome in _FAILURES:
-            reason = result.error or _NO_FLIGHT_REASON
+        if result.outcome == ERROR:
+            # Nothing settled reaches here with no reason on it: every failure is built by
+            # one of the three helpers above, and each of them says what went wrong.
             await notifier.mail_failed(
                 message_id=message.id,
                 subject=message.subject,
-                reason=f"{reason}\n{_SET_ASIDE_REASON}" if result.outcome == ERROR else reason,
+                reason=f"{result.error}\n{_SET_ASIDE_REASON}",
             )
             return
 
