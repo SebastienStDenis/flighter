@@ -95,6 +95,15 @@
         </aside>
       </div>
       {% endif %}
+      {% if v.booking.source_message_id %}
+      <div class="item" data-size="xs">
+        <section><p>Email</p></section>
+        <aside>
+          <a class="btn" data-variant="link" data-size="xs"
+             href="{{ email_url(v.booking.source_message_id) }}">Open in Mail</a>
+        </aside>
+      </div>
+      {% endif %}
     </div>
   </section>
 </div>

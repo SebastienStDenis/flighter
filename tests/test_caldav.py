@@ -125,6 +125,17 @@ def test_normal_flight() -> None:
     assert description.endswith(f"\n\n{BASE_URL}/f/7")
 
 
+def test_a_flight_from_an_email_carries_a_link_to_it() -> None:
+    """The confirmation itself, one tap from the entry it became."""
+    body = event_body(
+        booking(source_message_id="<abc@icloud.invalid>"), None, AIRPORTS, base_url=BASE_URL
+    )
+    [event] = body.walk("VEVENT")
+    assert str(event["DESCRIPTION"]).endswith(
+        f"\n\n{BASE_URL}/f/7\nEmail: message://%3Cabc@icloud.invalid%3E"
+    )
+
+
 def test_missing_values_are_omitted_not_printed() -> None:
     text = ical_for(confirmation_code=None, seat=None)
     assert "None" not in text

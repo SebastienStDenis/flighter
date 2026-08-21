@@ -12,7 +12,7 @@ import pytest
 
 from flighter.config import Settings
 from flighter.models import Booking, EventKind, FlightEvent
-from flighter.notify import MESSAGES_URL, PRIORITY_QUIET, Notifier, PushFailed, message_url
+from flighter.notify import MESSAGES_URL, PRIORITY_QUIET, Notifier, PushFailed
 from flighter.phase import CANCELLED_NOTICE
 
 ORIGIN_TZ = "America/New_York"
@@ -222,9 +222,3 @@ async def test_mail_pushes_are_best_effort(settings: Settings) -> None:
     await notifier.mail_imported([booking()], outcome="created")
     await notifier.mail_failed(message_id="<x@y>", subject="s", reason="r")
     assert len(recorder.requests) == 2
-
-
-@pytest.mark.parametrize("message_id", ["<abc@x.example>", "abc@x.example"])
-def test_a_message_url_is_encoded_the_same_either_way(message_id: str) -> None:
-    """The log stores whatever the header said, brackets or not."""
-    assert message_url(message_id) == "message://%3Cabc@x.example%3E"

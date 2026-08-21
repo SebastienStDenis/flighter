@@ -392,6 +392,24 @@ def set_aside_row() -> IngestLog:
 # --- One flight ----------------------------------------------------------------------
 
 
+def test_a_flight_from_an_email_links_back_to_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In the Booking card beside the calendar link, where it is found when wanted and
+    in nobody's way when not."""
+    show(monkeypatch, booking(source="email", source_message_id="<abc@icloud.invalid>"), None)
+    body = client.get("/f/1").text
+    assert 'href="message://%3Cabc@icloud.invalid%3E"' in body
+    assert "Open in Mail" in body
+
+
+def test_a_flight_typed_in_by_hand_has_no_email_to_open(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    show(monkeypatch, booking(), None)
+    assert "Open in Mail" not in client.get("/f/1").text
+
+
 def test_a_flight_with_nothing_known_yet_still_renders(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

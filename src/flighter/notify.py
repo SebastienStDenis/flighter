@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from decimal import Decimal
-from urllib.parse import quote
 
 import httpx
 
@@ -63,15 +62,6 @@ _IMPORTED = {
 
 class PushFailed(RuntimeError):
     """Pushover did not take the message; the text is its own reason where it gave one."""
-
-
-def message_url(message_id: str) -> str:
-    """A link that opens the email itself, in Mail, on the phone and on the Mac.
-
-    The angle brackets around a Message-ID have to be percent-encoded or Mail ignores the
-    URL entirely; what sits between them is left as it stands.
-    """
-    return f"message://%3C{quote(message_id.strip().strip('<>'), safe='@')}%3E"
 
 
 def _minutes_between(old: str | None, new: str | None) -> int | None:

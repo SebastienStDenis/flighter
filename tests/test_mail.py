@@ -24,7 +24,14 @@ from imap_tools import MailBox
 
 from flighter import mail, prefs
 from flighter.config import Settings
-from flighter.mail import FLAG_COLOURS, FLAG_KEYWORDS, Mailbox, Marked, parse_message
+from flighter.mail import (
+    FLAG_COLOURS,
+    FLAG_KEYWORDS,
+    Mailbox,
+    Marked,
+    message_url,
+    parse_message,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -666,3 +673,9 @@ async def test_hanging_up_never_raises(settings: Settings) -> None:
 
     mailbox = await connected(settings, Broken())
     await mailbox.close()
+
+
+@pytest.mark.parametrize("message_id", ["<abc@x.example>", "abc@x.example"])
+def test_a_message_url_is_encoded_the_same_either_way(message_id: str) -> None:
+    """The log stores whatever the header said, brackets or not."""
+    assert message_url(message_id) == "message://%3Cabc@x.example%3E"

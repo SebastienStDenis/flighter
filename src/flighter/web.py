@@ -34,9 +34,8 @@ from .caldav import CalendarClient, CalendarUnavailable, Collection
 from .checks import run_checks
 from .config import CREDENTIALS, SERVICES, Settings, write_secrets
 from .db import get_session
-from .mail import FLAG_COLOURS
+from .mail import FLAG_COLOURS, message_url
 from .models import Booking, BookingSource, BookingStatus, FlightEvent
-from .notify import message_url
 from .phase import CANCELLED_NOTICE
 from .views import FlightView, build_views
 from .widget import router as widget_router
