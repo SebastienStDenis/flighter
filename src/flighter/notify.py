@@ -168,7 +168,7 @@ class Notifier:
             title=flight_label(booking),
             message=event_message(event, origin_tz=origin_tz, dest_tz=dest_tz),
             priority=priority,
-            url=f"{prefs.current().public_base_url}/f/{booking.id}",
+            url=f"{prefs.public_base_url()}/f/{booking.id}",
             url_title=OPEN_FLIGHT,
         )
 
@@ -211,7 +211,7 @@ class Notifier:
                 title=notice.headline,
                 message=notice.body,
                 priority=PRIORITY_NORMAL,
-                url=f"{prefs.current().public_base_url}/problems",
+                url=f"{prefs.public_base_url()}/problems",
                 url_title=OPEN_APP,
             )
         except PushFailed:
@@ -226,7 +226,7 @@ class Notifier:
                 "Updates are paused until the cap is raised or the month ends."
             ),
             priority=PRIORITY_HIGH,
-            url=prefs.current().public_base_url,
+            url=prefs.public_base_url(),
             url_title=OPEN_APP,
         )
 
@@ -236,7 +236,7 @@ class Notifier:
 
     @staticmethod
     def _flight_url(bookings: Sequence[Booking]) -> str:
-        base = prefs.current().public_base_url
+        base = prefs.public_base_url()
         return f"{base}/f/{bookings[0].id}" if bookings else base
 
     async def _send(

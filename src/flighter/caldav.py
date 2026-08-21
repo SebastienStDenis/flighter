@@ -245,9 +245,7 @@ class CalendarClient:
         if not configured(self._settings):
             log.debug("iCloud Calendar is not configured; skipping booking %s", booking.id)
             return None
-        body = event_body(
-            booking, snapshot, self._airports, base_url=prefs.current().public_base_url
-        )
+        body = event_body(booking, snapshot, self._airports, base_url=prefs.public_base_url())
         uid = event_uid(booking)
         # No If-Match: this restates the whole flight from the newest snapshot, so there
         # is no edit of ours to lose and an entry someone changed by hand is meant to be

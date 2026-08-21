@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
+from icalendar import Calendar
 
 from flighter import prefs
 from flighter.caldav import (
@@ -403,6 +404,20 @@ async def test_the_event_lands_under_the_calendar(
     assert icloud.events[f"{FLIGHTS}{uid}.ics"].startswith("BEGIN:VCALENDAR")
     put = next(request for request in icloud.requests if request.method == "PUT")
     assert put.headers["Content-Type"] == "text/calendar; charset=utf-8"
+
+
+async def test_an_unsaved_address_links_to_where_the_app_was_last_reached(
+    calendar: CalendarClient, icloud: FakeICloud, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sync runs from the poller, with no request to borrow an address from."""
+    monkeypatch.setattr(prefs, "_current", Prefs(icloud_calendar_url=FLIGHTS_URL))
+    monkeypatch.setattr(prefs, "_last_seen_origin", "http://192.168.1.20:8586")
+
+    await calendar.upsert(booking(), None)
+
+    [stored] = icloud.events.values()
+    [event] = Calendar.from_ical(stored).walk("VEVENT")
+    assert str(event["DESCRIPTION"]).endswith("\n\nhttp://192.168.1.20:8586/f/7")
 
 
 async def test_an_event_deleted_by_hand_comes_back(

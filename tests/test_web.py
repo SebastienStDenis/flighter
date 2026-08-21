@@ -969,6 +969,29 @@ def test_healthz_is_liveness_only(client: TestClient) -> None:
     page = client.get("/healthz")
     assert page.status_code == 200
     assert page.json() == {"status": "ok"}
+    assert prefs.last_seen_origin() is None
+
+
+def test_the_address_a_page_was_opened_on_is_kept_for_the_work_that_has_no_request(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(prefs, "_current", prefs.Prefs())
+    merged: list[Any] = []
+    remember = client.session.merge  # type: ignore[attr-defined]
+
+    async def counted(instance: Any) -> Any:
+        merged.append(instance)
+        return await remember(instance)
+
+    monkeypatch.setattr(client.session, "merge", counted)  # type: ignore[attr-defined]
+
+    client.get("/")
+    client.get("/f/new")
+
+    assert prefs.public_base_url() == "http://testserver"
+    assert [(row.key, row.value) for row in merged] == [
+        (prefs.LAST_SEEN_ORIGIN_KEY, {"origin": "http://testserver"})
+    ]
 
 
 def test_the_schema_is_not_published(client: TestClient) -> None:

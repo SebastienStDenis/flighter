@@ -10,10 +10,12 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
+from flighter import prefs
 from flighter.config import Settings
 from flighter.models import Booking, EventKind, FlightEvent
 from flighter.notify import MESSAGES_URL, PRIORITY_QUIET, Notifier, PushFailed
 from flighter.phase import CANCELLED_NOTICE
+from flighter.prefs import Prefs
 
 ORIGIN_TZ = "America/New_York"
 DEST_TZ = "America/Los_Angeles"
@@ -70,6 +72,18 @@ async def push(settings: Settings, flight_event: FlightEvent, **kwargs: object) 
     notifier = Notifier(settings, transport=recorder.transport)
     await notifier.flight_event(booking(), flight_event, origin_tz=ORIGIN_TZ, dest_tz=DEST_TZ)
     return recorder
+
+
+async def test_an_unsaved_address_links_to_where_the_app_was_last_reached(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A push goes out from the poller, with no request to borrow an address from."""
+    monkeypatch.setattr(prefs, "_current", Prefs())
+    monkeypatch.setattr(prefs, "_last_seen_origin", "http://192.168.1.20:8586")
+
+    sent = (await push(settings, event(EventKind.GATE_ASSIGNED, new="B22"))).only
+
+    assert sent["url"] == "http://192.168.1.20:8586/f/7"
 
 
 async def test_title_and_url_name_the_flight(settings: Settings) -> None:

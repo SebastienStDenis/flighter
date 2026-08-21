@@ -59,6 +59,7 @@ def preferences(monkeypatch: pytest.MonkeyPatch) -> Prefs:
         icloud_calendar_url="https://p34-caldav.icloud.com/12345/calendars/6c1f4f0e-flights/",
     )
     monkeypatch.setattr(prefs, "_current", configured)
+    monkeypatch.setattr(prefs, "_last_seen_origin", None)
     return configured
 
 
