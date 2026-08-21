@@ -13,13 +13,17 @@ rather than a lock screen.
 
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Annotated, Final
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi.responses import Response
 from pydantic import BaseModel, PlainSerializer
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +33,7 @@ from . import prefs
 from .aeroapi import budget_status
 from .config import Settings, get_settings
 from .db import get_session
-from .models import Booking, BookingStatus, FlightSnapshot
+from .models import KV, Booking, BookingStatus, FlightSnapshot
 from .phase import (
     AIRBORNE,
     ARRIVAL_DELAY_THRESHOLD,
@@ -71,6 +75,16 @@ POLL_STALE_AFTER: Final = timedelta(minutes=45)
 
 PHASES_IMMINENT: Final = frozenset({DAY_OF, TAXIING, AIRBORNE, DIVERTED})
 
+# The script is served from here rather than fetched from a repository, so the phone
+# always runs the version that matches the server answering it.
+SCRIPT_FILE: Final = Path(__file__).parent / "static" / "flights-widget.js"
+# Fixed because the Connect link runs the script by name. The bundle installs it under
+# this name, so the only way to break the link is to rename the script by hand.
+SCRIPT_NAME: Final = "Flights"
+SCRIPT_ICON: Final = {"color": "deep-blue", "glyph": "plane-departure"}
+
+LAST_SEEN_KEY: Final = "widget_last_seen"
+
 
 def _iso_z(value: datetime) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -109,10 +123,57 @@ async def read_widget(
 ) -> WidgetPayload:
     authorize(settings, authorization, token)
     now = datetime.now(UTC)
+    await mark_seen(session, now)
     rows = await load_flight_rows(session, now)
     return build_payload(
         rows, settings=settings, now=now, degraded_reason=await read_degraded(session)
     )
+
+
+@router.get(f"/widget/{SCRIPT_NAME}.scriptable")
+async def read_script_bundle() -> Response:
+    """The script as a Scriptable document, which the app imports in one tap.
+
+    Nothing secret is in it. The server address and the token reach the phone through
+    the Connect link and live in its Keychain, so this file is the same for everyone and
+    the script can replace itself with a newer copy without carrying anything over.
+    """
+    bundle = {
+        "name": SCRIPT_NAME,
+        "icon": SCRIPT_ICON,
+        "script": script_body(),
+        "always_run_in_app": False,
+        "share_sheet_inputs": [],
+    }
+    return Response(
+        json.dumps(bundle),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{SCRIPT_NAME}.scriptable"'},
+    )
+
+
+def script_source() -> str:
+    return SCRIPT_FILE.read_text()
+
+
+def script_body() -> str:
+    """The script without the header Scriptable maintains itself.
+
+    The first comment block is the app's record of the icon, which a bundle carries as a
+    field of its own; importing it twice leaves the app with two headers.
+    """
+    header, _, body = script_source().partition("\n\n")
+    return body if header.startswith("// Variables used by Scriptable") else header
+
+
+def connect_url(settings: Settings) -> str:
+    """What the Connect button on the settings page opens.
+
+    Scriptable runs the named script and hands it the query as `args.queryParameters`,
+    so the phone learns the address and the token without anybody copying either.
+    """
+    query = urlencode({"api": prefs.current().public_base_url, "token": settings.widget_token})
+    return f"scriptable:///run/{SCRIPT_NAME}?{query}"
 
 
 def authorize(settings: Settings, authorization: str | None, token: str | None) -> None:
@@ -137,6 +198,22 @@ def authorize(settings: Settings, authorization: str | None, token: str | None) 
             detail="invalid widget token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+async def mark_seen(session: AsyncSession, now: datetime) -> None:
+    """Stamp the moment a phone last got its data, for the settings page to show.
+
+    Short of standing next to the phone, this is the only evidence that the widget is
+    talking to this server: a token that is wrong never gets here, so the stamp stops.
+    """
+    await session.merge(KV(key=LAST_SEEN_KEY, value={"at": _iso_z(now)}))
+
+
+async def last_seen(session: AsyncSession) -> datetime | None:
+    row = await session.get(KV, LAST_SEEN_KEY)
+    if row is None:
+        return None
+    return datetime.fromisoformat(row.value["at"]).astimezone(UTC)
 
 
 async def load_flight_rows(session: AsyncSession, now: datetime) -> list[FlightRow]:
