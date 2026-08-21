@@ -136,6 +136,13 @@ def test_a_flight_from_an_email_carries_a_link_to_it() -> None:
     )
 
 
+def test_the_entry_is_the_ticket_and_says_who_flies_it() -> None:
+    text = ical_for(operating_carrier="BA", operating_number="112")
+
+    assert "SUMMARY:DL1234 JFK -> LAX" in text
+    assert "Operated as BA112" in text
+
+
 def test_missing_values_are_omitted_not_printed() -> None:
     text = ical_for(confirmation_code=None, seat=None)
     assert "None" not in text

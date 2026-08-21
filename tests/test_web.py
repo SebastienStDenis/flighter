@@ -31,7 +31,6 @@ from flighter.db import get_session
 from flighter.lookup import Candidate
 from flighter.models import KV, Airport, Booking, FlightEvent, FlightSnapshot, IngestLog
 from flighter.notify import Notifier
-from flighter.timezones import format_local
 from flighter.widget import LAST_SEEN_KEY
 
 NOW = datetime.now(UTC)
@@ -99,6 +98,11 @@ def booking(**kwargs: Any) -> Booking:
 def empty_snapshot() -> FlightSnapshot:
     """What a snapshot looks like for a flight that is still three days out."""
     return FlightSnapshot(id=1, booking_id=1, raw={})
+
+
+def replace_snapshot(**fields: Any) -> FlightSnapshot:
+    """An empty snapshot with just these observed, for one point in a flight's life."""
+    return FlightSnapshot(id=1, booking_id=1, observed_at=NOW, raw={}, **fields)
 
 
 def full_snapshot() -> FlightSnapshot:
@@ -291,6 +295,17 @@ def test_a_booking_nobody_has_checked_sits_on_the_board_with_a_badge(
     assert 'href="/f/1"' in body
 
 
+def test_a_codeshare_is_shown_under_the_number_booked_with_a_note_on_who_flies_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    show(monkeypatch, booking(operating_carrier="LH", operating_number="479"), None)
+
+    for path in ("/", "/f/1"):
+        body = client.get(path).text
+        assert '<h2 class="font-mono tracking-tight">AC871</h2>' in body
+        assert "Operated as LH479" in body
+
+
 def test_the_board_offers_one_tap_out_of_a_spent_budget(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -476,10 +491,15 @@ def test_a_flight_with_nothing_known_yet_still_renders(
     body = page.text
     assert "AC871" in body
     assert "YUL" in body and "LHR" in body
+    assert "Montreal" in body and "London" in body
     # Every fact keeps its row and reads as a plain dash rather than disappearing.
-    for label in ("Gate", "Terminal", "Baggage", "Wheels up"):
+    for label in ("Departure", "Arrival", "Gate", "Terminal", "Baggage"):
         assert label in body
     assert body.count(">-<") >= 6
+    # Departure is the next thing to happen, and it is already on the card.
+    assert "Departs in" in body
+    for runway in ("Wheels up", "Lands", "At the gate"):
+        assert runway not in body
     assert "None" not in body
     # A missing value is a dash in its row, never the page-level empty state.
     assert 'class="empty"' not in body
@@ -498,65 +518,58 @@ def test_a_flight_in_the_air_renders_what_is_worth_knowing(
     # What is on the ticket, not what is in the flight plan.
     for gone in ("Filed route", "Distance", "Registration", "Timezone", "Last checked"):
         assert gone not in body
+    # The runway time that matters from a seat, and only that one.
+    assert "Lands" in body
+    assert "Wheels up" not in body and "At the gate" not in body
 
 
-def moved_time(was: datetime, now: datetime, tz: str, tone: str) -> str:
-    """A time that moved, as the page draws it: the original struck, the new one coloured."""
-    return (
-        f'<s class="font-normal text-muted-foreground">{format_local(was, tz)}</s> '
-        f'<span class="{tone}">{format_local(now, tz)}</span>'
-    )
-
-
-def test_the_lead_card_strikes_a_time_that_slipped_and_leaves_one_that_held(
+def test_the_card_names_one_runway_moment_at_a_time(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Late is red next to what was planned; ten minutes on arrival is not worth a mark."""
-    show(monkeypatch, booking(), full_snapshot())
-
-    body = client.get("/").text
-    late = DEPARTURE + timedelta(minutes=25)
-    assert moved_time(DEPARTURE, late, "America/Toronto", "text-stop") in body
-    arrival = format_local(ARRIVAL + timedelta(minutes=10), "Europe/London")
-    assert f'<span class="">{arrival}</span>' in body
-    assert (
-        f'<s class="font-normal text-muted-foreground">{format_local(ARRIVAL, "Europe/London")}'
-        not in body
-    )
-
-
-def test_a_departure_brought_forward_is_green_on_the_card_and_under_the_countdown(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    earlier = DEPARTURE - timedelta(minutes=20)
-    snapshot = FlightSnapshot(
-        id=4, booking_id=1, raw={}, scheduled_out=DEPARTURE, estimated_out=earlier
-    )
-    show(monkeypatch, booking(), snapshot)
-
+    """Departure and arrival are always on the card. Wheels up, wheels down and the gate
+    take turns at the bottom, each only while it is the next thing to happen."""
+    pushed_back = replace_snapshot(actual_out=DEPARTURE + timedelta(minutes=5))
+    show(monkeypatch, booking(), pushed_back)
     body = client.get("/f/1").text
-    assert "Departs in" in body
-    # The route, the countdown footer and the departure row all say the same thing.
-    assert body.count(moved_time(DEPARTURE, earlier, "America/Toronto", "text-ok")) == 3
+    assert "Wheels up" in body
+    assert "Lands" not in body and "At the gate" not in body
+
+    landed = replace_snapshot(
+        actual_out=DEPARTURE + timedelta(minutes=5),
+        actual_off=DEPARTURE + timedelta(minutes=15),
+        actual_on=ARRIVAL - timedelta(minutes=12),
+        estimated_in=ARRIVAL + timedelta(minutes=20),
+    )
+    show(monkeypatch, booking(), landed)
+    body = client.get("/f/1").text
+    assert "At the gate" in body
+    assert "Wheels up" not in body and "Lands" not in body
+    # The estimate still reads as a change against what was booked.
+    assert "late 20m" in body
+
+    at_the_gate = replace_snapshot(
+        actual_out=DEPARTURE + timedelta(minutes=5),
+        actual_off=DEPARTURE + timedelta(minutes=15),
+        actual_on=ARRIVAL - timedelta(minutes=12),
+        actual_in=ARRIVAL,
+    )
+    show(monkeypatch, booking(), at_the_gate)
+    body = client.get("/f/1").text
+    for runway in ("Wheels up", "Lands", "At the gate"):
+        assert runway not in body
 
 
-def test_the_landing_countdown_shows_the_runway_time_it_now_counts_to(
+def test_a_delay_is_shown_against_what_was_booked(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """In the air the checkpoint is wheels down, and it carries its own original."""
-    snapshot = full_snapshot()
-    snapshot.scheduled_on = ARRIVAL - timedelta(minutes=10)
-    snapshot.estimated_on = ARRIVAL + timedelta(minutes=20)
-    show(monkeypatch, booking(), snapshot)
-
-    body = client.get("/f/1").text
-    assert "Lands in" in body
-    assert (
-        moved_time(snapshot.scheduled_on, snapshot.estimated_on, "Europe/London", "text-stop")
-        in body
+    show(
+        monkeypatch,
+        booking(),
+        replace_snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=40)),
     )
-    # The struck time and the colour already say it.
-    assert "late " not in body and "early " not in body
+    body = client.get("/f/1").text
+    assert "<s>" in body
+    assert "late 40m" in body
 
 
 def test_a_cancelled_flight_says_who_said_so(
@@ -669,6 +682,7 @@ def test_a_number_that_flies_twice_that_day_is_a_choice_rather_than_a_guess(
     assert "flies more than once" in body
     assert "18:40" in body and "21:15" in body
     assert body.count("/f/new/details?") == 2
+    assert body.count("Operated as LH479") == 2
 
 
 def test_a_flight_number_nobody_publishes_says_so_and_offers_the_long_way(

@@ -58,6 +58,13 @@ class Status(NamedTuple):
     tone: str
 
 
+class Countdown(NamedTuple):
+    """A moment to count towards, and the words that go in front of it."""
+
+    label: str
+    target: datetime
+
+
 @dataclass(frozen=True)
 class Timeline:
     """One event's three-state answer, collapsed to what a reader needs to see.
@@ -87,16 +94,22 @@ class Timeline:
     def late(self) -> bool:
         return self.moved is not None and self.moved > timedelta(0)
 
+    @property
+    def drift(self) -> str | None:
+        """`late 25m` or `early 10m`, or nothing while it is inside the band."""
+        if self.moved is None:
+            return None
+        return f"{'late' if self.late else 'early'} {duration(self.moved)}"
 
-class Countdown(NamedTuple):
-    """A moment to count towards, the words that go in front of it, and its history.
 
-    The target is the best answer off `line`; the line is carried so the page can show
-    the time it replaced, read in the zone of the airport it happens at.
+class Checkpoint(NamedTuple):
+    """The next thing to happen to a flight that has left its gate, read at its airport.
+
+    Wheels up, then wheels down, then the gate: each is shown only while it is the next
+    one, so the page never lists three runway times against the two a ticket names.
     """
 
-    label: str
-    target: datetime
+    name: str
     line: Timeline
     tz: str
 
@@ -113,6 +126,12 @@ class FlightView:
     @property
     def flight_number(self) -> str:
         return f"{self.booking.marketing_carrier}{self.booking.marketing_number}"
+
+    @property
+    def operated(self) -> str | None:
+        return booking_repo.operated_note(
+            self.booking.operating_carrier, self.booking.operating_number
+        )
 
     @property
     def origin_tz(self) -> str:
@@ -198,13 +217,30 @@ class FlightView:
     @property
     def countdown(self) -> Countdown | None:
         """The one number worth looking at, decided the same way the widget decides it."""
-        phase = self.phase
-        label, target = countdown(phase, self.booking, self.snapshot)
+        label, target = countdown(self.phase, self.booking, self.snapshot)
         if label is None or target is None:
             return None
+        return Countdown(label, target)
+
+    @property
+    def checkpoint(self) -> Checkpoint | None:
+        """What the flight is working towards now, once departure is behind it.
+
+        Nothing until pushback, because until then the departure time on the card is
+        the answer; nothing after the doors open, because then the arrival time is.
+        """
+        snap = self.snapshot
+        if snap is None:
+            return None
+        phase = self.phase
+        if phase == TAXIING:
+            # Nobody upstream estimates wheels up, so the name stands without a time.
+            return Checkpoint("Wheels up", Timeline(None, None, None), self.origin_tz)
         if phase in (AIRBORNE, DIVERTED):
-            return Countdown(label, target, self.lands, self.dest_tz)
-        return Countdown(label, target, self.departs, self.origin_tz)
+            return Checkpoint("Lands", self.lands, self.dest_tz)
+        if phase == LANDED and snap.actual_in is None:
+            return Checkpoint("At the gate", self.arrives, self.dest_tz)
+        return None
 
     @property
     def calendar_link(self) -> str | None:
