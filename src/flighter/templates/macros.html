@@ -124,17 +124,19 @@
   </header>
   <section class="flex flex-col gap-5">
     {# The ends of the row are two lines tall, so the rule is pushed down to the middle of
-       the code rather than the middle of the pair. #}
+       the code rather than the middle of the pair. Only the code sets how wide an end is:
+       the city above it takes no width of its own and spills outward, so the rule runs
+       from code to code however long the city's name. #}
     <div class="route items-start">
       <div>
-        <div class="text-xs text-muted-foreground">{{ v.origin.city if v.origin }}</div>
+        <div class="w-0 min-w-full text-xs whitespace-nowrap text-muted-foreground">{{ v.origin.city if v.origin }}</div>
         <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.origin_iata }}</div>
       </div>
       <div class="mt-8">{{ route_line(v) }}</div>
       {# A diverted flight's new airport stands where the code goes, in red, with the
          one it was booked for struck beside it. #}
       <div class="text-right">
-        <div class="text-xs text-muted-foreground">{{ v.destination.city if v.destination }}</div>
+        <div class="flex w-0 min-w-full justify-end text-xs whitespace-nowrap text-muted-foreground">{{ v.destination.city if v.destination }}</div>
         <div class="font-mono text-2xl font-bold tracking-tight{{ ' text-stop' if v.diverted_to }}">
           {{- v.destination_iata -}}
           {%- if v.diverted_to %}<s class="ml-1.5 text-sm font-normal text-muted-foreground">{{ v.booking.dest_iata }}</s>{% endif -%}
