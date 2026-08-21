@@ -39,9 +39,10 @@ never stored and one the server no longer accepts.
 
 ## Updating the script
 
-Running the script inside the Scriptable app, which is what Connect does, compares it
-with the server's copy at `/static/flights-widget.js` and replaces itself if they differ.
-Update the server and tap Connect once; there is nothing to copy again.
+Every time the widget reaches the server it also compares itself with the server's copy
+at `/static/flights-widget.js` and replaces itself if they differ, so the next reload
+runs the new one. Update the server and the phone follows on its own; tapping Connect
+does the same thing at once, and says so.
 
 ## Sizes
 

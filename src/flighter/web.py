@@ -155,7 +155,6 @@ def create_app(settings: Settings) -> FastAPI:
         email_url=message_url,
         missing=views.MISSING,
         problem_notice=views.problem_notice,
-        same_day=views.same_day,
         same_local_date=same_local_date,
         until=views.until,
         zone=views.zone,
@@ -218,11 +217,11 @@ def create_app(settings: Settings) -> FastAPI:
         now = datetime.now(UTC)
         upcoming = sorted(
             (view for view in tracked + flown if view.off_board_at >= now),
-            key=lambda view: view.scheduled_departure,
+            key=lambda view: view.departure,
         )
         past = sorted(
             (view for view in tracked + flown if view.off_board_at < now),
-            key=lambda view: view.scheduled_departure,
+            key=lambda view: view.departure,
             reverse=True,
         )
         budget = await budget_status(session)
@@ -232,7 +231,6 @@ def create_app(settings: Settings) -> FastAPI:
             {
                 "trips": views.group_into_trips(upcoming),
                 "past": past[:FLOWN_LIMIT],
-                "featured": views.featured(upcoming),
                 "budget": budget,
                 "raised_cap": budget.cap_usd + LIMIT_STEP,
                 # An empty board on a fresh deployment is not the same thing as an empty

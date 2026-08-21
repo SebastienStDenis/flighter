@@ -43,40 +43,31 @@
 </section>
 {% else %}
 
+{# Each trip is a run of cards, and the gap between runs is what says where one
+   journey ends and the next begins: every card names its own day. #}
 {% for trip in trips %}
-<h2 class="mt-5 mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase first:mt-0">
-  {{ day(trip[0].scheduled_departure, trip[0].origin_tz) }}
-  {%- if trip|length > 1 and not same_day(trip[0], trip[-1]) %}
-    to {{ day(trip[-1].scheduled_departure, trip[-1].origin_tz) }}
-  {%- endif %}
-</h2>
-<div class="item-group last:mb-6">
+<div class="item-group mt-8 first:mt-0 last:mb-6">
   {% for v in trip %}
-  {%- if v.booking.id in featured -%}
   {{ m.flight_card(v, link="/f/" ~ v.booking.id) }}
-  {%- else -%}
-  {{ m.row(v) }}
-  {%- endif -%}
   {% endfor %}
 </div>
 {% endfor %}
 
 {% if past %}
-<div class="accordion mt-6 mb-6 rounded-lg border px-3">
-  <details>
-    <summary>
-      <span class="flex items-center gap-2">Flown
-        <span class="badge" data-variant="outline">{{ past|length }}</span></span>
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-           stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="m6 9 6 6 6-6"/>
-      </svg>
-    </summary>
-    <div class="item-group">
-      {% for v in past %}{{ m.row(v) }}{% endfor %}
-    </div>
-  </details>
-</div>
+<details class="group mt-6 mb-6">
+  <summary class="flex cursor-pointer list-none items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase [&::-webkit-details-marker]:hidden">
+    Flown
+    <span class="badge" data-variant="outline">{{ past|length }}</span>
+    <svg class="ml-auto size-4 transition-transform group-open:rotate-180" viewBox="0 0 24 24"
+         fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+         stroke-linejoin="round" aria-hidden="true">
+      <path d="m6 9 6 6 6-6"/>
+    </svg>
+  </summary>
+  <div class="item-group mt-3">
+    {% for v in past %}{{ m.row(v) }}{% endfor %}
+  </div>
+</details>
 {% endif %}
 
 {% endif %}

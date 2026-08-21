@@ -580,6 +580,15 @@ def test_the_script_draws_what_it_is_told() -> None:
     assert "applyRelativeStyle" not in source
 
 
+def test_a_widget_reload_takes_the_servers_newer_script_quietly() -> None:
+    """The phone follows the server without anyone opening the app, and a widget has
+    nobody to tell when it does."""
+    source = script_source()
+    widget_run = source[source.index("if (config.runsInWidget)") : source.index("} else {")]
+    assert "updateScript(" in widget_run
+    assert "notify(" not in widget_run
+
+
 FIGURES = [
     timedelta(days=3, hours=5),
     timedelta(hours=24, minutes=1),

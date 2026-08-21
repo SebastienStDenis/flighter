@@ -30,7 +30,8 @@
       {% endif %}
       {% if v.booking.operating_carrier %}
       {{ m.detail("Operated " ~ ("as" if v.booking.operating_number else "by"),
-                  v.booking.operating_carrier ~ (v.booking.operating_number or ""), mono=true) }}
+                  v.booking.operating_carrier ~ (v.booking.operating_number or ""),
+                  mono=true, carrier=v.booking.operating_carrier) }}
       {% endif %}
       {% if v.calendar_link %}
       <div class="item py-1" data-size="xs">

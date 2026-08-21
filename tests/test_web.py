@@ -292,11 +292,14 @@ def test_a_codeshare_is_shown_under_the_number_booked_with_a_note_on_who_flies_i
     show(monkeypatch, booking(operating_carrier="LH", operating_number="479"), None)
 
     for path in ("/", "/f/1"):
-        assert '<h2 class="font-mono tracking-tight">AC871</h2>' in client.get(path).text
-    # Who flies it is a detail for the flight page; the board stays one line a flight.
+        body = client.get(path).text
+        assert "<span>AC871</span>" in body and logo("AC") in body
+    # Who flies it is a detail for the flight page, drawn with its own mark; the board
+    # stays the number that was booked.
     body = client.get("/f/1").text
-    assert "Operated as" in body and "LH479" in body
-    assert "Operated" not in client.get("/").text
+    assert "Operated as" in body and "LH479" in body and logo("LH") in body
+    board = client.get("/").text
+    assert "Operated" not in board and logo("LH") not in board
 
 
 def test_a_row_is_the_flight_its_route_and_when_it_leaves(
@@ -511,13 +514,11 @@ def test_a_flight_with_nothing_known_yet_still_renders(
     assert "AC871" in body
     assert "YUL" in body and "LHR" in body
     assert "Montreal" in body and "London" in body
-    # Every fact keeps its row and reads as a plain dash rather than disappearing.
-    assert "Bags" in body
-    assert body.count(">-<") >= 6
-    # Days out, the card counts days and nothing finer.
-    assert ">1d</time>" in body
-    for milestone in ("Departs in", "Lands in", "At the gate in"):
-        assert milestone not in body
+    # Days out there is nothing to walk to and nothing to count to yet, so the card
+    # stops at the times rather than drawing a row of dashes under them.
+    card = body[body.index('<div class="card gap-5">') : body.index('<div class="card mt-3"')]
+    assert "Bags" not in card and ">Gate</div>" not in card
+    assert "<footer" not in card and "<time" not in card
     assert "None" not in body
     # A missing value is a dash in its row, never the page-level empty state.
     assert 'class="empty"' not in body
@@ -579,25 +580,37 @@ def test_the_card_counts_to_one_milestone_at_a_time(
     assert '<time class="countdown' not in body
 
 
-def struck(was: datetime, tz: str, *, with_date: bool = False) -> str:
-    """The time a flight was booked for, as it is drawn once that time has moved: no
-    zone, because the time that replaced it is read at the same airport."""
+def struck(was: datetime, tz: str, *, with_date: bool = False, arrival: bool = False) -> str:
+    """The time a flight was booked for, as it is drawn once that time has moved: small,
+    between the time that replaced it and the zone, and with no zone of its own because
+    it is read at the same airport."""
     local = to_local(was, tz)
     shown = local.strftime("%a %-d %b %H:%M" if with_date else "%H:%M")
-    return f'<s class="font-normal text-muted-foreground">{shown}</s>'
+    side = "mr-1.5" if arrival else "ml-1.5"
+    return f'<s class="{side} text-xs font-normal text-muted-foreground">{shown}</s>'
 
 
-def big_time(instant: datetime, tz: str, tone: str = "", *, arrival: bool = False) -> str:
+def big_time(
+    instant: datetime,
+    tz: str,
+    tone: str = "",
+    *,
+    arrival: bool = False,
+    was: datetime | None = None,
+    was_with_date: bool = False,
+) -> str:
     """The card's large time: the clock in its tone, the zone small and grey on its
-    outer side, which is after a departure and before an arrival."""
+    outer side, which is after a departure and before an arrival, and what the time was
+    between the two when it moved."""
     local = to_local(instant, tz)
+    gone = struck(was, tz, with_date=was_with_date, arrival=arrival) if was else ""
     if arrival:
         return (
             f'{tone}"><span class="mr-1 text-[0.6875rem] font-medium text-muted-foreground">'
-            f"{local:%Z}</span>{local:%H:%M}"
+            f"{local:%Z}</span>{gone}{local:%H:%M}"
         )
     return (
-        f'{tone}">{local:%H:%M}'
+        f'{tone}">{local:%H:%M}{gone}'
         f'<span class="ml-1 text-[0.6875rem] font-medium text-muted-foreground">{local:%Z}</span>'
     )
 
@@ -608,8 +621,7 @@ def test_a_delay_is_shown_against_what_was_booked(
     late = DEPARTURE + timedelta(minutes=40)
     show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=late))
     body = client.get("/f/1").text
-    assert big_time(late, "America/Toronto", "text-stop") in body
-    assert struck(DEPARTURE, "America/Toronto") in body
+    assert big_time(late, "America/Toronto", "text-stop", was=DEPARTURE) in body
     # The struck time and the colour say it; no words repeat it.
     assert "late " not in body and "early " not in body
 
@@ -620,8 +632,7 @@ def test_a_time_brought_forward_is_green(
     earlier = DEPARTURE - timedelta(minutes=20)
     show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=earlier))
     body = client.get("/f/1").text
-    assert big_time(earlier, "America/Toronto", "text-ok") in body
-    assert struck(DEPARTURE, "America/Toronto") in body
+    assert big_time(earlier, "America/Toronto", "text-ok", was=DEPARTURE) in body
 
 
 def test_each_end_of_a_red_eye_names_its_own_day(
@@ -653,16 +664,15 @@ def test_a_delay_past_midnight_keeps_the_day_it_was_booked_for(
     )
 
     body = client.get("/f/1").text
-    assert struck(booked, "America/Toronto", with_date=True) in body
+    assert big_time(slipped, "America/Toronto", "text-stop", was=booked, was_with_date=True) in body
     assert "Sat 12 Sep 23:50" in body
     assert "23:50 EDT" not in body
-    assert big_time(slipped, "America/Toronto", "text-stop") in body
     assert "Sun 13 Sep" in body
 
 
 def top_card(body: str) -> str:
     """The flight card's route and times, before its footer."""
-    start = body.index('<div class="card">')
+    start = body.index('<div class="card gap-5">')
     return body[start : body.index("</section>", start)]
 
 
@@ -711,12 +721,16 @@ def place(name: str, value: str, tone: str = "") -> str:
 def test_a_place_not_yet_known_keeps_its_box_with_a_dash(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    show(monkeypatch, booking(), replace_snapshot(terminal_origin="3", gate_destination="A14"))
+    today = booking(
+        scheduled_departure_utc=NOW + timedelta(hours=3),
+        scheduled_arrival_utc=NOW + timedelta(hours=10),
+    )
+    show(monkeypatch, today, replace_snapshot(terminal_origin="3", gate_destination="A14"))
     card = top_card(client.get("/f/1").text)
     assert place("Term", "3") in card and place("Gate", "-") in card
     assert place("Term", "-") in card and place("Gate", "A14", "text-plan font-semibold") in card
 
-    show(monkeypatch, booking(), empty_snapshot())
+    show(monkeypatch, today, empty_snapshot())
     card = top_card(client.get("/f/1").text)
     assert card.count(place("Term", "-")) == 2 and card.count(place("Gate", "-")) == 2
 
@@ -745,10 +759,9 @@ def test_the_board_card_strikes_a_time_that_slipped_and_leaves_one_that_held(
 
     body = client.get("/").text
     late = DEPARTURE + timedelta(minutes=25)
-    assert big_time(late, "America/Toronto", "text-stop") in body
-    assert struck(DEPARTURE, "America/Toronto") in body
+    assert big_time(late, "America/Toronto", "text-stop", was=DEPARTURE) in body
     assert big_time(ARRIVAL + timedelta(minutes=10), "Europe/London", arrival=True) in body
-    assert struck(ARRIVAL, "Europe/London") not in body
+    assert struck(ARRIVAL, "Europe/London", arrival=True) not in body
 
 
 def cards(body: str) -> list[str]:
@@ -759,6 +772,21 @@ def cards(body: str) -> list[str]:
 def rows(body: str) -> list[str]:
     """The flights the board draws as one-line rows, in order, by the id each links to."""
     return re.findall(r'<a class="item"[^>]*href="/f/(\d+)"', body)
+
+
+def board_card(body: str, booking_id: int) -> str:
+    """One flight's card on the board, from its link to its closing tag."""
+    start = body.index(f'href="/f/{booking_id}"')
+    return body[start : body.index("</a>", start)]
+
+
+def logo(carrier: str) -> str:
+    return f'src="https://www.gstatic.com/flights/airline_logos/70px/{carrier}.png"'
+
+
+def watched(card: str) -> bool:
+    """Whether a card carries the gate line and counts to something."""
+    return ">Gate</div>" in card and "<footer" in card
 
 
 def test_the_board_card_is_the_flight_page_card_with_a_link_on_it(
@@ -779,10 +807,11 @@ def test_the_board_card_is_the_flight_page_card_with_a_link_on_it(
     assert "14A" not in board
 
 
-def test_every_flight_inside_its_day_is_a_full_card_and_the_rest_are_rows(
+def test_every_flight_is_a_card_and_only_those_inside_their_day_are_watched(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Taxiing in, under way, or leaving today: each is watched the way the lead is."""
+    """Taxiing in, under way, or leaving today: each has a gate line and a figure to
+    count to. A flight next week has the same card, stopped at the times."""
     down = NOW - timedelta(hours=7)
     landed = booking(
         id=1, scheduled_departure_utc=down, scheduled_arrival_utc=NOW + timedelta(minutes=15)
@@ -813,11 +842,13 @@ def test_every_flight_inside_its_day_is_a_full_card_and_the_rest_are_rows(
     )
 
     body = client.get("/").text
-    assert cards(body) == ["1", "2", "3"]
-    assert rows(body) == ["4"]
+    assert cards(body) == ["1", "2", "3", "4"]
+    assert rows(body) == []
+    assert all(watched(board_card(body, booking_id)) for booking_id in (1, 2, 3))
+    assert not watched(board_card(body, 4))
 
 
-def test_a_board_of_flights_weeks_away_still_leads_with_one_card(
+def test_a_board_of_flights_weeks_away_is_cards_that_stop_at_the_times(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     soon = booking(
@@ -833,11 +864,41 @@ def test_a_board_of_flights_weeks_away_still_leads_with_one_card(
     show_board(monkeypatch, [(soon, None), (later, None)])
 
     body = client.get("/").text
-    assert cards(body) == ["1"]
-    assert rows(body) == ["2"]
+    assert cards(body) == ["1", "2"]
+    assert rows(body) == []
+    for booking_id in (1, 2):
+        card = board_card(body, booking_id)
+        assert not watched(card) and "Scheduled" in card
+    # Each card names its own day, in its header, so the board has no headings to file
+    # them under.
+    assert "Sat " not in body[: body.index('<a class="card')]
+    header = board_card(body, 1)[: board_card(body, 1).index("</header>")]
+    assert day_of(soon.scheduled_departure_utc, "America/Toronto") in header
 
 
-def test_a_cancelled_flight_keeps_to_a_row_unless_it_is_all_there_is_to_lead_with(
+def test_the_board_runs_in_the_order_flights_now_leave(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A flight held three hours belongs after the one that left in the meantime."""
+    held = booking(
+        id=1,
+        scheduled_departure_utc=NOW - timedelta(hours=3),
+        scheduled_arrival_utc=NOW + timedelta(hours=4),
+    )
+    waiting = replace_snapshot(
+        scheduled_out=NOW - timedelta(hours=3), estimated_out=NOW + timedelta(hours=1)
+    )
+    left = NOW - timedelta(hours=1)
+    gone = booking(
+        id=2, scheduled_departure_utc=left, scheduled_arrival_utc=NOW + timedelta(hours=6)
+    )
+    flying = replace_snapshot(actual_out=left, actual_off=left + timedelta(minutes=12))
+    show_board(monkeypatch, [(held, waiting), (gone, flying)])
+
+    assert cards(client.get("/").text) == ["2", "1"]
+
+
+def test_a_cancelled_flight_is_a_card_with_nothing_left_to_watch(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     called_off = booking(
@@ -854,13 +915,10 @@ def test_a_cancelled_flight_keeps_to_a_row_unless_it_is_all_there_is_to_lead_wit
     show_board(monkeypatch, [(called_off, cancelled), (in_the_air, flying)])
 
     body = client.get("/").text
-    assert cards(body) == ["2"]
-    assert rows(body) == ["1"]
-
-    show_board(monkeypatch, [(called_off, cancelled)])
-    body = client.get("/").text
-    assert cards(body) == ["1"]
-    assert "confirm with the airline" in body
+    assert cards(body) == ["2", "1"]
+    assert rows(body) == []
+    card = board_card(body, 1)
+    assert "confirm with the airline" in card and not watched(card)
 
 
 def test_a_cancelled_flight_says_who_said_so(
@@ -1500,9 +1558,11 @@ def test_a_diverted_flight_names_where_it_is_going_instead(
     assert "<title>AC871 YUL to MAN</title>" in body
     card = top_card(body)
     assert "Manchester" in card
-    # The new airport stands where the code goes, with the booked one struck under it.
-    assert 'tracking-tight text-stop">MAN</div>' in card
-    assert '<s class="-mt-3.5 mb-2.5 block font-mono text-sm text-muted-foreground">LHR</s>' in card
+    # The new airport stands where the code goes, with the booked one struck beside it.
+    assert (
+        'tracking-tight text-stop">MAN'
+        '<s class="ml-1.5 text-sm font-normal text-muted-foreground">LHR</s></div>'
+    ) in card
     assert "Diverted to" not in card
     assert "Lands in" in body
     # The board row follows the aircraft too.
@@ -1560,3 +1620,5 @@ def test_a_flight_long_at_the_gate_is_filed_under_flown(
     )
     body = client.get("/").text
     assert "Flown" in body and 'class="card' not in body
+    # Folded away under a heading like the board's own, not boxed in a card of its own.
+    assert "<details" in body and "accordion" not in body
