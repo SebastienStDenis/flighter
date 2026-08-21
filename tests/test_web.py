@@ -283,9 +283,10 @@ def test_a_codeshare_is_shown_under_the_number_booked_with_a_note_on_who_flies_i
     show(monkeypatch, booking(operating_carrier="LH", operating_number="479"), None)
 
     for path in ("/", "/f/1"):
-        body = client.get(path).text
-        assert '<h2 class="font-mono tracking-tight">AC871</h2>' in body
-        assert "Operated as LH479" in body
+        assert '<h2 class="font-mono tracking-tight">AC871</h2>' in client.get(path).text
+    # Who flies it is a detail for the flight page; the board stays one line a flight.
+    assert "Operated as LH479" in client.get("/f/1").text
+    assert "Operated" not in client.get("/").text
 
 
 def test_the_board_offers_one_tap_out_of_a_spent_budget(
