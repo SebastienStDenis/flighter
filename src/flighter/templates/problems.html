@@ -29,7 +29,7 @@
   <strong>Nothing added from {{ row.subject or 'an email' }}</strong>
   <section>
     <p>{{ row.error }} It still carries its flag in Mail.</p>
-    <div class="mt-2 flex gap-2">
+    <div class="mt-2 flex w-full flex-wrap gap-2">
       <form method="post" action="/mail/retry">
         <input type="hidden" name="message_id" value="{{ row.message_id }}">
         <button class="btn" data-variant="outline" data-size="sm" type="submit">
