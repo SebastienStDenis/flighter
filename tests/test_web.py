@@ -1621,6 +1621,21 @@ def test_a_flight_the_feed_lost_has_no_footer_to_grow(
     assert "--progress: 100%" in card and "data-off" not in card
 
 
+def test_a_flight_nobody_has_heard_about_for_days_has_no_footer_either(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Still active, because nothing polled it: no key, or a tripped budget."""
+    left = NOW - timedelta(days=3)
+    show(
+        monkeypatch,
+        booking(scheduled_departure_utc=left, scheduled_arrival_utc=left + timedelta(hours=6)),
+        None,
+    )
+    body = client.get("/f/1").text
+    card = body[body.index('<div class="card gap-5">') : body.index('<div class="card mt-3"')]
+    assert "<footer" not in card and "Due to depart" not in card
+
+
 def test_a_flight_just_at_the_gate_stays_on_the_board_a_while(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

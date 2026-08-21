@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import bookings as booking_repo
 from . import notices
 from .airports import get_airport
+from .cadence import ABANDON_AFTER
 from .caldav import calendar_link
 from .models import Airport, Booking, BookingStatus, FlightSnapshot, IngestLog
 from .phase import (
@@ -39,7 +40,7 @@ from .phase import (
     landing_estimate,
     progress_estimate,
 )
-from .timezones import format_local, parse_instant, to_local
+from .timezones import ensure_utc, format_local, parse_instant, to_local
 
 # What a value looks like when we simply do not have it. Gates and baggage belts stay
 # null until close to the event, so this is one of the most common things on the page.
@@ -259,7 +260,7 @@ class FlightView:
     @property
     def milestone(self) -> Milestone | None:
         """The one number worth looking at, and what to call it."""
-        return milestone(self.phase, self.booking, self.snapshot)
+        return milestone(self.phase, self.booking, self.snapshot, now=datetime.now(UTC))
 
     @property
     def milestone_label(self) -> str | None:
@@ -437,16 +438,29 @@ def day_word(instant: datetime, now: datetime, tz: str) -> str | None:
     return None
 
 
-def milestone(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> Milestone | None:
+def milestone(
+    phase: Phase, booking: Booking, snapshot: FlightSnapshot | None, *, now: datetime
+) -> Milestone | None:
     """The first thing still ahead of the flight that has a time against it.
 
     The ladder is departure, wheels up, landing, the gate. A rung is skipped once it has
     happened, and also when nobody has said when it will: nothing upstream estimates
     wheels up, so a flight taxiing out counts to its landing, and a flight with no
     arrival time at all has no milestone rather than a made-up one.
+
+    A rung whose time passed as long ago as the poller's own patience is not waiting on
+    the feed any more. Whatever stopped the news - a lost flight, a tripped budget, no
+    key to poll with - the count would otherwise grow for as long as the booking stands.
     """
     if phase == CANCELLED or flown(booking):
         return None
+    next_up = _next_rung(phase, booking, snapshot)
+    if next_up is None or next_up.target <= ensure_utc(now) - ABANDON_AFTER:
+        return None
+    return next_up
+
+
+def _next_rung(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> Milestone | None:
     if phase == UPCOMING:
         return Milestone("Scheduled", departure_estimate(booking, snapshot))
     if phase == DAY_OF:

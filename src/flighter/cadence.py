@@ -32,7 +32,8 @@ CLOSE_INTERVAL = timedelta(minutes=10)
 LANDED_TAIL = timedelta(minutes=90)
 
 # A flight whose departure passed this long ago without ever going airborne is not going
-# to start now; something upstream lost it. Stop rather than poll it forever.
+# to start now, and one whose landing was due this long ago is not still in the air;
+# something upstream lost it. Stop rather than poll it forever.
 ABANDON_AFTER = timedelta(hours=24)
 
 # A booking AeroAPI could not resolve, or a pinned flight it no longer returns, is looked
@@ -54,6 +55,10 @@ class SnapshotLike(Protocol):
     def estimated_out(self) -> datetime | None: ...
     @property
     def actual_off(self) -> datetime | None: ...
+    @property
+    def scheduled_on(self) -> datetime | None: ...
+    @property
+    def estimated_on(self) -> datetime | None: ...
     @property
     def actual_on(self) -> datetime | None: ...
     @property
@@ -90,12 +95,17 @@ def first_poll_at(now: datetime, departure: datetime) -> datetime:
 
 
 def next_poll_at(
-    now: datetime, current: SnapshotLike, previous: SnapshotLike | None = None
+    now: datetime,
+    current: SnapshotLike,
+    previous: SnapshotLike | None = None,
+    *,
+    booked: datetime,
 ) -> datetime | None:
     """When to look at this flight again after an observation, or None when there is
     nothing left to see.
 
-    None is the signal to complete the booking; the caller owns that write.
+    `booked` is the ticket's departure, for an observation that carries no time of its
+    own. None is the signal to complete the booking; the caller owns that write.
     """
     now = ensure_utc(now)
 
@@ -108,15 +118,24 @@ def next_poll_at(
     if actual_on is not None:
         return now + CLOSE_INTERVAL if now <= actual_on + LANDED_TAIL else None
 
-    if ensure_utc(current.actual_off) is not None:
-        return now + CLOSE_INTERVAL
+    off = ensure_utc(current.actual_off)
+    if off is not None:
+        # Wheels down is published minutes after the fact, so a landing long overdue
+        # with no word of it means the feed has lost the flight, not that it is still
+        # flying. Measured from the take-off when nobody has put a time on the landing.
+        landing = ensure_utc(current.estimated_on) or ensure_utc(current.scheduled_on) or off
+        return None if now > landing + ABANDON_AFTER else now + CLOSE_INTERVAL
 
     departure = ensure_utc(current.estimated_out) or ensure_utc(current.scheduled_out)
-    if departure is None:
-        # No usable estimate at all. Keep a moderate cadence rather than dropping a
-        # booking on the strength of one thin response.
-        return now + HOURLY_INTERVAL
-    return before_departure(now, departure)
+    if departure is not None:
+        return before_departure(now, departure)
+    # No usable estimate at all. Read the table off the ticket instead, at a moderate
+    # cadence rather than dropping a booking on the strength of one thin response, and
+    # still give up once the ticket's departure is long past.
+    following = before_departure(now, booked)
+    if following is None:
+        return None
+    return max(following, now + HOURLY_INTERVAL)
 
 
 def retry_poll_at(now: datetime, departure: datetime) -> datetime | None:
