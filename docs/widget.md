@@ -56,6 +56,28 @@ Tapping opens the flight's page on your server. On medium and large each row dee
 to its own flight; small and Lock Screen widgets get a single tap target, which is an iOS
 restriction and not a choice made here.
 
+The home screen widgets follow the system appearance: light on a light wallpaper, dark on
+a dark one. Lock Screen widgets are tinted by iOS and carry no colour of their own.
+
+## What each line means
+
+The route is the headline and the flight number sits beside it; the middle of every
+layout is one of three things, decided by the server:
+
+- a **date and time** at the origin airport, for a flight still more than a day away,
+  because a timer that far out is a wall of digits;
+- a **live countdown**, to the gate departure from the day before, and to wheels down
+  once in the air;
+- a **word** in the present tense ("Departing", "Taxiing", "Landing", "Landed") once
+  there is nothing left to count.
+
+Underneath: the gate and terminal to walk to, the bag belt once landed, and
+`Delayed 45m` whenever the feed says so. A delayed countdown is also drawn in amber.
+
+A flight stays on the widget for two hours after it lands, or two hours past the
+departure it was cancelled from. After that it is yesterday, and the slot goes to
+whatever is next.
+
 ## How it stays accurate
 
 The countdown is a system timer element (`addDate()` + `applyTimerStyle()`), not text the

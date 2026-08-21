@@ -77,13 +77,26 @@ def test_upcoming_flight(settings: Settings) -> None:
     assert flight == {
         "detail_url": "https://flights.example.com/f/42",
         "phase": "upcoming",
-        "title": "DL1234  JFK → LAX",
+        "flight_number": "DL1234",
+        "origin": "JFK",
+        "dest": "LAX",
         "subtitle": None,
-        "countdown_label": "Departs in",
-        "countdown_to": "2026-09-18T18:00:00Z",
-        "delayed": False,
+        "departs": "Fri 18 Sep 18:00 UTC",
+        "countdown_label": None,
+        "countdown_to": None,
+        "delay_minutes": None,
         "progress_percent": None,
     }
+
+
+def test_a_flight_days_away_is_dated_at_its_own_airport(settings: Settings) -> None:
+    """Six days out, a timer is a wall of digits; the ticket's own date and time is the
+    answer, read at the origin rather than in UTC."""
+    far = booking(scheduled_departure_utc=NOW + timedelta(days=6))
+    flight = payload([(far, None)], settings, zones={"JFK": "America/New_York"})["flights"][0]
+    assert flight["departs"] == "Fri 18 Sep 14:00 EDT"
+    assert flight["countdown_to"] is None
+    assert flight["countdown_label"] is None
 
 
 def test_day_of_shows_gate_and_terminal(settings: Settings) -> None:
@@ -142,7 +155,7 @@ def test_airborne_counts_down_to_landing_and_shows_progress(settings: Settings) 
     assert flight["countdown_to"] == "2026-09-12T22:40:00Z"
     assert flight["progress_percent"] == 64
     assert flight["subtitle"] == "Gate 12 · Terminal B"
-    assert flight["delayed"] is True
+    assert flight["delay_minutes"] == 25
 
 
 def test_landed_shows_the_carousel_and_no_countdown(settings: Settings) -> None:
@@ -183,7 +196,18 @@ def test_diverted_still_lands_somewhere(settings: Settings) -> None:
 
 def test_a_minute_late_is_not_delayed(settings: Settings) -> None:
     jitter = snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=1))
-    assert payload([(booking(), jitter)], settings)["flights"][0]["delayed"] is False
+    assert payload([(booking(), jitter)], settings)["flights"][0]["delay_minutes"] is None
+
+
+def test_the_delay_is_the_worse_of_the_two_ends(settings: Settings) -> None:
+    """Twenty minutes late off the gate and forty at the other end: forty is the news."""
+    slipping = snapshot(
+        scheduled_out=DEPARTURE,
+        estimated_out=DEPARTURE + timedelta(minutes=20),
+        scheduled_in=ARRIVAL,
+        estimated_in=ARRIVAL + timedelta(minutes=40),
+    )
+    assert payload([(booking(), slipping)], settings)["flights"][0]["delay_minutes"] == 40
 
 
 # --- instants -------------------------------------------------------------------------
@@ -209,8 +233,11 @@ def test_every_instant_is_utc_with_a_z(settings: Settings) -> None:
     ]
     body = payload(rows, settings)
     found = list(_instants(body))
-    assert len(found) == 3  # one countdown per flight
+    # One countdown each for the two close flights; the one days out carries a local
+    # date, which is prose rather than an instant and is never parsed by the phone.
+    assert len(found) == 2
     assert all(instant.endswith("Z") for instant in found)
+    assert body["flights"][2]["departs"] == "Wed 16 Sep 18:00 UTC"
 
 
 def test_instants_survive_a_non_utc_input(settings: Settings) -> None:
@@ -252,6 +279,42 @@ def test_landed_sinks_below_what_is_still_coming(settings: Settings) -> None:
         (booking(id=2, scheduled_departure_utc=NOW + timedelta(days=3)), None),
     ]
     assert [_id(flight) for flight in payload(rows, settings)["flights"]] == [2, 4]
+
+
+def test_landed_leaves_the_widget_two_hours_after_the_gate(settings: Settings) -> None:
+    """Long enough to find the carousel and the car. After that it is yesterday."""
+    rows: list[FlightRow] = [
+        (
+            booking(id=4, scheduled_departure_utc=NOW - timedelta(hours=8)),
+            snapshot(
+                actual_on=NOW - timedelta(hours=3),
+                actual_in=NOW - timedelta(hours=2, minutes=50),
+            ),
+        ),
+    ]
+    assert payload(rows, settings)["flights"] == []
+
+
+def test_a_cancelled_flight_keeps_its_place_on_its_day(settings: Settings) -> None:
+    cancelled = snapshot(cancelled=True, scheduled_out=DEPARTURE)
+    rows: list[FlightRow] = [
+        (booking(id=1), cancelled),
+        (booking(id=2, scheduled_departure_utc=NOW + timedelta(hours=3)), None),
+    ]
+    assert [_id(flight) for flight in payload(rows, settings)["flights"]] == [1, 2]
+
+
+def test_a_cancelled_flight_whose_time_has_gone_does_not_outrank_the_rebooking(
+    settings: Settings,
+) -> None:
+    """Cancelled and rebooked is the one day the lock screen's single slot matters most,
+    and the slot has to go to the flight that is still happening."""
+    cancelled = snapshot(cancelled=True, scheduled_out=NOW - timedelta(hours=5))
+    rows: list[FlightRow] = [
+        (booking(id=1, scheduled_departure_utc=NOW - timedelta(hours=5)), cancelled),
+        (booking(id=2, scheduled_departure_utc=NOW + timedelta(hours=3)), None),
+    ]
+    assert [_id(flight) for flight in payload(rows, settings)["flights"]] == [2]
 
 
 def test_refresh_slows_down_when_nothing_is_close(settings: Settings) -> None:
@@ -314,7 +377,7 @@ def test_a_stale_snapshot_on_a_close_flight_degrades(settings: Settings) -> None
     stale = snapshot(scheduled_out=DEPARTURE, observed_at=NOW - timedelta(minutes=95))
     body = payload([(booking(), stale)], settings)
     assert body["degraded"] is True
-    assert body["degraded_reason"] == "No status update in 95 min"
+    assert body["degraded_reason"] == "No update for 95 min"
 
 
 def test_a_recent_snapshot_does_not_degrade(settings: Settings) -> None:
@@ -386,7 +449,7 @@ def test_bearer_header_is_accepted(client: TestClient) -> None:
     response = client.get("/api/widget", headers={"Authorization": "Bearer test-token"})
     assert response.status_code == 200
     body = response.json()
-    assert body["flights"][0]["title"] == "DL1234  JFK → LAX"
+    assert body["flights"][0]["flight_number"] == "DL1234"
 
 
 def test_query_token_is_accepted(client: TestClient) -> None:
@@ -515,7 +578,7 @@ def test_a_late_pushback_stops_counting_once_the_flight_is_off_the_ground(
         estimated_in=ARRIVAL,
     )
     flight = payload([(booking(), recovered)], settings)["flights"][0]
-    assert flight["delayed"] is False
+    assert flight["delay_minutes"] is None
 
 
 # --- the query ------------------------------------------------------------------------

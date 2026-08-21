@@ -16,7 +16,8 @@
 //
 // There is nothing to edit here. The server's address and the token arrive through the
 // Connect button on the settings page, which runs this script with both in the URL, and
-// live in the Keychain from then on.
+// live in the Keychain from then on. The script also keeps itself current: every run
+// compares this file with the server's copy and replaces it when they differ.
 
 const API_KEY = "flighter-api";
 const TOKEN_KEY = "flighter-token";
@@ -26,23 +27,27 @@ const REQUEST_TIMEOUT_SECONDS = 15;
 // iOS budgets reloads and ignores an eager request anyway, so do not ask for one.
 const MIN_REFRESH_SECONDS = 60;
 
-const BG_TOP = new Color("#101725");
-const BG_BOTTOM = new Color("#070a12");
-const TEXT = new Color("#ffffff");
-const MUTED = new Color("#8a94a6");
-const TRACK = new Color("#ffffff", 0.18);
+// Every colour is a light/dark pair, so the widget sits on whatever wallpaper it is
+// given instead of always being a dark tile. Lock Screen widgets use none of these:
+// iOS tints them itself.
+const BG_TOP = pair("#f7f8fb", "#101725");
+const BG_BOTTOM = pair("#e9edf5", "#070a12");
+const TEXT = pair("#0b1220", "#ffffff");
+const MUTED = pair("#5b6575", "#8a94a6");
+const TRACK = Color.dynamic(new Color("#0b1220", 0.12), new Color("#ffffff", 0.18));
+const DELAYED = pair("#b45309", "#ffb454");
 
 const PHASE_COLOR = {
-  upcoming: new Color("#7aa2f7"),
-  day_of: new Color("#7aa2f7"),
-  taxiing: new Color("#ffb454"),
-  airborne: new Color("#4ec9b0"),
-  landed: new Color("#8a94a6"),
-  cancelled: new Color("#ff6b6b"),
-  diverted: new Color("#ff9e64"),
+  upcoming: pair("#2f5fd0", "#7aa2f7"),
+  day_of: pair("#2f5fd0", "#7aa2f7"),
+  taxiing: pair("#b45309", "#ffb454"),
+  airborne: pair("#0f766e", "#4ec9b0"),
+  landed: pair("#5b6575", "#8a94a6"),
+  cancelled: pair("#b91c1c", "#ff6b6b"),
+  diverted: pair("#c2410c", "#ff9e64"),
 };
 
-// The neutral name of a phase, for subtitles and status lines.
+// The neutral name of a phase, for status lines with nothing better to say.
 const PHASE_TEXT = {
   upcoming: "Upcoming",
   day_of: "Today",
@@ -79,6 +84,10 @@ const widget = server ? await buildWidget(server) : setupWidget();
 
 if (config.runsInWidget) {
   Script.setWidget(widget);
+  if (server) {
+    // Silently: the new copy draws the next refresh, and nobody is watching this one.
+    await updateScript(server.api);
+  }
 } else {
   await present(widget);
   if (server && (await updateScript(server.api))) {
@@ -121,13 +130,7 @@ async function load(server) {
     if (cached) {
       return { data: cached.data, stale: true, cachedAt: cached.cachedAt, rejected: false, error: null };
     }
-    return {
-      data: null,
-      stale: false,
-      cachedAt: null,
-      rejected: false,
-      error: String(error.message || error),
-    };
+    return { data: null, stale: false, cachedAt: null, rejected: false, error: describe(error, server.api) };
   }
 }
 
@@ -146,10 +149,20 @@ async function request({ api, token }) {
   return body;
 }
 
+// A sentence for the widget rather than the exception's own words.
+function describe(error, api) {
+  const text = String(error.message || error);
+  const answered = text.match(/^server returned (\d+)/);
+  if (answered) {
+    return `The server answered ${answered[1]}.`;
+  }
+  const host = api.match(/^https?:\/\/([^/]+)/);
+  return `Could not reach ${host ? host[1] : api}.`;
+}
+
 async function updateScript(api) {
   // Scripts are plain files in Scriptable's documents folder, so this one can replace
-  // itself with the server's copy and the widget ships with the server. Only from a run
-  // in the app: a widget has no way of saying it happened.
+  // itself with the server's copy, and a server deploy reaches every phone by itself.
   try {
     const req = new Request(`${api}${SCRIPT_PATH}`);
     req.timeoutInterval = REQUEST_TIMEOUT_SECONDS;
@@ -241,12 +254,12 @@ async function buildWidget(server) {
   scheduleRefresh(widget, data);
 
   if (flights.length === 0) {
-    message(widget, "No upcoming flights", staleNote(result));
+    message(widget, "No upcoming flights", footnote(data, result));
     return widget;
   }
 
   if (isAccessory) {
-    renderAccessory(widget, flights[0], result);
+    renderAccessory(widget, flights[0], data, result);
   } else if (family === "small") {
     renderSmall(widget, flights[0], data, result);
   } else {
@@ -271,65 +284,67 @@ function newWidget() {
   return widget;
 }
 
-function renderAccessory(widget, flight, result) {
-  // Roughly three lines above the clock, and one tap target for the lot.
+function renderAccessory(widget, flight, data, result) {
+  // Roughly three lines above the clock, and one tap target for the lot. No colours:
+  // the Lock Screen tints everything itself, so a delay has to be said in words.
   widget.url = flight.detail_url;
 
-  const title = widget.addText(result.stale ? `${flight.title} ·` : flight.title);
-  title.font = Font.semiboldSystemFont(13);
-  title.lineLimit = 1;
-  title.minimumScaleFactor = 0.7;
+  const head = widget.addStack();
+  head.centerAlignContent();
+  head.spacing = 5;
+  const route = head.addText(routeOf(flight));
+  route.font = Font.semiboldSystemFont(13);
+  route.lineLimit = 1;
+  route.minimumScaleFactor = 0.8;
+  const number = head.addText(flight.flight_number);
+  number.font = Font.systemFont(11);
+  number.textOpacity = 0.7;
+  number.lineLimit = 1;
 
-  const row = widget.addStack();
-  row.centerAlignContent();
-  row.spacing = 5;
-  if (isLive(flight)) {
-    const label = row.addText(flight.countdown_label);
-    label.font = Font.systemFont(11);
-    label.textOpacity = 0.7;
-    countdown(row, flight, Font.boldRoundedSystemFont(17), null);
-  } else {
-    const state = row.addText(overdueText(flight));
-    state.font = Font.semiboldSystemFont(15);
-    state.lineLimit = 1;
-  }
+  const middle = widget.addStack();
+  middle.centerAlignContent();
+  middle.spacing = 5;
+  timeSlot(middle, flight, {
+    labelFont: Font.systemFont(11),
+    labelOpacity: 0.7,
+    timerFont: Font.boldRoundedSystemFont(17),
+    wordFont: Font.semiboldSystemFont(15),
+  });
 
-  const detail = widget.addText(flight.subtitle || phaseText(flight));
+  const detail = widget.addText([statusFor(flight), footnote(data, result)].filter(Boolean).join(" · "));
   detail.font = Font.systemFont(11);
   detail.textOpacity = 0.7;
   detail.lineLimit = 1;
+  detail.minimumScaleFactor = 0.8;
 }
 
 function renderSmall(widget, flight, data, result) {
   // Small widgets get a single tap target, set on the widget rather than a row.
   widget.url = flight.detail_url;
 
-  const title = widget.addText(flight.title);
-  title.font = Font.semiboldSystemFont(13);
-  title.textColor = TEXT;
-  title.lineLimit = 1;
-  title.minimumScaleFactor = 0.7;
+  const route = widget.addText(routeOf(flight));
+  route.font = Font.semiboldSystemFont(16);
+  route.textColor = TEXT;
+  route.lineLimit = 1;
+  route.minimumScaleFactor = 0.7;
+  const number = widget.addText(flight.flight_number);
+  number.font = Font.systemFont(11);
+  number.textColor = MUTED;
 
-  widget.addSpacer(2);
-  if (isLive(flight)) {
-    const label = widget.addText(flight.countdown_label);
-    label.font = Font.systemFont(11);
-    label.textColor = PHASE_COLOR[flight.phase] || MUTED;
-    countdown(widget, flight, Font.boldRoundedSystemFont(30), TEXT);
-  } else {
-    const state = widget.addText(overdueText(flight));
-    state.font = Font.boldRoundedSystemFont(24);
-    state.textColor = PHASE_COLOR[flight.phase] || TEXT;
-    state.lineLimit = 1;
-    state.minimumScaleFactor = 0.6;
-  }
+  widget.addSpacer(4);
+  timeSlot(widget, flight, {
+    labelFont: Font.systemFont(11),
+    labelColor: PHASE_COLOR[flight.phase] || MUTED,
+    timerFont: Font.boldRoundedSystemFont(30),
+    timerColor: TEXT,
+    wordFont: Font.boldRoundedSystemFont(24),
+    wordColor: PHASE_COLOR[flight.phase] || TEXT,
+  });
 
-  if (flight.subtitle) {
-    const subtitle = widget.addText(flight.subtitle);
-    subtitle.font = Font.systemFont(11);
-    subtitle.textColor = MUTED;
-    subtitle.lineLimit = 2;
-  }
+  const status = widget.addText(statusFor(flight));
+  status.font = Font.systemFont(11);
+  status.textColor = MUTED;
+  status.lineLimit = 2;
 
   if (hasProgress(flight)) {
     widget.addSpacer(6);
@@ -363,16 +378,16 @@ function renderList(widget, flights, data, result) {
     left.layoutVertically();
     left.spacing = 2;
 
-    const title = left.addText(flight.title);
-    title.font = Font.semiboldSystemFont(14);
-    title.textColor = TEXT;
-    title.lineLimit = 1;
-    title.minimumScaleFactor = 0.7;
+    const route = left.addText(routeOf(flight));
+    route.font = Font.semiboldSystemFont(14);
+    route.textColor = TEXT;
+    route.lineLimit = 1;
+    route.minimumScaleFactor = 0.7;
 
-    const subtitle = left.addText(subtitleFor(flight));
-    subtitle.font = Font.systemFont(11);
-    subtitle.textColor = MUTED;
-    subtitle.lineLimit = 1;
+    const detail = left.addText(`${flight.flight_number} · ${statusFor(flight)}`);
+    detail.font = Font.systemFont(11);
+    detail.textColor = MUTED;
+    detail.lineLimit = 1;
 
     if (hasProgress(flight)) {
       left.addSpacer(4);
@@ -384,43 +399,83 @@ function renderList(widget, flights, data, result) {
     const right = row.addStack();
     right.layoutVertically();
     right.spacing = 1;
-
-    if (isLive(flight)) {
-      const label = right.addText(flight.countdown_label);
-      label.font = Font.systemFont(10);
-      label.textColor = MUTED;
-      label.rightAlignText();
-      label.lineLimit = 1;
-      countdown(right, flight, Font.boldRoundedSystemFont(21), TEXT, { align: "right" });
-    } else {
-      const state = right.addText(overdueText(flight));
-      state.font = Font.boldRoundedSystemFont(15);
-      state.textColor = PHASE_COLOR[flight.phase] || MUTED;
-      state.rightAlignText();
-      state.lineLimit = 1;
-      state.minimumScaleFactor = 0.7;
-    }
+    timeSlot(right, flight, {
+      align: "right",
+      labelFont: Font.systemFont(10),
+      labelColor: MUTED,
+      timerFont: Font.boldRoundedSystemFont(21),
+      timerColor: TEXT,
+      wordFont: Font.boldRoundedSystemFont(15),
+      wordColor: PHASE_COLOR[flight.phase] || MUTED,
+    });
   });
 
   widget.addSpacer();
   footer(widget, data, result);
 }
 
-// The whole point of the file: a system timer element, which ticks with no reload and
-// no network. Only ever called for an instant that is still ahead of us.
-function countdown(container, flight, font, color, options = {}) {
-  const element = container.addDate(new Date(flight.countdown_to));
-  element.applyTimerStyle();
-  element.font = font;
-  if (color) {
-    element.textColor = flight.delayed ? PHASE_COLOR.diverted : color;
+// The middle of every layout, and the same decision in all of them: the date for a
+// flight still days away, the live timer while there is something to count, and the
+// present-tense word once there is not. A layout passes fonts and colours, not logic.
+function timeSlot(container, flight, style) {
+  if (flight.departs) {
+    label(container, "Departs", style);
+    const when = container.addText(flight.departs);
+    when.font = style.wordFont;
+    tint(when, style.timerColor);
+    when.lineLimit = 1;
+    when.minimumScaleFactor = 0.5;
+    align(when, style);
+    return;
+  }
+  if (isLive(flight)) {
+    label(container, flight.countdown_label, style);
+    countdown(container, flight, style);
+    return;
+  }
+  const word = container.addText(overdueText(flight));
+  word.font = style.wordFont;
+  tint(word, style.wordColor);
+  word.lineLimit = 1;
+  word.minimumScaleFactor = 0.7;
+  align(word, style);
+}
+
+function label(container, text, style) {
+  const element = container.addText(text);
+  element.font = style.labelFont;
+  tint(element, style.labelColor);
+  if (style.labelOpacity) {
+    element.textOpacity = style.labelOpacity;
   }
   element.lineLimit = 1;
+  align(element, style);
+}
+
+// The whole point of the file: a system timer element, which ticks with no reload and
+// no network. Only ever called for an instant that is still ahead of us.
+function countdown(container, flight, style) {
+  const element = container.addDate(new Date(flight.countdown_to));
+  element.applyTimerStyle();
+  element.font = style.timerFont;
+  tint(element, flight.delay_minutes ? DELAYED : style.timerColor);
+  element.lineLimit = 1;
   element.minimumScaleFactor = 0.6;
-  if (options.align === "right") {
+  align(element, style);
+  return element;
+}
+
+function tint(element, color) {
+  // Lock Screen elements are left untinted, and pass no colour, so iOS can do its own.
+  if (color) {
+    element.textColor = color;
+  }
+}
+
+function align(element, style) {
+  if (style.align === "right") {
     element.rightAlignText();
   }
-  return element;
 }
 
 function progressBar(container, percent, width) {
@@ -436,8 +491,7 @@ function progressBar(container, percent, width) {
 }
 
 function footer(widget, data, result) {
-  const degraded = data.degraded ? data.degraded_reason || "Status may be out of date" : null;
-  const note = degraded || staleNote(result);
+  const note = footnote(data, result);
   if (!note) {
     return;
   }
@@ -452,16 +506,12 @@ function message(widget, headline, detail) {
   widget.addSpacer();
   const title = widget.addText(headline);
   title.font = Font.semiboldSystemFont(isAccessory ? 13 : 15);
-  if (!isAccessory) {
-    title.textColor = TEXT;
-  }
+  tint(title, isAccessory ? null : TEXT);
   title.centerAlignText();
   if (detail) {
     const body = widget.addText(detail);
     body.font = Font.systemFont(isAccessory ? 10 : 11);
-    if (!isAccessory) {
-      body.textColor = MUTED;
-    }
+    tint(body, isAccessory ? null : MUTED);
     body.centerAlignText();
     body.lineLimit = 2;
     body.minimumScaleFactor = 0.7;
@@ -495,6 +545,14 @@ function scheduleRefresh(widget, data) {
 
 // --- text ------------------------------------------------------------------------------
 
+function pair(light, dark) {
+  return Color.dynamic(new Color(light), new Color(dark));
+}
+
+function routeOf(flight) {
+  return `${flight.origin} → ${flight.dest}`;
+}
+
 function isLive(flight) {
   return Boolean(flight.countdown_to) && new Date(flight.countdown_to).getTime() > Date.now();
 }
@@ -511,18 +569,30 @@ function overdueText(flight) {
   return OVERDUE_TEXT[flight.phase] || phaseText(flight);
 }
 
-function subtitleFor(flight) {
+// Gate, belt or seat, and how late, on every family alike.
+function statusFor(flight) {
   const parts = [];
   if (flight.subtitle) {
     parts.push(flight.subtitle);
   }
-  if (flight.delayed) {
-    parts.push("Delayed");
+  if (flight.delay_minutes) {
+    parts.push(`Delayed ${durationText(flight.delay_minutes)}`);
   }
   return parts.join(" · ") || phaseText(flight);
 }
 
-function staleNote(result) {
+// `45m`, `1h 20m`: the same shape the web pages use.
+function durationText(minutes) {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return hours ? `${hours}h ${String(rest).padStart(2, "0")}m` : `${minutes}m`;
+}
+
+// What the server says is wrong with its numbers, or else that these are old ones.
+function footnote(data, result) {
+  if (data.degraded) {
+    return data.degraded_reason || "Status may be out of date";
+  }
   if (!result.stale) {
     return null;
   }
@@ -541,12 +611,8 @@ async function present(widget) {
     await widget.presentSmall();
   } else if (family === "large") {
     await widget.presentLarge();
-  } else if (family === "accessoryRectangular") {
+  } else if (isAccessory) {
     await widget.presentAccessoryRectangular();
-  } else if (family === "accessoryCircular") {
-    await widget.presentAccessoryCircular();
-  } else if (family === "accessoryInline") {
-    await widget.presentAccessoryInline();
   } else {
     await widget.presentMedium();
   }
