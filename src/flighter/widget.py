@@ -38,7 +38,6 @@ from .models import KV, Booking, BookingStatus, FlightSnapshot
 from .phase import (
     AIRBORNE,
     CANCELLED,
-    CANCELLED_NOTICE,
     DAY_OF,
     DIVERTED,
     LANDED,
@@ -327,7 +326,7 @@ def _flight(
 def _subtitle(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> str | None:
     """Gate, terminal or carousel, whichever is the one to walk towards now."""
     if phase == CANCELLED:
-        return CANCELLED_NOTICE
+        return None
     if phase == DIVERTED:
         bound_for = views.destination_iata(booking, snapshot)
         return f"Diverted to {bound_for}" if bound_for != booking.dest_iata else "Diverted"

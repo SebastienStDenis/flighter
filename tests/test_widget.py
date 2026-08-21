@@ -21,7 +21,6 @@ from flighter.aeroapi import BREAKER_KEY, month_key
 from flighter.config import Settings, get_settings
 from flighter.db import get_session
 from flighter.models import KV, Airport, Booking, FlightSnapshot
-from flighter.phase import CANCELLED_NOTICE
 from flighter.views import until
 from flighter.widget import (
     FlightRow,
@@ -189,12 +188,11 @@ def test_at_the_gate_there_is_nothing_left_to_count(settings: Settings) -> None:
 
 
 def test_cancelled_has_nothing_to_count_to(settings: Settings) -> None:
-    """FlightAware's flag means "no longer tracked", so the widget says who said it."""
     flight = payload([(booking(), snapshot(cancelled=True))], settings)["flights"][0]
     assert flight["phase"] == "cancelled"
-    assert flight["status_label"] == "Maybe cancelled"
+    assert flight["status_label"] == "Cancelled"
     assert flight["status_tone"] == "stop"
-    assert flight["subtitle"] == CANCELLED_NOTICE
+    assert flight["subtitle"] is None
     assert flight["milestone_label"] is None
     assert flight["milestone_to"] is None
 

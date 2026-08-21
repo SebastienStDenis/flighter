@@ -43,11 +43,6 @@ DAY_OF_LEAD: Final = timedelta(hours=24)
 DEPARTURE_DELAY_THRESHOLD: Final = timedelta(minutes=15)
 ARRIVAL_DELAY_THRESHOLD: Final = timedelta(minutes=15)
 
-# AeroAPI's `cancelled` means the flight is no longer tracked by FlightAware, which is
-# usually but not always an airline cancellation, so every surface says who said it
-# rather than asserting the flight is off.
-CANCELLED_NOTICE: Final = "Marked cancelled by FlightAware - confirm with the airline"
-
 
 class BookingLike(Protocol):
     """What a phase decision needs off a booking; `Booking` satisfies it structurally."""

@@ -188,10 +188,6 @@ def diff_snapshots(
             DetectedChange(EventKind.BAGGAGE_CLAIM_ASSIGNED, None, current.baggage_claim)
         )
 
-    # AeroAPI's `cancelled` is an untracked flag, not an airline status: the spec warns
-    # it goes true "for a number of reasons ... including cancellation by the airline,
-    # but that will not always be the case". Still worth a push, but the copy
-    # deliberately attributes it rather than asserting the flight is off.
     if current.cancelled and not previous.cancelled:
         changes.append(DetectedChange(EventKind.CANCELLED, "false", "true"))
 

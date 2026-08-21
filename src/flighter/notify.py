@@ -12,7 +12,6 @@ from . import notices, prefs
 from .bookings import flight_label
 from .config import Settings
 from .models import Booking, EventKind, FlightEvent, IngestOutcome
-from .phase import CANCELLED_NOTICE
 from .timezones import FALLBACK_TZ, format_local, parse_instant
 
 log = logging.getLogger(__name__)
@@ -112,7 +111,7 @@ def event_message(event: FlightEvent, *, origin_tz: str, dest_tz: str) -> str:
     if kind == EventKind.BAGGAGE_CLAIM_ASSIGNED:
         return f"Baggage claim {new}"
     if kind == EventKind.CANCELLED:
-        return CANCELLED_NOTICE
+        return "Cancelled"
     if kind == EventKind.DIVERTED:
         return f"Diverted to {new}" if new and new != "true" else "Diverted"
     return kind
