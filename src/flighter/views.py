@@ -58,13 +58,6 @@ class Status(NamedTuple):
     tone: str
 
 
-class Countdown(NamedTuple):
-    """A moment to count towards, and the words that go in front of it."""
-
-    label: str
-    target: datetime
-
-
 @dataclass(frozen=True)
 class Timeline:
     """One event's three-state answer, collapsed to what a reader needs to see.
@@ -89,6 +82,23 @@ class Timeline:
             return None
         shift = self.best - self.scheduled
         return shift if abs(shift) >= DEPARTURE_DELAY_THRESHOLD else None
+
+    @property
+    def late(self) -> bool:
+        return self.moved is not None and self.moved > timedelta(0)
+
+
+class Countdown(NamedTuple):
+    """A moment to count towards, the words that go in front of it, and its history.
+
+    The target is the best answer off `line`; the line is carried so the page can show
+    the time it replaced, read in the zone of the airport it happens at.
+    """
+
+    label: str
+    target: datetime
+    line: Timeline
+    tz: str
 
 
 @dataclass(frozen=True)
@@ -188,10 +198,13 @@ class FlightView:
     @property
     def countdown(self) -> Countdown | None:
         """The one number worth looking at, decided the same way the widget decides it."""
-        label, target = countdown(self.phase, self.booking, self.snapshot)
+        phase = self.phase
+        label, target = countdown(phase, self.booking, self.snapshot)
         if label is None or target is None:
             return None
-        return Countdown(label, target)
+        if phase in (AIRBORNE, DIVERTED):
+            return Countdown(label, target, self.lands, self.dest_tz)
+        return Countdown(label, target, self.departs, self.origin_tz)
 
     @property
     def calendar_link(self) -> str | None:

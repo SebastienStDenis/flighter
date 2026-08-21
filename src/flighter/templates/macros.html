@@ -3,6 +3,14 @@
 <span class="badge" data-variant="{{ status.tone }}">{{ status.label }}</span>
 {% endmacro %}
 
+{# A time that may have moved since it was scheduled. The original is struck through
+   only when it did, so an on-time flight reads as one clean time; the current one is
+   red when it slipped later and green when it came forward. #}
+{% macro shift(line, tz) -%}
+  {%- if line.moved %}<s class="font-normal text-muted-foreground">{{ at(line.scheduled, tz) }}</s> {% endif -%}
+  <span class="{{ ('text-stop' if line.late else 'text-ok') if line.moved }}">{{ at(line.best, tz) }}</span>
+{%- endmacro %}
+
 {# The route rule: origin, destination, and how far along the aircraft is. One hairline
    carries all three, so the list and the flight page say the same thing at two sizes. #}
 {% macro route(v, names=false) %}
@@ -10,7 +18,7 @@
 <div class="route" style="--progress: {{ progress or 0 }}%">
   <div>
     <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.origin_iata }}</div>
-    <div class="font-mono text-xs text-muted-foreground">{{ at(v.departure, v.origin_tz) }}</div>
+    <div class="font-mono text-xs text-muted-foreground">{{ shift(v.departs, v.origin_tz) }}</div>
   </div>
   <div class="route-line {{ 'text-live' if progress else 'text-muted-foreground/50' }}">
     <span class="route-mark rounded-full bg-card p-0.5" aria-hidden="true">
@@ -22,7 +30,7 @@
   </div>
   <div class="text-right">
     <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.dest_iata }}</div>
-    <div class="font-mono text-xs text-muted-foreground">{{ at(v.arrival, v.dest_tz) }}</div>
+    <div class="font-mono text-xs text-muted-foreground">{{ shift(v.arrives, v.dest_tz) }}</div>
   </div>
 </div>
 {# The names get their own line under the rule, so they can be as long as airports make
@@ -58,14 +66,21 @@
     {{ stat("Terminal", dash(v.terminal)) }}
     {{ stat("Seat", dash(v.booking.seat)) }}
   </section>
-  {% if v.countdown %}
-  <footer class="border-t">
-    <span class="text-sm text-muted-foreground">{{ v.countdown.label }}</span>
-    <time class="countdown ml-auto font-mono text-lg font-bold"
-          data-to="{{ v.countdown.target.isoformat() }}">{{ until(v.countdown.target) }}</time>
-  </footer>
-  {% endif %}
+  {% if v.countdown %}{{ checkpoint(v.countdown) }}{% endif %}
 </a>
+{% endmacro %}
+
+{# The one moment worth counting to: what it is called, when it is, and how long until.
+   The time sits under the label so a slipped estimate is read, not just felt. #}
+{% macro checkpoint(c) %}
+<footer class="border-t">
+  <div>
+    <div class="text-sm text-muted-foreground">{{ c.label }}</div>
+    <div class="font-mono text-xs text-muted-foreground">{{ shift(c.line, c.tz) }}</div>
+  </div>
+  <time class="countdown ml-auto font-mono text-lg font-bold"
+        data-to="{{ c.target.isoformat() }}">{{ until(c.target) }}</time>
+</footer>
 {% endmacro %}
 
 {# Everything that is not next. Same facts, one line each. #}
@@ -96,8 +111,8 @@
 </div>
 {% endmacro %}
 
-{# A time that has resolved through scheduled -> estimated -> actual. The original is
-   struck through only when it moved, so an on-time flight reads as one clean time. #}
+{# A time that has resolved through scheduled -> estimated -> actual, with how far it
+   drifted spelled out next to it. #}
 {% macro when(name, line, tz) %}
 <div class="item" data-size="xs">
   <section class="flex-none"><p>{{ name }}</p></section>
@@ -105,11 +120,10 @@
     {%- if line.best is none -%}
       {{ missing }}
     {%- else -%}
-      {%- if line.moved %}<s class="font-normal text-muted-foreground">{{ at(line.scheduled, tz) }}</s>{% endif -%}
-      <span class="{{ 'text-warn' if line.moved and line.moved.total_seconds() > 0 }}">{{ at(line.best, tz) }}</span>
+      {{ shift(line, tz) }}
       {%- if line.moved %}
       <span class="font-sans text-xs font-normal text-muted-foreground">
-        {{- 'late' if line.moved.total_seconds() > 0 else 'early' }} {{ duration(line.moved) }}</span>
+        {{- 'late' if line.late else 'early' }} {{ duration(line.moved) }}</span>
       {%- endif -%}
     {%- endif -%}
   </aside>

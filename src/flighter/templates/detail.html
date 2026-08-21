@@ -46,13 +46,7 @@
     {{ m.stat("Terminal", dash(v.terminal)) }}
     {{ m.stat("Seat", dash(v.booking.seat)) }}
   </section>
-  {% if v.countdown %}
-  <footer class="border-t">
-    <span class="text-sm text-muted-foreground">{{ v.countdown.label }}</span>
-    <time class="countdown ml-auto font-mono text-lg font-bold"
-          data-to="{{ v.countdown.target.isoformat() }}">{{ until(v.countdown.target) }}</time>
-  </footer>
-  {% endif %}
+  {% if v.countdown %}{{ m.checkpoint(v.countdown) }}{% endif %}
 </div>
 
 <div class="card mt-3" data-size="sm">
