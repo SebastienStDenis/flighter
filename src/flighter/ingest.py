@@ -30,6 +30,7 @@ from typing import NamedTuple
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from . import notices
 from .airports import UnknownAirport, airport_tz
 from .bookings import create_booking, find_duplicate
 from .config import Settings, get_settings
@@ -75,13 +76,6 @@ RETRY_DELAYS = (timedelta(minutes=2), timedelta(minutes=10))
 # rather than minutes because no connection is open to cost anybody anything, and because
 # somebody who has just typed an Apple ID into the settings page is watching for it.
 UNCONFIGURED_PAUSE_SECONDS = 5.0
-
-_NO_FLIGHT_REASON = "There is no flight in it."
-_UNREADABLE_REASON = "It looks like a flight email, but nothing could be read from it."
-
-# Said only about a message that kept its flag: it is still in Mail, and it will sit
-# there until it is either unflagged or handed back to the service.
-_SET_ASIDE_REASON = "It was set aside under Problems."
 
 
 class Ingested(NamedTuple):
@@ -181,7 +175,7 @@ def _no_flight() -> Ingested:
     stays on all the same: the email is still where the person left it, and the Problems
     page asks them whether it really held nothing rather than deciding that on its own.
     """
-    return Ingested(ERROR, error=_NO_FLIGHT_REASON, retryable=False)
+    return Ingested(ERROR, error=notices.NO_FLIGHT, retryable=False)
 
 
 def _unreadable() -> Ingested:
@@ -191,7 +185,7 @@ def _unreadable() -> Ingested:
     be shown again, but said differently: the person was right to flag this one, and what
     wants looking at is how the email was read, not whether it held a flight.
     """
-    return Ingested(ERROR, error=_UNREADABLE_REASON, retryable=False)
+    return Ingested(ERROR, error=notices.UNREADABLE, retryable=False)
 
 
 def _unknown_airport(exc: UnknownAirport) -> Ingested:
@@ -201,11 +195,7 @@ def _unknown_airport(exc: UnknownAirport) -> Ingested:
     the same way, so the retries would spend model calls to end up here anyway. The email
     is set aside at once instead, and the push names the code that has to be corrected.
     """
-    return Ingested(
-        ERROR,
-        error=f"{exc.iata} is not an airport we know, so nothing was added.",
-        retryable=False,
-    )
+    return Ingested(ERROR, error=notices.unknown_airport(exc.iata), retryable=False)
 
 
 async def _book(session: AsyncSession, message: Message, extraction: Extraction) -> Ingested:
@@ -489,7 +479,7 @@ async def _announce(notifier: Notifier, message: Message, result: Ingested) -> N
             await notifier.mail_failed(
                 message_id=message.id,
                 subject=message.subject,
-                reason=f"{result.error}\n{_SET_ASIDE_REASON}",
+                reason=result.error,
             )
             return
 

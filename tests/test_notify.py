@@ -207,11 +207,15 @@ async def test_a_failed_import_links_to_the_problems_page(settings: Settings) ->
     )
     sent = recorder.only
 
-    assert sent["title"] == "Import failed"
+    assert sent["title"] == "Email could not be imported"
     assert sent["url"] == "https://flights.example.com/problems"
     assert sent["url_title"] == "Open flighter"
     assert sent["priority"] == "0"
-    assert sent["message"] == "Your itinerary\nthe model timed out"
+    # The headline is the same for every failure, so the body names the email, says what
+    # went wrong as a sentence, and says where the email is now.
+    assert sent["message"] == (
+        "Subject: Your itinerary\nThe model timed out. It is still flagged in Mail."
+    )
 
 
 async def test_mail_pushes_are_best_effort(settings: Settings) -> None:

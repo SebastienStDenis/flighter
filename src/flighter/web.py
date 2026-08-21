@@ -171,6 +171,7 @@ def create_app(settings: Settings) -> FastAPI:
         email_url=message_url,
         local_input=views.local_input,
         missing=views.MISSING,
+        problem_notice=views.problem_notice,
         same_day=views.same_day,
         until=views.until,
     )

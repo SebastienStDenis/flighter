@@ -8,7 +8,7 @@ from decimal import Decimal
 
 import httpx
 
-from . import prefs
+from . import notices, prefs
 from .bookings import flight_label
 from .config import Settings
 from .models import Booking, EventKind, FlightEvent, IngestOutcome
@@ -197,17 +197,20 @@ class Notifier:
         except PushFailed:
             log.warning("push about an imported email failed", exc_info=True)
 
-    async def mail_failed(self, *, message_id: str, subject: str, reason: str) -> None:
+    async def mail_failed(self, *, message_id: str, subject: str, reason: str | None) -> None:
         """Nothing came of an email that was marked.
 
         Priority 0 as well: an import that did not happen costs nobody a flight. The link
         opens the Problems page, which is where the email can be tried again, written off,
         or opened in Mail. Best effort, for the same reason as above.
+
+        The words come from `notices` so that the push and that page say the same thing.
         """
+        notice = notices.import_failed(subject=subject, reason=reason)
         try:
             await self._send(
-                title="Import failed",
-                message=f"{subject}\n{reason}" if subject else reason,
+                title=notice.headline,
+                message=notice.body,
                 priority=PRIORITY_NORMAL,
                 url=f"{prefs.current().public_base_url}/problems",
                 url_title=OPEN_APP,
