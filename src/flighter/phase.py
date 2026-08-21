@@ -71,6 +71,7 @@ class SnapshotLike(Protocol):
     scheduled_in: datetime | None
     estimated_in: datetime | None
     actual_in: datetime | None
+    progress_percent: int | None
 
 
 def compute_phase(booking: BookingLike, snapshot: SnapshotLike | None, now: datetime) -> Phase:
@@ -144,3 +145,40 @@ def landing_estimate(booking: BookingLike, snapshot: SnapshotLike | None) -> dat
             if candidate is not None:
                 return ensure_utc(candidate)
     return arrival_estimate(booking, snapshot)
+
+
+def airborne_window(
+    booking: BookingLike, snapshot: SnapshotLike | None, now: datetime
+) -> tuple[datetime, datetime] | None:
+    """Wheels-up and best known wheels-down, for a flight that is in the air at `now`.
+
+    None on the ground, once landed, and whenever the two do not make a span: a landing
+    estimate that has not caught up with a late take-off is nothing to divide by.
+    """
+    if snapshot is None or compute_phase(booking, snapshot, now) != AIRBORNE:
+        return None
+    off = ensure_utc(snapshot.actual_off)
+    landing = landing_estimate(booking, snapshot)
+    if off is None or landing is None or landing <= off:
+        return None
+    return off, landing
+
+
+def progress_estimate(
+    booking: BookingLike, snapshot: SnapshotLike | None, now: datetime
+) -> int | None:
+    """How far along the flight is at `now`, as a percentage.
+
+    AeroAPI states a `progress_percent`, but it is true at the moment it was polled and
+    an airborne flight is polled every ten minutes, so on its own the figure sits still
+    between polls and for as long as a poll keeps failing. Wheels-up is observed and the
+    landing estimate moves all flight long, so elapsed over expected airborne time is
+    current at every instant and agrees with the feed each time the feed is asked. The
+    feed's figure stands whenever the clock has nothing to go on.
+    """
+    window = airborne_window(booking, snapshot, now)
+    if window is None:
+        return snapshot.progress_percent if snapshot is not None else None
+    off, landing = window
+    fraction = (ensure_utc(now) - off) / (landing - off)
+    return round(100 * min(max(fraction, 0.0), 1.0))

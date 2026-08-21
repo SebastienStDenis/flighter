@@ -83,6 +83,15 @@
         // A target in the past counts up: "20m ago" is a fact, "-20m" is arithmetic.
         el.textContent = figure(target - now) + (target < now ? " ago" : "");
       });
+      // The aircraft on the route rule is the same idea: the server placed it from the
+      // clock, and this keeps it moving on a page left open for the whole flight.
+      document.querySelectorAll(".route[data-off][data-on]").forEach(function (el) {
+        var off = Date.parse(el.dataset.off);
+        var on = Date.parse(el.dataset.on);
+        if (isNaN(off) || isNaN(on) || on <= off) return;
+        var fraction = Math.min(Math.max((now - off) / (on - off), 0), 1);
+        el.style.setProperty("--progress", Math.round(fraction * 100) + "%");
+      });
       // Seconds are only on screen inside the last hour, so that is the only time this
       // is allowed to wake the phone up every one of them.
       setTimeout(tick, nearest < 3600000 ? 1000 : 60000);

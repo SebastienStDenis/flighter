@@ -7,7 +7,8 @@
    carries all three, so the list and the flight page say the same thing at two sizes. #}
 {% macro route(v, names=false) %}
 {% set progress = v.progress_percent %}
-<div class="route" style="--progress: {{ progress or 0 }}%">
+{% set window = v.airborne_window %}
+<div class="route" style="--progress: {{ progress or 0 }}%"{% if window %} data-off="{{ window[0].isoformat() }}" data-on="{{ window[1].isoformat() }}"{% endif %}>
   <div>
     <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.origin_iata }}</div>
     <div class="font-mono text-xs text-muted-foreground">{{ at(v.departure, v.origin_tz) }}</div>
