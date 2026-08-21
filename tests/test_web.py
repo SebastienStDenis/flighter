@@ -7,6 +7,7 @@ and a page that raises on one of them is a page that fails exactly when it is ne
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -26,6 +27,7 @@ from flighter.config import Settings
 from flighter.db import get_session
 from flighter.lookup import Candidate
 from flighter.models import KV, Airport, Booking, FlightEvent, FlightSnapshot, IngestLog
+from flighter.widget import LAST_SEEN_KEY
 
 NOW = datetime.now(UTC)
 DEPARTURE = NOW + timedelta(days=2)
@@ -764,8 +766,64 @@ def test_the_settings_page_shows_what_is_connected(client: TestClient) -> None:
     # The Apple ID names the account rather than proving anything, so it is shown back.
     assert "someone@icloud.com" in body
     assert "Flights" in body
-    # The token has to be readable: it is typed into Scriptable by hand.
-    assert "test-token" in body
+    # The token is handed to your own phone, so the page carries it: in the Connect link,
+    # and in the clear for trying the endpoint by hand.
+    assert (
+        'href="scriptable:///run/Flights?api=https%3A%2F%2Fflights.example.com&amp;token=test-token"'
+        in body
+    )
+    assert ">test-token</pre>" in body
+
+
+def test_the_widget_tab_says_whether_a_phone_has_fetched(client: TestClient) -> None:
+    body = client.get("/settings").text
+    assert "No phone has fetched flights yet" in body
+    assert "Not connected" in body
+
+    recent = datetime.now(UTC) - timedelta(minutes=4)
+    client.session.rows["KV"] = [  # type: ignore[attr-defined]
+        KV(key=LAST_SEEN_KEY, value={"at": recent.strftime("%Y-%m-%dT%H:%M:%SZ")})
+    ]
+    body = client.get("/settings").text
+    assert "Last fetched by a phone <strong>4m ago</strong>" in body
+
+
+def test_a_phone_not_heard_from_in_a_day_is_not_connected(client: TestClient) -> None:
+    """iOS skips reloads for hours at a time; only a whole day of silence means broken."""
+    long_ago = datetime.now(UTC) - timedelta(days=3, hours=2)
+    client.session.rows["KV"] = [  # type: ignore[attr-defined]
+        KV(key=LAST_SEEN_KEY, value={"at": long_ago.strftime("%Y-%m-%dT%H:%M:%SZ")})
+    ]
+    body = client.get("/settings").text
+    assert "Last fetched by a phone <strong>3d ago</strong>" in body
+    assert "Not connected" in body
+
+
+def test_regenerating_the_token_lands_back_on_the_widget_tab(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    minted: list[bool] = []
+    monkeypatch.setattr(web, "mint_widget_token", lambda: minted.append(True))
+
+    response = client.post("/settings/widget/token", follow_redirects=False)
+
+    assert minted == [True]
+    assert response.status_code == 303
+    assert response.headers["location"] == "/settings?saved=1&tab=widget"
+    body = client.get("/settings?saved=1&tab=widget").text
+    assert re.search(
+        r'id="settings-tabs-tab-3"\s+aria-controls="[^"]+"\s+aria-selected="true"', body
+    )
+    assert re.search(
+        r'id="settings-tabs-tab-1"\s+aria-controls="[^"]+"\s+aria-selected="false"', body
+    )
+
+
+def test_the_install_copy_fallback_carries_the_whole_script(client: TestClient) -> None:
+    """Plain http has no clipboard API, so the script is on the page to be selected."""
+    body = client.get("/settings").text
+    assert 'id="widget-script"' in body
+    assert "Keychain.set(TOKEN_KEY" in body
 
 
 def test_the_settings_page_says_what_the_month_has_cost(client: TestClient) -> None:

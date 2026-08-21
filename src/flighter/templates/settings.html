@@ -336,29 +336,126 @@
 </form>
 {% endset %}
 
+{# A step with a button on it. The buttons only work on the phone: two of them open
+   Scriptable, and a desktop has nowhere to send them. #}
+{% macro action_step(number, name, what, href=None, action=None, attrs='') %}
+<div class="item" data-size="xs">
+  <aside class="w-6 shrink-0 text-center font-mono font-bold text-muted-foreground">
+    {{- number -}}
+  </aside>
+  <section>
+    <h4>{{ name }}</h4>
+    <p>{{ what }}</p>
+    {{ caller() if caller }}
+  </section>
+  {% if href %}
+  <aside>
+    <a class="btn" data-variant="outline" data-size="sm" href="{{ href }}" {{ attrs|safe }}>
+      {{- action -}}</a>
+  </aside>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro chevron() %}
+<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path d="m6 9 6 6 6-6"/>
+</svg>
+{% endmacro %}
+
 {% set widget %}
 <div class="card" data-size="sm">
   <header>
     <h3>Widget</h3>
-    <p>Enter this the first time you run the widget on your phone.</p>
+    <div class="card-action">{{ status(widget_connected) }}</div>
+    <p>A live countdown to the next flight on the Lock Screen and home screen. Open this
+      page on the phone and work down the list; nothing is typed.</p>
   </header>
   <section>
-    <pre id="widget-token"
-         class="overflow-x-auto rounded-md bg-muted p-3 font-mono text-sm">{{ widget_token }}</pre>
-    <button class="btn mt-3" data-variant="outline" data-size="sm" type="button"
-            onclick="copyToken(this)">Copy</button>
+    <div class="item-group -mx-2.5">
+      {{ action_step(1, 'Get Scriptable', 'Free, on the App Store. It is what runs the widget.',
+                     'https://apps.apple.com/app/scriptable/id1405459188', 'App Store',
+                     'target="_blank" rel="noopener"') }}
+      {% call action_step(2, 'Install the script',
+                          'Opening the download imports it into Scriptable as “Flights”.',
+                          '/widget/Flights.scriptable', 'Install') %}
+      <div class="accordion mt-2">
+        <details>
+          <summary>Or copy it instead {{ chevron() }}</summary>
+          <p class="text-sm text-muted-foreground">In Scriptable, tap <strong>+</strong>,
+            paste, and name the script <strong>Flights</strong>. The name matters: the
+            Connect button below runs it by name.</p>
+          <textarea id="widget-script" class="mt-2 h-24 w-full rounded-md bg-muted p-2 font-mono text-xs"
+                    readonly spellcheck="false">{{ widget_script }}</textarea>
+          <button class="btn mt-2" data-variant="outline" data-size="sm" type="button"
+                  onclick="copyText(this, document.getElementById('widget-script').value)">
+            Copy the script</button>
+        </details>
+      </div>
+      {% endcall %}
+      {{ action_step(3, 'Connect this phone',
+                     'Hands Scriptable this address and the token. Tap it again whenever the token changes.',
+                     widget_connect_url, 'Connect') }}
+      {% call action_step(4, 'Add the widget', 'Long press the wallpaper or the Lock Screen.') %}
+      <div class="accordion mt-2">
+        <details>
+          <summary>Home Screen {{ chevron() }}</summary>
+          <p class="text-sm text-muted-foreground">Long press the wallpaper, tap
+            <strong>+</strong>, choose Scriptable and a size. Tap the placed widget and set
+            <strong>Script</strong> to Flights and <strong>When Interacting</strong> to
+            <strong>Run Script</strong>. Medium and large show up to three flights, each
+            one tappable; small shows the next flight with a large countdown.</p>
+        </details>
+        <details>
+          <summary>Lock Screen {{ chevron() }}</summary>
+          <p class="text-sm text-muted-foreground">Long press the Lock Screen, tap
+            <strong>Customise</strong>, then the area under the clock. Choose Scriptable,
+            pick the rectangular widget and set <strong>Script</strong> to Flights. Needs
+            iOS 16 or later.</p>
+        </details>
+      </div>
+      {% endcall %}
+    </div>
   </section>
-  <footer class="border-t">
-    <a class="btn" data-variant="link" data-size="sm" target="_blank" rel="noopener"
-       href="https://github.com/sebastienstdenis/flighter/blob/main/widget/README.md">
-      How to install it</a>
-  </footer>
+  <section class="border-t pt-4">
+    <p class="text-sm text-muted-foreground">
+      {%- if widget_last_seen -%}
+      Last fetched by a phone <strong>{{ widget_last_seen }}</strong>.
+      {%- else -%}
+      No phone has fetched flights yet. Once a widget is on a screen, this updates within
+      a few minutes.
+      {%- endif -%}
+    </p>
+    <div class="accordion mt-3 rounded-lg border px-3">
+      <details>
+        <summary>Advanced {{ chevron() }}</summary>
+        <div class="pb-3">
+          <p class="text-sm text-muted-foreground">The token, for trying the endpoint by
+            hand: <code>GET /api/widget</code> with it as a bearer.</p>
+          <pre id="widget-token"
+               class="mt-2 overflow-x-auto rounded-md bg-muted p-3 font-mono text-sm">{{ widget_token }}</pre>
+          <div class="mt-3 flex">
+            <button class="btn" data-variant="outline" data-size="sm" type="button"
+                    onclick="copyText(this, document.getElementById('widget-token').textContent.trim())">
+              Copy</button>
+            <form class="ml-auto" method="post" action="/settings/widget/token"
+                  onsubmit="return confirm('Every phone will stop updating until it taps Connect again. Continue?')">
+              <button class="btn" data-variant="ghost" data-size="sm" type="submit">
+                Regenerate</button>
+            </form>
+          </div>
+        </div>
+      </details>
+    </div>
+  </section>
 </div>
 {% endset %}
 
 {{ bc.tabs(
      id='settings-tabs',
      tablist_attrs={'class': 'w-full'},
+     default_tab_index=3 if tab == 'widget' else 1,
      tabsets=[
        {'tab': 'Connections', 'panel': connections},
        {'tab': 'Preferences', 'panel': preferences},
@@ -378,9 +475,29 @@
     }
   }
 
-  async function copyToken(button) {
-    await navigator.clipboard.writeText(document.getElementById("widget-token").textContent.trim());
-    button.textContent = "Copied";
+  async function copyText(button, text) {
+    var copied = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    } catch (error) {
+      // Browsers only offer the clipboard API on https or localhost, and this page is
+      // usually neither, so fall back to copying a selection the old way.
+      var scratch = document.createElement("textarea");
+      scratch.value = text;
+      scratch.setAttribute("readonly", "");
+      scratch.style.position = "fixed";
+      scratch.style.opacity = "0";
+      document.body.appendChild(scratch);
+      scratch.select();
+      try {
+        copied = document.execCommand("copy");
+      } catch (ignored) {
+        copied = false;
+      }
+      scratch.remove();
+    }
+    button.textContent = copied ? "Copied" : "Could not copy";
   }
 </script>
 
