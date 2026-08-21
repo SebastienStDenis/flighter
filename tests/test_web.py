@@ -847,7 +847,7 @@ def test_the_settings_page_shows_what_is_connected(client: TestClient) -> None:
     # The token is handed to your own phone, so the page carries it: in the Connect link,
     # and in the clear for trying the endpoint by hand.
     assert (
-        'href="scriptable:///run/Flights?api=https%3A%2F%2Fflights.example.com&amp;token=test-token"'
+        'href="scriptable:///run/Flighter?api=https%3A%2F%2Fflights.example.com&amp;token=test-token"'
         in body
     )
     assert ">test-token</pre>" in body

@@ -378,13 +378,13 @@
                      'https://apps.apple.com/app/scriptable/id1405459188', 'App Store',
                      'target="_blank" rel="noopener"') }}
       {% call action_step(2, 'Install the script',
-                          'Opening the download imports it into Scriptable as “Flights”.',
-                          '/widget/Flights.scriptable', 'Install') %}
+                          'Opening the download imports it into Scriptable as “Flighter”.',
+                          '/widget/Flighter.scriptable', 'Install') %}
       <div class="accordion mt-2">
         <details>
           <summary>Or copy it instead {{ chevron() }}</summary>
           <p class="text-sm text-muted-foreground">In Scriptable, tap <strong>+</strong>,
-            paste, and name the script <strong>Flights</strong>. The name matters: the
+            paste, and name the script <strong>Flighter</strong>. The name matters: the
             Connect button below runs it by name.</p>
           <textarea id="widget-script" class="mt-2 h-24 w-full rounded-md bg-muted p-2 font-mono text-xs"
                     readonly spellcheck="false">{{ widget_script }}</textarea>
@@ -403,7 +403,7 @@
           <summary>Home Screen {{ chevron() }}</summary>
           <p class="text-sm text-muted-foreground">Long press the wallpaper, tap
             <strong>+</strong>, choose Scriptable and a size. Tap the placed widget and set
-            <strong>Script</strong> to Flights and <strong>When Interacting</strong> to
+            <strong>Script</strong> to Flighter and <strong>When Interacting</strong> to
             <strong>Run Script</strong>. Medium and large show up to three flights, each
             one tappable; small shows the next flight with a large countdown.</p>
         </details>
@@ -411,7 +411,7 @@
           <summary>Lock Screen {{ chevron() }}</summary>
           <p class="text-sm text-muted-foreground">Long press the Lock Screen, tap
             <strong>Customise</strong>, then the area under the clock. Choose Scriptable,
-            pick the rectangular widget and set <strong>Script</strong> to Flights. Needs
+            pick the rectangular widget and set <strong>Script</strong> to Flighter. Needs
             iOS 16 or later.</p>
         </details>
       </div>

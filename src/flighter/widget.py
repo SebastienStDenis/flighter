@@ -80,7 +80,7 @@ PHASES_IMMINENT: Final = frozenset({DAY_OF, TAXIING, AIRBORNE, DIVERTED})
 SCRIPT_FILE: Final = Path(__file__).parent / "static" / "flights-widget.js"
 # Fixed because the Connect link runs the script by name. The bundle installs it under
 # this name, so the only way to break the link is to rename the script by hand.
-SCRIPT_NAME: Final = "Flights"
+SCRIPT_NAME: Final = "Flighter"
 SCRIPT_ICON: Final = {"color": "deep-blue", "glyph": "plane-departure"}
 
 LAST_SEEN_KEY: Final = "widget_last_seen"

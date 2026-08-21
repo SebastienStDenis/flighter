@@ -1,4 +1,4 @@
-# Flights widget for Scriptable
+# Flighter widget for Scriptable
 
 An iOS home screen and Lock Screen widget for the flight tracker. It reads
 `GET /api/widget` and draws it. Every display decision is made on the server, so the
@@ -11,17 +11,17 @@ Everything happens on the **Widget** tab of the server's settings page, opened o
 phone. Nothing is typed and nothing is edited.
 
 1. **Get Scriptable.** Free, on the App Store.
-2. **Install the script.** The button downloads `Flights.scriptable`; opening the download
+2. **Install the script.** The button downloads `Flighter.scriptable`; opening the download
    imports it into Scriptable with its name and icon set. If that does not suit, the same
    step offers the script to copy: in Scriptable, tap `+`, paste, and name the script
-   `Flights`. The name matters, because the next step runs it by name.
+   `Flighter`. The name matters, because the next step runs it by name.
 3. **Connect this phone.** The button opens Scriptable and runs the script with the
    server's address and the widget token in the URL. The script stores both in the iOS
    Keychain and renders a preview, which is how you check the address works from the
    phone. Neither value is ever written into the script.
 4. **Add the widget.**
    - **Home Screen**: long press the wallpaper, tap `+`, choose Scriptable, pick a size,
-     then tap the placed widget and set *Script* to Flights and *When Interacting* to
+     then tap the placed widget and set *Script* to Flighter and *When Interacting* to
      *Run Script*.
    - **Lock Screen**: long press the Lock Screen, tap Customise, tap the area under the
      clock, choose Scriptable, and pick the rectangular widget. Set the script the same

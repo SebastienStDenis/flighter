@@ -90,7 +90,7 @@ Script.complete();
 // --- data ------------------------------------------------------------------------------
 
 function connect() {
-  // Opened from the settings page: scriptable:///run/Flights?api=...&token=... Each
+  // Opened from the settings page: scriptable:///run/Flighter?api=...&token=... Each
   // tap overwrites what is stored, which is how a regenerated token gets onto the phone.
   const params = args.queryParameters || {};
   if (params.api && params.token) {
