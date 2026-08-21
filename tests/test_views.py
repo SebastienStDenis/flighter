@@ -26,7 +26,9 @@ from flighter.phase import (
 from flighter.views import (
     FlightView,
     Milestone,
+    Status,
     clock,
+    day_word,
     destination_iata,
     milestone,
     milestone_label,
@@ -206,6 +208,26 @@ def test_the_page_script_builds_the_same_figure() -> None:
 
 def now_ish(**shift: float) -> datetime:
     return datetime.now(UTC) + timedelta(**shift)
+
+
+def test_the_day_is_named_by_the_calendar_at_the_origin() -> None:
+    """The window is a rolling day, so a morning flight enters it the morning before."""
+    # 20:00 in New York on the 12th, where the clock is four hours behind UTC.
+    evening = datetime(2026, 9, 13, 0, 0, tzinfo=UTC)
+    assert day_word(evening + timedelta(hours=3), evening, "America/New_York") == "Today"
+    assert day_word(evening + timedelta(hours=6), evening, "America/New_York") == "Tomorrow"
+    assert day_word(evening + timedelta(hours=6), evening, "UTC") == "Today"
+    assert day_word(evening - timedelta(hours=22), evening, "America/New_York") is None
+
+
+def test_a_flight_inside_its_day_without_a_feed_says_which_day() -> None:
+    tomorrow = view(booking(scheduled_departure_utc=now_ish(hours=23)), None)
+    assert tomorrow.status.tone == "plan"
+    assert tomorrow.status.label in ("Today", "Tomorrow")
+    assert tomorrow.status.label == day_word(tomorrow.departure, datetime.now(UTC), JFK.tz)
+
+    far = view(booking(scheduled_departure_utc=now_ish(hours=25)), None)
+    assert far.status == Status("Scheduled", "quiet")
 
 
 def test_a_late_departure_is_a_departure_delay_until_pushback() -> None:

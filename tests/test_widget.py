@@ -92,6 +92,21 @@ def test_upcoming_flight(settings: Settings) -> None:
     }
 
 
+def test_a_flight_without_a_feed_is_named_by_the_day_at_its_origin(settings: Settings) -> None:
+    """NOW is 18:00 UTC on the 12th: 14:00 in New York, 03:00 the next day in Tokyo."""
+    early = booking(origin_iata="HND", scheduled_departure_utc=NOW + timedelta(hours=8))
+    zones = {"HND": "Asia/Tokyo", "JFK": "America/New_York"}
+
+    assert payload([(early, None)], settings, zones=zones)["flights"][0]["status_label"] == "Today"
+    late = booking(scheduled_departure_utc=NOW + timedelta(hours=12))
+    assert payload([(late, None)], settings, zones=zones)["flights"][0]["status_label"] == (
+        "Tomorrow"
+    )
+    # With no airport on file the day is read off UTC rather than left blank.
+    assert payload([(late, None)], settings)["flights"][0]["status_label"] == "Tomorrow"
+    assert payload([(early, None)], settings)["flights"][0]["status_label"] == "Tomorrow"
+
+
 def test_day_of_shows_gate_and_terminal(settings: Settings) -> None:
     gated = snapshot(scheduled_out=DEPARTURE, gate_origin="B22", terminal_origin="4")
     flight = payload([(booking(), gated)], settings)["flights"][0]

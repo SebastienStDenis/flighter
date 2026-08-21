@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Final
@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import bookings as booking_repo
 from . import prefs, views
 from .aeroapi import budget_status
+from .airports import get_airport
 from .config import Settings, get_settings
 from .db import get_session
 from .models import KV, Booking, BookingStatus, FlightSnapshot
@@ -47,6 +48,7 @@ from .phase import (
     departure_estimate,
     progress_estimate,
 )
+from .timezones import FALLBACK_TZ
 
 log = logging.getLogger(__name__)
 
@@ -131,6 +133,7 @@ async def read_widget(
         rows,
         settings=settings,
         now=now,
+        zones=await load_zones(session, rows),
         # The phone reached this address to ask, so the links it is handed back work
         # from wherever it is, saved address or not.
         base_url=prefs.public_base_url(str(request.base_url).rstrip("/")),
@@ -253,6 +256,16 @@ async def load_flight_rows(session: AsyncSession, now: datetime) -> list[FlightR
     return [(booking, latest.get(booking.id)) for booking in bookings]
 
 
+async def load_zones(session: AsyncSession, rows: Sequence[FlightRow]) -> dict[str, str]:
+    """The zone at each flight's origin, for the one pill that names a day."""
+    zones: dict[str, str] = {}
+    for booking, _ in rows:
+        if booking.origin_iata not in zones:
+            airport = await get_airport(session, booking.origin_iata)
+            zones[booking.origin_iata] = airport.tz if airport else FALLBACK_TZ
+    return zones
+
+
 async def read_degraded(session: AsyncSession) -> str | None:
     """Why the numbers might be wrong, in words the widget can print verbatim.
 
@@ -271,12 +284,21 @@ def build_payload(
     settings: Settings,
     now: datetime,
     base_url: str,
+    zones: Mapping[str, str] | None = None,
     degraded_reason: str | None = None,
 ) -> WidgetPayload:
+    origins = zones or {}
     ranked: list[tuple[int, datetime, WidgetFlight]] = []
     observed: list[datetime] = []
     for booking, snapshot in rows:
-        flight = _flight(booking, snapshot, settings=settings, now=now, base_url=base_url)
+        flight = _flight(
+            booking,
+            snapshot,
+            settings=settings,
+            now=now,
+            base_url=base_url,
+            origin_tz=origins.get(booking.origin_iata, FALLBACK_TZ),
+        )
         ranked.append(
             (views.phase_rank(flight.phase), departure_estimate(booking, snapshot), flight)
         )
@@ -301,9 +323,10 @@ def _flight(
     settings: Settings,
     now: datetime,
     base_url: str,
+    origin_tz: str,
 ) -> WidgetFlight:
     phase = compute_phase(booking, snapshot, now)
-    pill = views.status(phase, booking, snapshot)
+    pill = views.status(phase, booking, snapshot, now=now, origin_tz=origin_tz)
     next_up = views.milestone(phase, booking, snapshot)
     return WidgetFlight(
         detail_url=f"{base_url}/f/{booking.id}",
