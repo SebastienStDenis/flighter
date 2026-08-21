@@ -13,9 +13,14 @@
 // The matching trap: a timer whose date has passed counts *up*, with no sign and no
 // marker, so "2:32" reads identically as "departs in 2m32s" and "departed 2m32s ago".
 // Every timer here is gated on its date still being in the future.
+//
+// There is nothing to edit here. The server's address and the token arrive through the
+// Connect button on the settings page, which runs this script with both in the URL, and
+// live in the Keychain from then on.
 
-const API = "https://flights.example.com"; // your own hostname, no trailing slash
+const API_KEY = "flighter-api";
 const TOKEN_KEY = "flighter-token";
+const SCRIPT_PATH = "/static/flights-widget.js";
 const CACHE_FILE = "flighter-widget.json";
 const REQUEST_TIMEOUT_SECONDS = 15;
 // iOS budgets reloads and ignores an eager request anyway, so do not ask for one.
@@ -56,84 +61,137 @@ const OVERDUE_TEXT = {
   airborne: "Landing",
 };
 
+// The one repair for a missing or rejected token, and the same sentence for both.
+const RECONNECT_TEXT = "Open the settings page on this phone and tap Connect.";
+
+// Declared up here because the widget is built before the rest of the file has run, and
+// a class, unlike a function, does not exist until its line does.
+class TokenRejected extends Error {}
+
 const family = config.widgetFamily || "medium";
 const isAccessory = family.startsWith("accessory");
 // Per-element tap targets exist only on medium and large. Everywhere else the whole
 // widget gets one URL.
 const supportsRowLinks = family === "medium" || family === "large";
 
-const token = await resolveToken();
-const widget = token ? await buildWidget(token) : setupWidget();
+const server = connect();
+const widget = server ? await buildWidget(server) : setupWidget();
 
 if (config.runsInWidget) {
   Script.setWidget(widget);
 } else {
   await present(widget);
+  if (server && (await updateScript(server.api))) {
+    await notify("Widget updated", "The server's newer version is installed and runs from now on.");
+  }
 }
 Script.complete();
 
 // --- data ------------------------------------------------------------------------------
 
-async function resolveToken() {
-  // Keychain.get() throws on a missing key, so contains() is not optional.
-  if (Keychain.contains(TOKEN_KEY)) {
-    return Keychain.get(TOKEN_KEY);
+function connect() {
+  // Opened from the settings page: scriptable:///run/Flights?api=...&token=... Each
+  // tap overwrites what is stored, which is how a regenerated token gets onto the phone.
+  const params = args.queryParameters || {};
+  if (params.api && params.token) {
+    Keychain.set(API_KEY, params.api.replace(/\/+$/, ""));
+    Keychain.set(TOKEN_KEY, params.token);
   }
-  // A widget cannot show an alert, so only an in-app run can fix a missing token.
-  if (config.runsInApp) {
-    return await promptForToken();
+  // Keychain.get() throws on a missing key, so contains() is not optional.
+  if (Keychain.contains(API_KEY) && Keychain.contains(TOKEN_KEY)) {
+    return { api: Keychain.get(API_KEY), token: Keychain.get(TOKEN_KEY) };
   }
   return null;
 }
 
-async function promptForToken() {
-  const alert = new Alert();
-  alert.title = "Flight widget token";
-  alert.message = "Paste the widget token from your flight tracker's settings page.";
-  alert.addSecureTextField("token", "");
-  alert.addAction("Save");
-  alert.addCancelAction("Cancel");
-  const choice = await alert.present();
-  if (choice !== 0) {
-    return null;
-  }
-  const value = alert.textFieldValue(0).trim();
-  if (!value) {
-    return null;
-  }
-  Keychain.set(TOKEN_KEY, value);
-  return value;
-}
-
-async function load(token) {
+async function load(server) {
   try {
-    const data = await request(token);
+    const data = await request(server);
     writeCache(data);
-    return { data, stale: false, cachedAt: null, error: null };
+    return { data, stale: false, cachedAt: null, rejected: false, error: null };
   } catch (error) {
+    // Not the cache: yesterday's flights with a small "Cached" mark would hide that the
+    // token is wrong, and that is the one failure a reload never fixes.
+    if (error instanceof TokenRejected) {
+      return { data: null, stale: false, cachedAt: null, rejected: true, error: null };
+    }
     // A stale widget beats a blank one. The flight has almost certainly not changed,
     // and the live timer keeps ticking whether or not the network came back.
     const cached = readCache();
     if (cached) {
-      return { data: cached.data, stale: true, cachedAt: cached.cachedAt, error: null };
+      return { data: cached.data, stale: true, cachedAt: cached.cachedAt, rejected: false, error: null };
     }
-    return { data: null, stale: false, cachedAt: null, error: String(error.message || error) };
+    return {
+      data: null,
+      stale: false,
+      cachedAt: null,
+      rejected: false,
+      error: String(error.message || error),
+    };
   }
 }
 
-async function request(token) {
-  const req = new Request(`${API}/api/widget`);
+async function request({ api, token }) {
+  const req = new Request(`${api}/api/widget`);
   req.headers = { Authorization: `Bearer ${token}` };
   req.timeoutInterval = REQUEST_TIMEOUT_SECONDS;
   const body = await req.loadJSON();
   const status = req.response.statusCode;
   if (status === 401) {
-    throw new Error("token rejected");
+    throw new TokenRejected("token rejected");
   }
   if (status !== 200) {
     throw new Error(`server returned ${status}`);
   }
   return body;
+}
+
+async function updateScript(api) {
+  // Scripts are plain files in Scriptable's documents folder, so this one can replace
+  // itself with the server's copy and the widget ships with the server. Only from a run
+  // in the app: a widget has no way of saying it happened.
+  try {
+    const req = new Request(`${api}${SCRIPT_PATH}`);
+    req.timeoutInterval = REQUEST_TIMEOUT_SECONDS;
+    const latest = await req.loadString();
+    // The header is the one line every copy of this script starts with, so anything
+    // else is an error page and must not be written over the working script.
+    if (req.response.statusCode !== 200 || !latest.startsWith("// Variables used by Scriptable")) {
+      return false;
+    }
+    const path = module.filename;
+    const fm = fileManagerFor(path);
+    if (fm.readString(path) === latest) {
+      return false;
+    }
+    fm.writeString(path, latest);
+    return true;
+  } catch (error) {
+    console.warn(`could not update the script: ${error}`);
+    return false;
+  }
+}
+
+function fileManagerFor(path) {
+  // A script kept in iCloud Drive can only be written through the iCloud manager, and
+  // asking for that manager throws on a phone without iCloud Drive turned on.
+  try {
+    const icloud = FileManager.iCloud();
+    if (path.startsWith(icloud.documentsDirectory())) {
+      return icloud;
+    }
+  } catch (error) {
+    // Fall through: the script is local.
+  }
+  return FileManager.local();
+}
+
+async function notify(title, text) {
+  const alert = new Alert();
+  alert.title = title;
+  alert.message = text;
+  alert.addAction("OK");
+  await alert.present();
 }
 
 function cachePath() {
@@ -165,10 +223,14 @@ function readCache() {
 
 // --- widget ----------------------------------------------------------------------------
 
-async function buildWidget(token) {
-  const result = await load(token);
+async function buildWidget(server) {
+  const result = await load(server);
   const widget = newWidget();
 
+  if (result.rejected) {
+    message(widget, "Reconnect needed", RECONNECT_TEXT);
+    return widget;
+  }
   if (!result.data) {
     message(widget, "Flights unavailable", result.error);
     return widget;
@@ -409,7 +471,7 @@ function message(widget, headline, detail) {
 
 function setupWidget() {
   const widget = newWidget();
-  message(widget, "Setup needed", "Run this script in the Scriptable app to store your token.");
+  message(widget, "Not connected", RECONNECT_TEXT);
   return widget;
 }
 
