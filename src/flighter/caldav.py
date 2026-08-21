@@ -33,7 +33,7 @@ from .bookings import flight_label, operated_note
 from .config import Settings
 from .mail import message_url
 from .models import Airport, Booking, FlightSnapshot
-from .phase import CANCELLED_NOTICE, arrival_estimate, departure_estimate
+from .phase import arrival_estimate, departure_estimate
 from .timezones import FALLBACK_TZ, to_local
 
 log = logging.getLogger(__name__)
@@ -161,7 +161,7 @@ def event_body(
     event = Event()
     event.add("uid", event_uid(booking))
     event.add("dtstamp", datetime.now(UTC))
-    event.add("summary", f"{label} (marked cancelled)" if cancelled else label)
+    event.add("summary", f"{label} (cancelled)" if cancelled else label)
     event.add("location", _location(airports, booking.origin_iata))
     # Wall clock plus the airport's IANA zone. An offset pins the wrong instant the day
     # the rules change and a bare local time floats to wherever the phone is standing;
@@ -171,11 +171,8 @@ def event_body(
 
     lines = []
     if cancelled:
-        # Tentative rather than cancelled: FlightAware dropping a flight is usually the
-        # airline's doing, but a struck-through entry would assert what only the airline
-        # can confirm.
-        event.add("status", "TENTATIVE")
-        lines.append(CANCELLED_NOTICE)
+        # Struck through rather than deleted: the trip stays visible where it was planned.
+        event.add("status", "CANCELLED")
     operated = operated_note(booking.operating_carrier, booking.operating_number)
     if operated:
         lines.append(operated)

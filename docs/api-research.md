@@ -1089,10 +1089,10 @@ names one, it is referring to Standard.
 - `route_distance` is **statute miles**, not nautical miles.
 - `origin` / `destination` are nested objects and are **nullable** as a whole. `origin.code` may be
   a plain location string rather than an airport code for position-only flights.
-- `cancelled` does not mean the airline cancelled the flight. The spec: "Flag indicating that the
-  flight is no longer being tracked by FlightAware. There are a number of reasons this could happen
-  including cancellation by the airline, but that will not always be the case." Do not send a
-  "flight cancelled" notification off this flag alone.
+- `cancelled` is defined by the spec as "Flag indicating that the flight is no longer being tracked
+  by FlightAware. There are a number of reasons this could happen including cancellation by the
+  airline, but that will not always be the case." In practice it is the only cancellation signal
+  the API offers, so it is read as one.
 - `codeshares` is ICAO-only; IATA codeshares live in the separate `codeshares_iata`.
 - `operator_icao`, `ident_icao`, `ident_iata` are not in the schema's `required` list - use
   `.get()`, do not index.

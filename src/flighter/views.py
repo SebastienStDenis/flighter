@@ -351,9 +351,7 @@ def scheduled_arrival(booking: Booking, snapshot: FlightSnapshot | None) -> date
 def status(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> Status:
     """The pill: where the flight stands, as a word and the tone it is drawn in."""
     if phase == CANCELLED:
-        # FlightAware's flag means "no longer tracked", so the badge asks rather than
-        # asserts and the flight page carries the sentence that explains it.
-        return Status("Maybe cancelled", "stop")
+        return Status("Cancelled", "stop")
     if phase == DIVERTED:
         return Status("Diverted", "stop")
     if phase == LANDED:

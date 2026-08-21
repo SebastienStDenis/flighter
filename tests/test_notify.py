@@ -14,7 +14,6 @@ from flighter import prefs
 from flighter.config import Settings
 from flighter.models import Booking, EventKind, FlightEvent
 from flighter.notify import MESSAGES_URL, PRIORITY_QUIET, Notifier, PushFailed
-from flighter.phase import CANCELLED_NOTICE
 from flighter.prefs import Prefs
 
 ORIGIN_TZ = "America/New_York"
@@ -113,7 +112,7 @@ async def test_title_and_url_name_the_flight(settings: Settings) -> None:
             "0",
             "Baggage claim carousel 3",
         ),
-        (event(EventKind.CANCELLED, old="false", new="true"), "1", CANCELLED_NOTICE),
+        (event(EventKind.CANCELLED, old="false", new="true"), "1", "Cancelled"),
         (event(EventKind.DIVERTED, old="false", new="true"), "1", "Diverted"),
         (event(EventKind.DIVERTED, new="YOW"), "1", "Diverted to YOW"),
     ],

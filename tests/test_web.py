@@ -918,18 +918,14 @@ def test_a_cancelled_flight_is_a_card_with_nothing_left_to_watch(
     assert cards(body) == ["2", "1"]
     assert rows(body) == []
     card = board_card(body, 1)
-    assert "confirm with the airline" in card and not watched(card)
+    assert "Cancelled" in card and not watched(card)
 
 
-def test_a_cancelled_flight_says_who_said_so(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """AeroAPI's flag means "no longer tracked", which is not the same as being told."""
+def test_a_cancelled_flight_says_so(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     show(monkeypatch, booking(), FlightSnapshot(id=3, booking_id=1, cancelled=True, raw={}))
 
     body = client.get("/f/1").text
-    assert "Maybe cancelled" in body
-    assert "confirm with the airline" in body
+    assert "Cancelled" in body
 
 
 def test_the_newest_change_is_on_the_page_and_the_rest_are_behind_a_fold(

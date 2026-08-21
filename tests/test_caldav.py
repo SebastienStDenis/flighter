@@ -25,7 +25,6 @@ from flighter.caldav import (
 )
 from flighter.config import Settings
 from flighter.models import Airport, Booking, FlightSnapshot
-from flighter.phase import CANCELLED_NOTICE
 from flighter.prefs import Prefs
 
 BASE_URL = "https://flights.example.com"
@@ -159,17 +158,11 @@ def test_a_flight_with_no_arrival_time_still_gets_an_end() -> None:
     assert "DTEND;TZID=America/Los_Angeles:20260912T140000" in text
 
 
-def test_cancelled_flight_is_marked_never_deleted() -> None:
-    """AeroAPI's flag means FlightAware stopped tracking, which is not quite the same
-    as the airline cancelling, so the entry says who said so rather than striking the
-    trip through."""
+def test_cancelled_flight_is_struck_through_never_deleted() -> None:
     body = event_body(booking(), snapshot(cancelled=True), AIRPORTS, base_url=BASE_URL)
     text = body.to_ical().decode()
-    assert "SUMMARY:DL1234 JFK -> LAX (marked cancelled)" in text
-    assert "STATUS:TENTATIVE" in text
-    assert "STATUS:CANCELLED" not in text
-    [event] = body.walk("VEVENT")
-    assert str(event["DESCRIPTION"]).startswith(CANCELLED_NOTICE)
+    assert "SUMMARY:DL1234 JFK -> LAX (cancelled)" in text
+    assert "STATUS:CANCELLED" in text
     # Still a full event: the trip stays visible where it was planned.
     assert "DTSTART;TZID=America/New_York:20260912T150000" in text
 

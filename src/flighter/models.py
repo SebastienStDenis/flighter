@@ -36,10 +36,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 class BookingStatus(StrEnum):
     """Where a booking stands with the poller.
 
-    There is deliberately no cancelled status. AeroAPI's `cancelled` flag means the
-    flight is no longer tracked, which is usually but not always an airline
-    cancellation, so it is carried on the snapshot under its own name and never
-    promoted to a fact about the booking.
+    There is deliberately no cancelled status: a cancellation is something the feed
+    says about the flight, so it lives on the snapshot, and the booking still runs
+    through the same watch and completion as any other.
     """
 
     ACTIVE = "active"

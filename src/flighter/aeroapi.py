@@ -616,9 +616,6 @@ def to_snapshot_fields(flight: dict[str, Any]) -> dict[str, Any]:
     """
     fields: dict[str, Any] = {
         "status_text": _as_text(flight.get("status")),
-        # AeroAPI's `cancelled` means "no longer tracked by FlightAware", which is often
-        # but not always an airline cancellation. It keeps its own name all the way down
-        # so nothing downstream reads it as more certain than it is.
         "cancelled": _as_bool(flight.get("cancelled")),
         "diverted": _as_bool(flight.get("diverted")),
         "destination_iata": _iata_of(flight.get("destination")),

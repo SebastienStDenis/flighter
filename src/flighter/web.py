@@ -33,7 +33,6 @@ from .config import CREDENTIALS, SERVICES, Settings, mint_widget_token, write_se
 from .db import get_session, session_scope
 from .mail import FLAG_COLOURS, message_url
 from .models import Booking, BookingSource, BookingStatus, FlightEvent
-from .phase import CANCELLED_NOTICE
 from .timezones import same_local_date
 from .views import FlightView, build_views
 from .widget import connect_url, last_seen, script_source
@@ -145,7 +144,6 @@ def create_app(settings: Settings) -> FastAPI:
     templates = Jinja2Templates(directory=str(TEMPLATES))
     templates.env.globals.update(
         at=views.at,
-        cancelled_notice=CANCELLED_NOTICE,
         change_title=views.change_title,
         change_value=views.change_value,
         clock=views.clock,

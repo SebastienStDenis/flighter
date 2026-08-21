@@ -141,9 +141,6 @@
     {% if v.watched %}
     {{ places(v, s) }}
     {% endif %}
-    {% if v.cancelled %}
-    <p class="text-sm text-stop">{{ cancelled_notice }}</p>
-    {% endif %}
   </section>
   {% if v.watched and v.milestone %}
   <footer class="-mt-2 -mb-3 border-t pt-3">
