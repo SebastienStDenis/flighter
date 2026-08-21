@@ -105,6 +105,12 @@ class FlightView:
         return f"{self.booking.marketing_carrier}{self.booking.marketing_number}"
 
     @property
+    def operated(self) -> str | None:
+        return booking_repo.operated_note(
+            self.booking.operating_carrier, self.booking.operating_number
+        )
+
+    @property
     def origin_tz(self) -> str:
         return self.origin.tz if self.origin else "UTC"
 

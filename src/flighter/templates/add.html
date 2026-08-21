@@ -67,7 +67,9 @@
           {{ candidate.origin_iata }} &rarr; {{ candidate.dest_iata }}</span>
       </h3>
       <p class="font-mono">{{ candidate.departure_local.strftime('%H:%M') }}
-        at {{ candidate.origin_iata }}</p>
+        at {{ candidate.origin_iata }}
+        {%- if candidate.operated %} &middot; {{ candidate.operated }}{% endif -%}
+      </p>
     </section>
   </a>
   {% endfor %}

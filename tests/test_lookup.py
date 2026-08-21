@@ -195,6 +195,34 @@ async def test_the_airline_that_actually_flies_it_is_kept() -> None:
     assert found.as_form()["operating_carrier"] == "LH"
 
 
+async def test_the_number_typed_is_the_one_kept_when_the_operator_answers() -> None:
+    """LH8811 is AC871 with a Lufthansa number on it; the board should say LH8811."""
+    (found,) = await find_flights(None, "LH", "8811", DAY, FakeClient(row()), today=DAY)  # type: ignore[arg-type]
+
+    assert found.marketing_carrier == "LH" and found.marketing_number == "8811"
+    assert found.operating_carrier == "AC" and found.operating_number == "871"
+    assert found.operated == "Operated as AC871"
+
+
+async def test_the_answer_is_the_same_whichever_row_comes_back_first() -> None:
+    codeshare = row(
+        ident="DLH8811", ident_icao="DLH8811", ident_iata="LH8811", actual_ident_iata="AC871"
+    )
+
+    first = await find_flights(None, "LH", "8811", DAY, FakeClient(row(), codeshare), today=DAY)  # type: ignore[arg-type]
+    second = await find_flights(None, "LH", "8811", DAY, FakeClient(codeshare, row()), today=DAY)  # type: ignore[arg-type]
+
+    assert first == second
+    assert first[0].flight_number == "LH8811" and first[0].operating_number == "871"
+
+
+async def test_an_icao_spelling_is_offered_the_way_the_ticket_prints_it() -> None:
+    (found,) = await find_flights(None, "ACA", "871", DAY, FakeClient(row()), today=DAY)  # type: ignore[arg-type]
+
+    assert found.flight_number == "AC871"
+    assert found.operating_carrier is None
+
+
 async def test_a_row_we_cannot_place_is_dropped_rather_than_raised_on() -> None:
     """An airport with no IATA code, or none we know the zone of, is not an error."""
     usable = row(scheduled_out="2026-09-12T20:00:00Z")

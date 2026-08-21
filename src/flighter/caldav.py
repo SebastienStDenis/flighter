@@ -29,7 +29,7 @@ import httpx
 from icalendar import Alarm, Calendar, Event, Timezone
 
 from . import prefs
-from .bookings import flight_label
+from .bookings import flight_label, operated_note
 from .config import Settings
 from .mail import message_url
 from .models import Airport, Booking, FlightSnapshot
@@ -176,6 +176,9 @@ def event_body(
         # can confirm.
         event.add("status", "TENTATIVE")
         lines.append(CANCELLED_NOTICE)
+    operated = operated_note(booking.operating_carrier, booking.operating_number)
+    if operated:
+        lines.append(operated)
     if booking.confirmation_code:
         lines.append(f"Confirmation: {booking.confirmation_code}")
     if booking.seat:

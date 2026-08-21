@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .aeroapi import AeroAPIClient, shared_client, split_ident
 from .airports import UnknownAirport, airport_tz
+from .bookings import operated_note
 from .timezones import parse_instant, to_local
 
 log = logging.getLogger(__name__)
@@ -68,6 +69,10 @@ class Candidate:
     @property
     def flight_number(self) -> str:
         return f"{self.marketing_carrier}{self.marketing_number}"
+
+    @property
+    def operated(self) -> str | None:
+        return operated_note(self.operating_carrier, self.operating_number)
 
     def as_form(self) -> dict[str, str]:
         """The add form's fields, so a choice here is a filled-in form there."""
@@ -165,10 +170,23 @@ async def _candidate(
         return None
 
     arrival_utc = parse_instant(row.get("scheduled_in"))
-    marketing = split_ident(row.get("ident_iata")) or (carrier, number)
-    operating = split_ident(row.get("actual_ident_iata")) or split_ident(
+    typed = (carrier, number)
+    published = split_ident(row.get("ident_iata"))
+    published_icao = split_ident(row.get("ident_icao")) or split_ident(row.get("ident"))
+    operator = split_ident(row.get("actual_ident_iata")) or split_ident(
         row.get("actual_ident_icao")
     )
+    if typed in (published, published_icao):
+        # Published under the number typed, so the row's IATA spelling is the ticket's
+        # even when the ICAO one was typed.
+        marketing = published or typed
+    else:
+        # A codeshare is answered with the operator's own row too. The number booked is
+        # the one typed, whichever row came back, and the row's own number is who flies
+        # it unless the row says otherwise.
+        marketing = typed
+        operator = operator or published or published_icao
+    operating = operator if operator and operator != marketing else None
     return Candidate(
         marketing_carrier=marketing[0],
         marketing_number=marketing[1],
@@ -178,8 +196,8 @@ async def _candidate(
         arrival_local=(
             to_local(arrival_utc, dest_tz).replace(tzinfo=None) if arrival_utc else None
         ),
-        operating_carrier=operating[0] if operating and operating != marketing else None,
-        operating_number=operating[1] if operating and operating != marketing else None,
+        operating_carrier=operating[0] if operating else None,
+        operating_number=operating[1] if operating else None,
     )
 
 
