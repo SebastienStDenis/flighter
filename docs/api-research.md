@@ -229,6 +229,47 @@ IATA ident, pass `ident_type=designator` at minimum, and prefer resolving it to 
 Default behaviour with no `ident_type` is to try to read the string as a registration, which is
 the wrong guess for a commercial flight number.
 
+### 1.8 `GET /schedules/{date_start}/{date_end}` - the only way to ask about a future flight
+
+`operationId: get_schedules_by_date`, tag `miscellaneous`. Spec description: "Returns scheduled
+flights that have been published by airlines. These schedules are available for up to three months
+in the past as well as one year into the future."
+
+This is the endpoint to ask "what is AC871 on the 12th of next month". `/flights/{ident}` cannot
+answer it: its `start`/`end` are capped at 10 days in the past and 2 days in the future, so a
+flight further out than that is simply not in the data.
+
+Path parameters, both required, ISO-8601 date or date-time (a bare date implies `00:00:00Z`):
+
+| Param | Constraint |
+| --- | --- |
+| `date_start` | No earlier than 3 months in the past, and no more than 3 weeks before `date_end`. |
+| `date_end` | No later than 1 year in the future, and no more than 3 weeks after `date_start`. Exclusive: to cover one day with bare dates, pass the next day's date. |
+
+Query parameters: `origin`, `destination` (ICAO or IATA), `airline` (ICAO or IATA), `flight_number`
+(integer), `include_codeshares` (default true), `include_regional` (default true), `max_pages`
+(default 1), `cursor`.
+
+The response is `{links, num_pages, scheduled}`, and a `scheduled` item is *not* a flight object -
+it is a smaller, flatter schedule record. The fields that matter here, all required in the schema:
+
+| Field | Notes |
+| --- | --- |
+| `ident`, `ident_icao`, `ident_iata` | The flight number the row is published under. The IATA one is nullable. |
+| `actual_ident`, `actual_ident_icao`, `actual_ident_iata` | "If ident is a codeshare flight, this is the primary identifier used by the operator" - i.e. who actually flies it. |
+| `origin`, `origin_icao`, `origin_iata`, `origin_lid` | Airport codes as strings, not the nested `FlightAirportRef` the flight object uses. IATA is nullable. |
+| `destination`, `destination_icao`, `destination_iata`, `destination_lid` | As above. |
+| `scheduled_out`, `scheduled_in` | UTC gate departure and gate arrival. |
+| `fa_flight_id` | "Will be null for flights scheduled more than a few days in the future", so it cannot be pinned at the time a flight is added. |
+| `aircraft_type`, `meal_service`, `seats_cabin_*` | Published intent, not observation. |
+
+Price: **$0.020 / result set** - four times a `/flights/{ident}` page. Same result-set rule, so
+`max_pages=1` still caps a call at one.
+
+Source: the OpenAPI spec at
+<https://www.flightaware.com/commercial/aeroapi/resources/aeroapi-openapi.yml> and the fee table at
+<https://www.flightaware.com/commercial/aeroapi/> (both checked 2026-08).
+
 ---
 
 ## 2. AeroAPI pricing and Personal-tier limits
@@ -279,6 +320,7 @@ Two Personal-tier gotchas for a self-hosted tracker:
 | `GET /flights/{id}/route` | $0.010 / result set |
 | `GET /flights/{id}/map` | $0.030 / result set |
 | `GET /airports/{id}` class | $0.005 / result set (`/airports`), $0.004 (`/airports/nearby`) |
+| `GET /schedules/{date_start}/{date_end}` | $0.020 / result set |
 
 At $0.005/result set, the **$5 Personal allowance is 1,000 result sets per month** of
 `/flights/{ident}` - and only if every call stays at one page.

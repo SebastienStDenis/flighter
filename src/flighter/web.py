@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, fields
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import urlencode
 
+import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -25,8 +27,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import bookings as booking_repo
-from . import ingest, prefs, views
-from .aeroapi import budget_status, clear_breaker
+from . import ingest, lookup, prefs, views
+from .aeroapi import BudgetExceeded, budget_status, clear_breaker
 from .airports import UnknownAirport
 from .caldav import CalendarClient, CalendarUnavailable, Collection
 from .checks import run_checks
@@ -80,6 +82,10 @@ class FlightForm:
     confirmation_code: Annotated[str, Form()] = ""
     seat: Annotated[str, Form()] = ""
     notes: Annotated[str, Form()] = ""
+    # Who actually flies the leg, which is who FlightAware tracks. Carried hidden rather
+    # than asked about: a lookup knows it, and nobody reads it off a ticket.
+    operating_carrier: Annotated[str, Form()] = ""
+    operating_number: Annotated[str, Form()] = ""
 
     @property
     def departure(self) -> datetime | None:
@@ -99,6 +105,10 @@ class FlightForm:
 
 
 FormDep = Annotated[FlightForm, Depends()]
+
+# What a lookup is allowed to fill in, so a query string can never post something the
+# form does not have a box for.
+FORM_FIELDS = frozenset(field.name for field in fields(FlightForm))
 
 
 async def recently_flown(session: AsyncSession, limit: int) -> list[Booking]:
@@ -146,11 +156,31 @@ def create_app(settings: Settings) -> FastAPI:
         view: FlightView | None,
         error: str | None = None,
         posted: dict[str, Any] | None = None,
+        *,
+        found: bool = False,
     ) -> Response:
         return page(
             request,
             "form.html",
-            {"view": view, "error": error, "form": posted or {}},
+            {"view": view, "error": error, "form": posted or {}, "found": found},
+            status_code=400 if error else 200,
+        )
+
+    def search_page(
+        request: Request,
+        error: str | None = None,
+        posted: dict[str, Any] | None = None,
+        candidates: list[tuple[lookup.Candidate, str]] | None = None,
+    ) -> Response:
+        return page(
+            request,
+            "add.html",
+            {
+                "error": error,
+                "form": posted or {},
+                "candidates": candidates or [],
+                "configured": settings.aeroapi_configured,
+            },
             status_code=400 if error else 200,
         )
 
@@ -234,7 +264,58 @@ def create_app(settings: Settings) -> FastAPI:
     # Declared before /f/{booking_id} so that "new" is never read as an id.
     @app.get("/f/new")
     async def new_flight(request: Request) -> Response:
-        return flight_form_page(request, view=None)
+        """Two boxes: the number on the boarding pass, and the day it leaves."""
+        return search_page(request)
+
+    @app.post("/f/new")
+    async def find_flight(
+        request: Request,
+        session: SessionDep,
+        flight_number: Annotated[str, Form()],
+        departure_date: Annotated[str, Form()],
+    ) -> Response:
+        """Ask the airline's schedule what that flight number is, that day.
+
+        Every way this can fail ends on the same page with a sentence and the way to
+        type the flight in by hand, because a lookup is a convenience and a flight
+        somebody is standing in an airport for is not.
+        """
+        posted = {"flight_number": flight_number, "departure_date": departure_date}
+        flight = lookup.parse_flight_number(flight_number)
+        if flight is None:
+            return search_page(request, "A flight number looks like AC871.", posted)
+        day = _parse_date(departure_date)
+        if day is None:
+            return search_page(request, "Pick the day it departs.", posted)
+
+        carrier, number = flight
+        try:
+            found = await lookup.find_flights(session, carrier, number, day)
+        except lookup.OutOfRange:
+            return search_page(request, "No airline has published a schedule that far off.", posted)
+        except BudgetExceeded:
+            return search_page(
+                request, "The FlightAware budget is spent, so nothing can be looked up.", posted
+            )
+        except httpx.HTTPError:
+            log.warning("could not look up %s on %s", flight_number, departure_date, exc_info=True)
+            return search_page(request, "FlightAware did not answer.", posted)
+
+        if not found:
+            return search_page(
+                request, f"No {carrier}{number} is scheduled to leave that day.", posted
+            )
+        if len(found) == 1:
+            return RedirectResponse(_details_url(found[0]), status_code=303)
+        return search_page(request, None, posted, [(one, _details_url(one)) for one in found])
+
+    @app.get("/f/new/details")
+    async def new_flight_details(request: Request) -> Response:
+        """The whole form: filled in by a lookup, or empty to type a flight into."""
+        filled = {
+            name: value for name, value in request.query_params.items() if name in FORM_FIELDS
+        }
+        return flight_form_page(request, None, posted=filled, found=bool(filled))
 
     @app.post("/f")
     async def create_flight(request: Request, session: SessionDep, form: FormDep) -> Response:
@@ -254,6 +335,8 @@ def create_app(settings: Settings) -> FastAPI:
                 confirmation_code=form.optional("confirmation_code"),
                 seat=form.optional("seat"),
                 notes=form.optional("notes"),
+                operating_carrier=form.optional("operating_carrier"),
+                operating_number=form.optional("operating_number"),
                 source=BookingSource.MANUAL,
             )
         except UnknownAirport as exc:
@@ -310,6 +393,8 @@ def create_app(settings: Settings) -> FastAPI:
                 confirmation_code=form.optional("confirmation_code"),
                 seat=form.optional("seat"),
                 notes=form.optional("notes"),
+                operating_carrier=form.optional("operating_carrier"),
+                operating_number=form.optional("operating_number"),
             )
         except UnknownAirport as exc:
             return flight_form_page(request, view, _unknown_airport(exc), form.as_posted())
@@ -484,6 +569,18 @@ def create_app(settings: Settings) -> FastAPI:
 
 def _unknown_airport(exc: UnknownAirport) -> str:
     return f"{exc.iata} is not an airport we know."
+
+
+def _parse_date(value: str) -> date | None:
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError:
+        return None
+
+
+def _details_url(candidate: lookup.Candidate) -> str:
+    """A found flight as a filled-in form, which is what choosing one comes down to."""
+    return f"/f/new/details?{urlencode(candidate.as_form())}"
 
 
 def _merged(names: tuple[str, ...], entered: dict[str, str], *, forget: bool) -> dict[str, str]:

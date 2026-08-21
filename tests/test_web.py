@@ -8,20 +8,23 @@ and a page that raises on one of them is a page that fails exactly when it is ne
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
-from datetime import UTC, datetime, timedelta
+from dataclasses import replace
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect
 
 from flighter import prefs, web
-from flighter.aeroapi import BREAKER_KEY, BudgetStatus
+from flighter.aeroapi import BREAKER_KEY, BudgetExceeded, BudgetStatus
 from flighter.airports import UnknownAirport
 from flighter.caldav import CalendarUnavailable, Collection
 from flighter.config import Settings
 from flighter.db import get_session
+from flighter.lookup import Candidate
 from flighter.models import KV, Airport, Booking, FlightEvent, FlightSnapshot, IngestLog
 
 NOW = datetime.now(UTC)
@@ -50,6 +53,18 @@ SETTINGS_FORM = {
 
 # What discovery answers with, so the settings page has a picker to render.
 CALENDARS = [Collection("Flights", FLIGHTS_CALENDAR), Collection("Home", f"{CALDAV_HOME}1b-home/")]
+
+# What a lookup answers with: one leg, in the shape the add form takes.
+CANDIDATE = Candidate(
+    marketing_carrier="AC",
+    marketing_number="871",
+    origin_iata="YUL",
+    dest_iata="LHR",
+    departure_local=datetime(2026, 9, 12, 18, 40),
+    arrival_local=datetime(2026, 9, 13, 10, 25),
+    operating_carrier="LH",
+    operating_number="479",
+)
 
 CLEAR_BUDGET = BudgetStatus(
     spend_usd=Decimal("0.42"), cap_usd=Decimal("4.00"), tripped=False, month="2026-08"
@@ -223,6 +238,20 @@ def show(monkeypatch: pytest.MonkeyPatch, view_booking: Booking, snapshot: Any) 
     monkeypatch.setattr(web.booking_repo, "get_booking", get_booking)
     monkeypatch.setattr(web.booking_repo, "list_bookings", list_bookings)
     monkeypatch.setattr(web.views.booking_repo, "latest_snapshots", latest)
+
+
+def looks_up(
+    monkeypatch: pytest.MonkeyPatch, candidates: Sequence[Candidate]
+) -> list[tuple[str, str, date]]:
+    """Answer every lookup with these, and record what it was asked about."""
+    asked: list[tuple[str, str, date]] = []
+
+    async def find_flights(_session: Any, carrier: str, number: str, day: date) -> list[Candidate]:
+        asked.append((carrier, number, day))
+        return list(candidates)
+
+    monkeypatch.setattr(web.lookup, "find_flights", find_flights)
+    return asked
 
 
 # --- The board -----------------------------------------------------------------------
@@ -434,12 +463,163 @@ def test_a_page_that_breaks_still_looks_like_the_app(
     assert 'href="/"' in page.text
 
 
-def test_the_add_form_asks_only_about_the_flight(client: TestClient) -> None:
+def test_adding_a_flight_asks_for_a_number_and_a_day_and_nothing_else(
+    client: TestClient,
+) -> None:
     page = client.get("/f/new")
+    assert page.status_code == 200
+    assert 'name="flight_number"' in page.text
+    assert 'name="departure_date"' in page.text
+    # The airports, the times and the operator are the airline's to state, not a
+    # person's to copy off a ticket.
+    for asked in ("origin_iata", "dest_iata", "departure_local"):
+        assert asked not in page.text
+
+
+def test_a_flight_number_that_names_one_flight_comes_back_as_a_filled_in_form(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked = looks_up(monkeypatch, [CANDIDATE])
+
+    response = client.post(
+        "/f/new",
+        data={"flight_number": "ac 871", "departure_date": "2026-09-12"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert asked == [("AC", "871", date(2026, 9, 12))]
+    body = client.get(response.headers["location"]).text
+    assert 'value="YUL"' in body and 'value="LHR"' in body
+    assert 'value="2026-09-12T18:40"' in body
+    assert 'value="2026-09-13T10:25"' in body
+    # Who actually flies it is carried through without being asked about.
+    assert 'name="operating_carrier"' in body
+    assert 'value="LH"' in body and 'value="479"' in body
+
+
+def test_a_number_that_flies_twice_that_day_is_a_choice_rather_than_a_guess(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evening = replace(CANDIDATE, departure_local=datetime(2026, 9, 12, 21, 15))
+    looks_up(monkeypatch, [CANDIDATE, evening])
+
+    body = client.post(
+        "/f/new", data={"flight_number": "AC871", "departure_date": "2026-09-12"}
+    ).text
+
+    assert "flies more than once" in body
+    assert "18:40" in body and "21:15" in body
+    assert body.count("/f/new/details?") == 2
+
+
+def test_a_flight_number_nobody_publishes_says_so_and_offers_the_long_way(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    looks_up(monkeypatch, [])
+
+    page = client.post("/f/new", data={"flight_number": "AC871", "departure_date": "2026-09-12"})
+
+    assert page.status_code == 400
+    assert "No AC871 is scheduled to leave that day." in page.text
+    assert 'href="/f/new/details"' in page.text
+    # What was typed comes back with it, so the date does not have to be picked again.
+    assert 'value="2026-09-12"' in page.text
+
+
+@pytest.mark.parametrize(
+    ("typed", "said"),
+    [
+        ({"flight_number": "YUL to LHR", "departure_date": "2026-09-12"}, "looks like AC871"),
+        ({"flight_number": "AC871", "departure_date": "the 12th"}, "Pick the day"),
+    ],
+)
+def test_what_cannot_be_looked_up_is_refused_before_anything_is_spent(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, typed: dict[str, str], said: str
+) -> None:
+    asked = looks_up(monkeypatch, [CANDIDATE])
+
+    page = client.post("/f/new", data=typed)
+
+    assert page.status_code == 400
+    assert said in page.text
+    assert asked == []
+
+
+def test_a_lookup_that_cannot_be_made_still_leaves_a_way_to_add_the_flight(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A convenience that is down must not take adding a flight down with it."""
+    failures = [
+        (BudgetExceeded(SPENT_BUDGET, just_tripped=False), "budget is spent"),
+        (httpx.ConnectError("no route to host"), "did not answer"),
+        (web.lookup.OutOfRange(date(2027, 12, 25)), "published a schedule that far off"),
+    ]
+    for raised, said in failures:
+
+        async def broken(*_args: Any, _raised: Exception = raised, **_kwargs: Any) -> Any:
+            raise _raised
+
+        monkeypatch.setattr(web.lookup, "find_flights", broken)
+        page = client.post(
+            "/f/new", data={"flight_number": "AC871", "departure_date": "2026-09-12"}
+        )
+
+        assert page.status_code == 400
+        assert said in page.text
+        assert 'href="/f/new/details"' in page.text
+
+
+def test_without_a_flightaware_key_the_page_says_why_and_offers_the_form(
+    unconfigured: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with build_client(unconfigured, monkeypatch) as fresh:
+        body = fresh.get("/f/new").text
+
+    assert "No FlightAware key" in body
+    assert 'name="flight_number"' not in body
+    assert 'href="/f/new/details"' in body
+
+
+def test_the_form_behind_the_lookup_still_asks_about_the_whole_flight(
+    client: TestClient,
+) -> None:
+    page = client.get("/f/new/details")
     assert page.status_code == 200
     assert 'name="marketing_carrier"' in page.text
     # The times are wall clock at their own airport, never a UTC instant.
     assert 'type="datetime-local"' in page.text
+    assert 'action="/f"' in page.text
+
+
+def test_a_flight_added_by_hand_is_not_credited_to_an_operator_nobody_named(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The hidden fields are empty on the by-hand path, and empty is not a carrier."""
+    written: dict[str, Any] = {}
+
+    async def create_booking(_session: Any, **fields: Any) -> Booking:
+        written.update(fields)
+        return booking()
+
+    monkeypatch.setattr(web.booking_repo, "create_booking", create_booking)
+
+    client.post(
+        "/f",
+        data={
+            "marketing_carrier": "AC",
+            "marketing_number": "871",
+            "origin_iata": "YUL",
+            "dest_iata": "LHR",
+            "departure_local": "2026-09-12T18:40",
+            "operating_carrier": "",
+            "operating_number": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert written["operating_carrier"] is None
+    assert written["operating_number"] is None
 
 
 def test_an_airport_nobody_has_heard_of_comes_back_as_a_sentence(
