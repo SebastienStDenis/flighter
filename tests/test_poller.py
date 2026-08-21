@@ -37,6 +37,9 @@ from flighter.models import (
 from flighter.poller import HISTORY_RETENTION, USAGE_RETENTION, poll_once, prune_history
 
 NOW = datetime(2026, 9, 12, 12, 0, tzinfo=UTC)
+# What the ticket says, for an observation that says nothing: close enough that the
+# table would poll fast, so the floor is what shows.
+BOOKED = NOW + timedelta(hours=1)
 
 
 @dataclass
@@ -44,6 +47,8 @@ class FakeSnapshot:
     scheduled_out: datetime | None = None
     estimated_out: datetime | None = None
     actual_off: datetime | None = None
+    scheduled_on: datetime | None = None
+    estimated_on: datetime | None = None
     actual_on: datetime | None = None
     cancelled: bool | None = False
 
@@ -72,7 +77,7 @@ def scheduled(delta: timedelta, **kwargs: object) -> FakeSnapshot:
     ],
 )
 def test_cadence_windows(label: str, snapshot: FakeSnapshot, expected: datetime) -> None:
-    assert next_poll_at(NOW, snapshot) == expected, label
+    assert next_poll_at(NOW, snapshot, booked=BOOKED) == expected, label
 
 
 def test_estimated_out_beats_scheduled_out() -> None:
@@ -81,7 +86,7 @@ def test_estimated_out_beats_scheduled_out() -> None:
         scheduled_out=NOW + timedelta(hours=2),
         estimated_out=NOW + timedelta(hours=30),
     )
-    assert next_poll_at(NOW, snapshot) == NOW + timedelta(hours=6)
+    assert next_poll_at(NOW, snapshot, booked=BOOKED) == NOW + timedelta(hours=6)
 
 
 def test_airborne_polls_every_ten_minutes() -> None:
@@ -89,7 +94,7 @@ def test_airborne_polls_every_ten_minutes() -> None:
         scheduled_out=NOW - timedelta(hours=2),
         actual_off=NOW - timedelta(hours=2),
     )
-    assert next_poll_at(NOW, snapshot) == NOW + CLOSE_INTERVAL
+    assert next_poll_at(NOW, snapshot, booked=BOOKED) == NOW + CLOSE_INTERVAL
 
 
 def test_landed_keeps_polling_through_the_baggage_tail() -> None:
@@ -98,17 +103,17 @@ def test_landed_keeps_polling_through_the_baggage_tail() -> None:
         actual_off=NOW - timedelta(hours=5),
         actual_on=NOW - timedelta(minutes=30),
     )
-    assert next_poll_at(NOW, snapshot) == NOW + CLOSE_INTERVAL
+    assert next_poll_at(NOW, snapshot, booked=BOOKED) == NOW + CLOSE_INTERVAL
 
 
 def test_landed_exactly_ninety_minutes_ago_still_polls() -> None:
     snapshot = FakeSnapshot(actual_on=NOW - timedelta(minutes=90))
-    assert next_poll_at(NOW, snapshot) == NOW + CLOSE_INTERVAL
+    assert next_poll_at(NOW, snapshot, booked=BOOKED) == NOW + CLOSE_INTERVAL
 
 
 def test_landed_ninety_one_minutes_ago_is_done() -> None:
     snapshot = FakeSnapshot(actual_on=NOW - timedelta(minutes=91))
-    assert next_poll_at(NOW, snapshot) is None
+    assert next_poll_at(NOW, snapshot, booked=BOOKED) is None
 
 
 def test_cancelled_gets_one_confirming_poll_then_stops() -> None:
@@ -116,42 +121,70 @@ def test_cancelled_gets_one_confirming_poll_then_stops() -> None:
     however far off its departure: there is nothing further to learn, and ten-minute
     polls until the abandon point would be a dollar a flight."""
     first = FakeSnapshot(scheduled_out=NOW + timedelta(days=4), cancelled=True)
-    assert next_poll_at(NOW, first) == NOW + CLOSE_INTERVAL
-    assert next_poll_at(NOW, first, previous=FakeSnapshot(cancelled=False)) == NOW + CLOSE_INTERVAL
+    assert next_poll_at(NOW, first, booked=BOOKED) == NOW + CLOSE_INTERVAL
+    assert (
+        next_poll_at(NOW, first, previous=FakeSnapshot(cancelled=False), booked=BOOKED)
+        == NOW + CLOSE_INTERVAL
+    )
 
     confirmed = FakeSnapshot(scheduled_out=NOW + timedelta(days=4), cancelled=True)
-    assert next_poll_at(NOW, confirmed, previous=first) is None
+    assert next_poll_at(NOW, confirmed, previous=first, booked=BOOKED) is None
 
 
 def test_a_cancellation_that_clears_returns_to_the_table() -> None:
     previous = FakeSnapshot(scheduled_out=NOW + timedelta(days=4), cancelled=True)
     restored = FakeSnapshot(scheduled_out=NOW + timedelta(days=4), cancelled=False)
-    assert next_poll_at(NOW, restored, previous=previous) == NOW + timedelta(days=2)
+    assert next_poll_at(NOW, restored, previous=previous, booked=BOOKED) == NOW + timedelta(days=2)
 
 
 def test_a_diversion_follows_the_flight_like_any_other() -> None:
     """The diverted leg is in the air and then on the ground: the airborne and landed
     rules already watch exactly those minutes."""
     in_the_air = FakeSnapshot(actual_off=NOW - timedelta(hours=2))
-    assert next_poll_at(NOW, in_the_air) == NOW + CLOSE_INTERVAL
+    assert next_poll_at(NOW, in_the_air, booked=BOOKED) == NOW + CLOSE_INTERVAL
     long_down = FakeSnapshot(
         actual_off=NOW - timedelta(hours=6), actual_on=NOW - timedelta(hours=4)
     )
-    assert next_poll_at(NOW, long_down) is None
+    assert next_poll_at(NOW, long_down, booked=BOOKED) is None
+
+
+def test_a_landing_long_overdue_without_wheels_down_is_abandoned() -> None:
+    """The feed lost the flight; it is not still in the air a day after it was due."""
+    lost = FakeSnapshot(
+        actual_off=NOW - ABANDON_AFTER - timedelta(hours=3),
+        estimated_on=NOW - ABANDON_AFTER - timedelta(minutes=1),
+    )
+    assert next_poll_at(NOW, lost, booked=BOOKED) is None
+    late = FakeSnapshot(
+        actual_off=NOW - ABANDON_AFTER - timedelta(hours=3),
+        estimated_on=NOW - ABANDON_AFTER + timedelta(minutes=1),
+    )
+    assert next_poll_at(NOW, late, booked=BOOKED) == NOW + CLOSE_INTERVAL
+    # With no landing time anywhere, the take-off is the clock it runs against.
+    no_estimate = FakeSnapshot(actual_off=NOW - ABANDON_AFTER - timedelta(minutes=1))
+    assert next_poll_at(NOW, no_estimate, booked=BOOKED) is None
 
 
 def test_departure_long_past_without_a_takeoff_is_abandoned() -> None:
     snapshot = FakeSnapshot(scheduled_out=NOW - ABANDON_AFTER - timedelta(minutes=1))
-    assert next_poll_at(NOW, snapshot) is None
+    assert next_poll_at(NOW, snapshot, booked=BOOKED) is None
 
 
 def test_no_departure_estimate_keeps_a_moderate_cadence() -> None:
-    assert next_poll_at(NOW, FakeSnapshot()) == NOW + HOURLY_INTERVAL
+    assert next_poll_at(NOW, FakeSnapshot(), booked=BOOKED) == NOW + HOURLY_INTERVAL
+
+
+def test_no_departure_estimate_still_follows_the_ticket() -> None:
+    """Thin responses do not get a booking polled hourly for the rest of time."""
+    far_off = NOW + timedelta(days=10)
+    assert next_poll_at(NOW, FakeSnapshot(), booked=far_off) == far_off - FEED_HORIZON
+    long_gone = NOW - ABANDON_AFTER - timedelta(minutes=1)
+    assert next_poll_at(NOW, FakeSnapshot(), booked=long_gone) is None
 
 
 def test_naive_timestamps_are_read_as_utc() -> None:
     snapshot = FakeSnapshot(scheduled_out=(NOW + timedelta(hours=1)).replace(tzinfo=None))
-    assert next_poll_at(NOW.replace(tzinfo=None), snapshot) == NOW + CLOSE_INTERVAL
+    assert next_poll_at(NOW.replace(tzinfo=None), snapshot, booked=BOOKED) == NOW + CLOSE_INTERVAL
 
 
 # --- Nothing came back ---------------------------------------------------------------

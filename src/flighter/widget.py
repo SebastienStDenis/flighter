@@ -327,7 +327,7 @@ def _flight(
 ) -> WidgetFlight:
     phase = compute_phase(booking, snapshot, now)
     pill = views.status(phase, booking, snapshot, now=now, origin_tz=origin_tz)
-    next_up = views.milestone(phase, booking, snapshot)
+    next_up = views.milestone(phase, booking, snapshot, now=now)
     return WidgetFlight(
         detail_url=f"{base_url}/f/{booking.id}",
         phase=phase,

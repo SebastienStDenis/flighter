@@ -127,7 +127,10 @@ async def _poll_booking(booking: Booking, now: datetime) -> None:
             return
         current = await record_snapshot(session, booking, flight)
         await detect_changes(session, booking, previous, current)
-        _reschedule(booking, next_poll_at(now, current, previous))
+        _reschedule(
+            booking,
+            next_poll_at(now, current, previous, booked=booking.scheduled_departure_utc),
+        )
 
 
 def _reschedule(booking: Booking, following: datetime | None) -> None:
