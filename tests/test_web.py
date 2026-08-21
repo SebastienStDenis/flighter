@@ -680,7 +680,7 @@ def day_of(instant: datetime, tz: str) -> str:
     return to_local(instant, tz).strftime("%a %-d %b")
 
 
-def test_the_card_leads_with_the_city_over_the_code_and_the_day_over_the_time(
+def test_the_card_leads_with_the_city_over_the_code_and_the_time_over_the_day(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     show(monkeypatch, booking(), empty_snapshot())
@@ -688,10 +688,10 @@ def test_the_card_leads_with_the_city_over_the_code_and_the_day_over_the_time(
     assert re.search(r"Montreal</div>\s*<div[^>]*>YUL</div>", card)
     assert re.search(r"London</div>\s*<div[^>]*>LHR</div>", card)
     assert "Departure" not in card and "Arrival" not in card
-    # The day is read before the time, the way a ticket states it.
+    # The time is the big fact; the day sits under it.
     ends = card[card.index('class="ends"') :]
     departs = big_time(DEPARTURE, "America/Toronto")
-    assert ends.index(day_of(DEPARTURE, "America/Toronto")) < ends.index(departs)
+    assert ends.index(departs) < ends.index(day_of(DEPARTURE, "America/Toronto"))
 
 
 def test_terminal_and_gate_share_a_line_and_the_gate_keeps_its_colour(
