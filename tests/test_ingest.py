@@ -284,7 +284,9 @@ async def test_a_failing_extraction_is_logged_and_swallowed(
     assert result.outcome == "error"
     assert not result.settled
     logged = one_session.log["flight_plain.eml"]
-    assert logged.error is not None and "RuntimeError" in logged.error
+    # The exception's words and not its class: this is what a push and the Problems page
+    # show, and "RuntimeError:" in front of it helps nobody standing in a terminal.
+    assert logged.error == "model output did not match the extraction schema"
     assert recorder.created == []
 
 

@@ -159,7 +159,8 @@ from the thing you are looking at rather than a queue to work through somewhere 
 Something that fails for a passing reason - the model, iCloud, the network - is tried
 again after two minutes and again after ten. If it still fails, your phone is told once
 and the email is set aside: it keeps its flag, so it is still where you left it in Mail,
-and it sits at the top of the flight board with **Try again** and **Ignore** beside it.
+and it waits on the **Problems** page with **Try again** and **Ignore** beside it; the tab
+in the nav wears a mark while anything is there, so the board itself stays about flights.
 Unflagging it in Mail drops it too. Two things skip the retries and are set aside at once,
 because reading them again reads them the same way: an email naming an airport code the app
 has no row for, where the push names the code, and an email with no flight in it at all.

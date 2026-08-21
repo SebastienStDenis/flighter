@@ -31,6 +31,7 @@ from icalendar import Alarm, Calendar, Event, Timezone
 from . import prefs
 from .bookings import flight_label
 from .config import Settings
+from .mail import message_url
 from .models import Airport, Booking, FlightSnapshot
 from .phase import CANCELLED_NOTICE, arrival_estimate, departure_estimate
 from .timezones import FALLBACK_TZ, to_local
@@ -190,6 +191,9 @@ def event_body(
     if snapshot and snapshot.baggage_claim:
         lines.append(f"Baggage claim: {snapshot.baggage_claim}")
     lines.extend(["", f"{base_url}/f/{booking.id}"])
+    if booking.source_message_id:
+        # The confirmation itself, one tap from the calendar entry it became.
+        lines.append(f"Email: {message_url(booking.source_message_id)}")
     event.add("description", "\n".join(lines))
 
     alarm = Alarm()

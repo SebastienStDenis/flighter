@@ -31,6 +31,7 @@ from email import message_from_bytes, policy
 from email.utils import parsedate_to_datetime
 from time import monotonic
 from typing import Any, NamedTuple
+from urllib.parse import quote
 
 from imap_tools import FolderInfo, MailBox
 from pydantic import BaseModel
@@ -39,6 +40,16 @@ from . import prefs
 from .config import Settings, credentials_generation
 
 log = logging.getLogger(__name__)
+
+
+def message_url(message_id: str) -> str:
+    """A link that opens the email itself, in Mail, on the phone and on the Mac.
+
+    The angle brackets around a Message-ID have to be percent-encoded or Mail ignores the
+    URL entirely; what sits between them is left as it stands.
+    """
+    return f"message://%3C{quote(message_id.strip().strip('<>'), safe='@')}%3E"
+
 
 IMAP_HOST = "imap.mail.me.com"
 IMAP_PORT = 993

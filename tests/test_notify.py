@@ -12,7 +12,7 @@ import pytest
 
 from flighter.config import Settings
 from flighter.models import Booking, EventKind, FlightEvent
-from flighter.notify import MESSAGES_URL, PRIORITY_QUIET, Notifier, PushFailed, message_url
+from flighter.notify import MESSAGES_URL, PRIORITY_QUIET, Notifier, PushFailed
 from flighter.phase import CANCELLED_NOTICE
 
 ORIGIN_TZ = "America/New_York"
@@ -75,10 +75,10 @@ async def push(settings: Settings, flight_event: FlightEvent, **kwargs: object) 
 async def test_title_and_url_name_the_flight(settings: Settings) -> None:
     sent = (await push(settings, event(EventKind.GATE_ASSIGNED, new="B22"))).only
 
-    # The glyph is the whole point of leading with one: the flight is still readable.
-    assert sent["title"].endswith("DL1234 JFK -> LAX")
+    # The title is the flight and nothing else: no glyph in front of it to decode.
+    assert sent["title"] == "DL1234 JFK -> LAX"
     assert sent["url"] == "https://flights.example.com/f/7"
-    assert sent["url_title"]
+    assert sent["url_title"] == "Open flight"
     assert sent["message"] == "Gate B22"
 
 
@@ -90,13 +90,17 @@ async def test_title_and_url_name_the_flight(settings: Settings) -> None:
         (
             event(EventKind.DEPARTURE_DELAYED, old=DEPARTS.isoformat(), new=DELAYED.isoformat()),
             "0",
-            "Delayed 35 min, now departing 19:35 EDT",
+            "Delayed 35 min. Departs 19:35 EDT",
         ),
-        (event(EventKind.DEPARTED, new=DELAYED.isoformat()), "0", "Left the gate at 19:35 EDT"),
-        (event(EventKind.LANDED, new=DELAYED.isoformat()), "0", "Landed at 16:35 PDT"),
-        (event(EventKind.BAGGAGE_CLAIM_ASSIGNED, new="carousel 3"), "0", "Bag claim: carousel 3"),
+        (event(EventKind.DEPARTED, new=DELAYED.isoformat()), "0", "Departed 19:35 EDT"),
+        (event(EventKind.LANDED, new=DELAYED.isoformat()), "0", "Landed 16:35 PDT"),
+        (
+            event(EventKind.BAGGAGE_CLAIM_ASSIGNED, new="carousel 3"),
+            "0",
+            "Baggage claim carousel 3",
+        ),
         (event(EventKind.CANCELLED, old="false", new="true"), "1", CANCELLED_NOTICE),
-        (event(EventKind.DIVERTED, old="false", new="true"), "1", "Flight diverted"),
+        (event(EventKind.DIVERTED, old="false", new="true"), "1", "Diverted"),
     ],
 )
 async def test_message_and_priority_per_kind(
@@ -105,6 +109,9 @@ async def test_message_and_priority_per_kind(
     sent = (await push(settings, flight_event)).only
     assert sent["message"] == message
     assert sent["priority"] == priority
+    # Plain text on the lock screen: no symbols, no emoji, nothing to decode.
+    assert sent["title"].isascii()
+    assert sent["message"].isascii()
 
 
 async def test_the_credentials_travel_with_every_push(settings: Settings) -> None:
@@ -146,7 +153,7 @@ async def test_budget_alert_is_high_priority(settings: Settings) -> None:
     )
     sent = recorder.only
     assert sent["priority"] == "1"
-    assert sent["title"].endswith("AeroAPI budget reached")
+    assert sent["title"] == "AeroAPI budget reached"
     assert "$4.12 of the $4.00 monthly cap" in sent["message"]
 
 
@@ -172,7 +179,7 @@ async def test_an_import_links_to_the_flight_page(settings: Settings) -> None:
     page carries the live gate and status anyway."""
     sent = await imported(settings, "created")
 
-    assert sent["title"].endswith("Flight added")
+    assert sent["title"] == "Flight added"
     assert sent["message"] == "DL1234 JFK -> LAX"
     assert sent["url"] == "https://flights.example.com/f/7"
     assert sent["priority"] == "0"
@@ -180,30 +187,31 @@ async def test_an_import_links_to_the_flight_page(settings: Settings) -> None:
 
 @pytest.mark.parametrize(
     ("outcome", "title"),
-    [("review", "Flight needs a look"), ("duplicate", "Already tracked")],
+    [("review", "Flight needs review"), ("duplicate", "Already tracked")],
 )
 async def test_every_import_outcome_has_its_own_words(
     settings: Settings, outcome: str, title: str
 ) -> None:
     sent = await imported(settings, outcome)
-    assert sent["title"].endswith(title)
+    assert sent["title"] == title
     assert "DL1234 JFK -> LAX" in sent["message"]
 
 
-async def test_a_failed_import_links_back_to_the_email(settings: Settings) -> None:
+async def test_a_failed_import_links_to_the_problems_page(settings: Settings) -> None:
+    """Where the email can be tried again, written off, or opened in Mail."""
     recorder = Recorder()
     await Notifier(settings, transport=recorder.transport).mail_failed(
         message_id="<abc.123@mail.example.com>",
         subject="Your itinerary",
-        reason="RuntimeError: the model timed out",
+        reason="the model timed out",
     )
     sent = recorder.only
 
-    # Mail opens this on the phone and on the Mac; the brackets have to be encoded.
-    assert sent["url"] == "message://%3Cabc.123@mail.example.com%3E"
+    assert sent["title"] == "Import failed"
+    assert sent["url"] == "https://flights.example.com/problems"
+    assert sent["url_title"] == "Open flighter"
     assert sent["priority"] == "0"
-    assert "the model timed out" in sent["message"]
-    assert "Your itinerary" in sent["message"]
+    assert sent["message"] == "Your itinerary\nthe model timed out"
 
 
 async def test_mail_pushes_are_best_effort(settings: Settings) -> None:
@@ -214,9 +222,3 @@ async def test_mail_pushes_are_best_effort(settings: Settings) -> None:
     await notifier.mail_imported([booking()], outcome="created")
     await notifier.mail_failed(message_id="<x@y>", subject="s", reason="r")
     assert len(recorder.requests) == 2
-
-
-@pytest.mark.parametrize("message_id", ["<abc@x.example>", "abc@x.example"])
-def test_a_message_url_is_encoded_the_same_either_way(message_id: str) -> None:
-    """The log stores whatever the header said, brackets or not."""
-    assert message_url(message_id) == "message://%3Cabc@x.example%3E"
