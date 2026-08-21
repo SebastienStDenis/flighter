@@ -448,7 +448,7 @@ def test_the_connect_link_runs_the_script_with_the_address_and_the_token(
     settings: Settings,
 ) -> None:
     assert connect_url(settings, "https://flights.example.com") == (
-        "scriptable:///run/Flights?api=https%3A%2F%2Fflights.example.com&token=test-token"
+        "scriptable:///run/Flighter?api=https%3A%2F%2Fflights.example.com&token=test-token"
     )
 
 
@@ -473,11 +473,11 @@ def test_the_script_is_the_same_for_everyone(settings: Settings) -> None:
 def test_the_bundle_installs_the_script_under_the_name_the_connect_link_runs(
     client: TestClient,
 ) -> None:
-    response = client.get("/widget/Flights.scriptable")
+    response = client.get("/widget/Flighter.scriptable")
     assert response.status_code == 200
-    assert response.headers["content-disposition"] == 'attachment; filename="Flights.scriptable"'
+    assert response.headers["content-disposition"] == 'attachment; filename="Flighter.scriptable"'
     bundle = response.json()
-    assert bundle["name"] == "Flights"
+    assert bundle["name"] == "Flighter"
     assert bundle["icon"] == {"color": "deep-blue", "glyph": "plane-departure"}
     assert "Keychain.set" in bundle["script"]
 
