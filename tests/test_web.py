@@ -546,12 +546,17 @@ def test_the_card_names_one_runway_moment_at_a_time(
         assert runway not in body
 
 
+def struck(was: datetime, tz: str, *, with_date: bool = False) -> str:
+    """The time a flight was booked for, as it is drawn once that time has moved."""
+    return (
+        '<s class="font-normal text-muted-foreground">'
+        f"{format_local(was, tz, with_date=with_date)}</s>"
+    )
+
+
 def moved_time(was: datetime, now: datetime, tz: str, tone: str) -> str:
     """A time that moved, as one line draws it: the original struck, the new one coloured."""
-    return (
-        f'<s class="font-normal text-muted-foreground">{format_local(was, tz)}</s> '
-        f'<span class="{tone}">{format_local(now, tz)}</span>'
-    )
+    return f'{struck(was, tz)} <span class="{tone}">{format_local(now, tz)}</span>'
 
 
 def test_a_delay_is_shown_against_what_was_booked(
@@ -561,7 +566,7 @@ def test_a_delay_is_shown_against_what_was_booked(
     show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=late))
     body = client.get("/f/1").text
     assert f'text-stop">{format_local(late, "America/Toronto")}' in body
-    assert f"<s>{format_local(DEPARTURE, 'America/Toronto')}</s>" in body
+    assert struck(DEPARTURE, "America/Toronto") in body
     # The struck time and the colour say it; no words repeat it.
     assert "late " not in body and "early " not in body
 
@@ -573,7 +578,42 @@ def test_a_time_brought_forward_is_green(
     show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=earlier))
     body = client.get("/f/1").text
     assert f'text-ok">{format_local(earlier, "America/Toronto")}' in body
-    assert f"<s>{format_local(DEPARTURE, 'America/Toronto')}</s>" in body
+    assert struck(DEPARTURE, "America/Toronto") in body
+
+
+def test_each_end_of_a_red_eye_names_its_own_day(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Leaves Saturday evening, lands Sunday morning: one heading cannot say both."""
+    overnight = booking(
+        scheduled_departure_utc=datetime(2026, 9, 12, 22, 40, tzinfo=UTC),
+        scheduled_arrival_utc=datetime(2026, 9, 13, 9, 25, tzinfo=UTC),
+    )
+    show(monkeypatch, overnight, None)
+
+    for path in ("/", "/f/1"):
+        body = client.get(path).text
+        assert "Sat 12 Sep" in body
+        assert "Sun 13 Sep" in body
+
+
+def test_a_delay_past_midnight_keeps_the_day_it_was_booked_for(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """23:50 struck next to 00:30 reads as earlier, unless the struck time says Saturday."""
+    booked = datetime(2026, 9, 13, 3, 50, tzinfo=UTC)
+    slipped = datetime(2026, 9, 13, 4, 30, tzinfo=UTC)
+    show(
+        monkeypatch,
+        booking(scheduled_departure_utc=booked),
+        replace_snapshot(scheduled_out=booked, estimated_out=slipped),
+    )
+
+    body = client.get("/f/1").text
+    assert struck(booked, "America/Toronto", with_date=True) in body
+    assert "Sat 12 Sep 23:50 EDT" in body
+    assert 'text-stop">00:30 EDT' in body
+    assert "Sun 13 Sep" in body
 
 
 def test_the_lead_card_strikes_a_time_that_slipped_and_leaves_one_that_held(
