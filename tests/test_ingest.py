@@ -142,7 +142,6 @@ async def test_structured_confirmation_becomes_an_active_booking(
     assert result.outcome == "created"
     assert result.settled
     (created,) = recorder.created
-    assert created["status"] == "active"
     assert created["marketing_carrier"] == "DL"
     assert created["departure_local"] == datetime(2026, 9, 12, 18, 40)
     assert created["source"] == "email"
@@ -237,21 +236,21 @@ async def test_the_departure_zone_comes_from_the_airport_not_the_email(
     assert recorder.zones_asked == ["YYC"]
 
 
-async def test_low_confidence_goes_to_review(
+async def test_a_shaky_extraction_is_booked_like_any_other(
     settings: Settings,
     recorder: Recorder,
     monkeypatch: pytest.MonkeyPatch,
     one_session: FakeSession,
 ) -> None:
-    use_model(monkeypatch, extraction(confidence=ingest.CONFIDENCE_THRESHOLD - 0.01))
+    """There is no review step: what was read goes on the board, and a flight that is
+    not yours is stopped from its own page. The confidence is kept, for the log."""
+    use_model(monkeypatch, extraction(confidence=0.4))
 
     result = await ingest.process_message(message("flight_plain.eml"), settings=settings)
 
-    assert result.outcome == "review"
-    assert recorder.created[0]["status"] == "pending_review"
-    assert recorder.created[0]["extraction_confidence"] == pytest.approx(
-        ingest.CONFIDENCE_THRESHOLD - 0.01
-    )
+    assert result.outcome == "created"
+    assert "status" not in recorder.created[0]
+    assert recorder.created[0]["extraction_confidence"] == pytest.approx(0.4)
 
 
 async def test_a_flight_we_already_have_is_not_booked_twice(

@@ -42,7 +42,6 @@ class BookingStatus(StrEnum):
     promoted to a fact about the booking.
     """
 
-    PENDING_REVIEW = "pending_review"
     ACTIVE = "active"
     COMPLETED = "completed"
     ARCHIVED = "archived"
@@ -57,7 +56,6 @@ class IngestOutcome(StrEnum):
     CREATED = "created"
     DUPLICATE = "duplicate"
     NO_FLIGHT = "no_flight"
-    REVIEW = "review"
     ERROR = "error"
 
 

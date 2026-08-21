@@ -9,12 +9,10 @@ module is the routes and nothing else.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, fields
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
-from urllib.parse import urlencode
 
 import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -29,7 +27,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import bookings as booking_repo
 from . import ingest, lookup, prefs, views
 from .aeroapi import BudgetExceeded, budget_status, clear_breaker
-from .airports import UnknownAirport
 from .caldav import CalendarClient, CalendarUnavailable, Collection
 from .checks import run_checks
 from .config import CREDENTIALS, SERVICES, Settings, mint_widget_token, write_secrets
@@ -48,7 +45,7 @@ STATIC = Path(__file__).parent / "static"
 
 # What the board shows above the fold. Archived bookings are gone as far as the UI is
 # concerned, and a completed one belongs under Flown.
-BOARD_STATUSES = (BookingStatus.ACTIVE, BookingStatus.PENDING_REVIEW)
+BOARD_STATUSES = (BookingStatus.ACTIVE,)
 
 # Flown flights are history, and history is not what this screen is for. Five is enough
 # to recognise the trip you just took and few enough to keep the query bounded.
@@ -94,48 +91,6 @@ def _first_validation_message(exc: ValidationError) -> str:
     return f"{field.replace('_', ' ')}: {error['msg']}"
 
 
-@dataclass
-class FlightForm:
-    """The add and edit forms, which post exactly the same fields."""
-
-    marketing_carrier: Annotated[str, Form()]
-    marketing_number: Annotated[str, Form()]
-    origin_iata: Annotated[str, Form()]
-    dest_iata: Annotated[str, Form()]
-    departure_local: Annotated[str, Form()]
-    arrival_local: Annotated[str, Form()] = ""
-    confirmation_code: Annotated[str, Form()] = ""
-    seat: Annotated[str, Form()] = ""
-    notes: Annotated[str, Form()] = ""
-    # Who actually flies the leg, which is who FlightAware tracks. Carried hidden rather
-    # than asked about: a lookup knows it, and nobody reads it off a ticket.
-    operating_carrier: Annotated[str, Form()] = ""
-    operating_number: Annotated[str, Form()] = ""
-
-    @property
-    def departure(self) -> datetime | None:
-        return views.parse_local(self.departure_local)
-
-    @property
-    def arrival(self) -> datetime | None:
-        return views.parse_local(self.arrival_local)
-
-    def optional(self, name: str) -> str | None:
-        value: str = getattr(self, name)
-        return value.strip() or None
-
-    def as_posted(self) -> dict[str, Any]:
-        """What the user typed, so a rejected form comes back filled in."""
-        return {field.name: getattr(self, field.name) for field in fields(self)}
-
-
-FormDep = Annotated[FlightForm, Depends()]
-
-# What a lookup is allowed to fill in, so a query string can never post something the
-# form does not have a box for.
-FORM_FIELDS = frozenset(field.name for field in fields(FlightForm))
-
-
 async def recently_flown(session: AsyncSession, limit: int) -> list[Booking]:
     """The last few flights that have been taken, newest first and never more."""
     rows = await session.execute(
@@ -169,7 +124,6 @@ def create_app(settings: Settings) -> FastAPI:
         day=views.day,
         duration=views.duration,
         email_url=message_url,
-        local_input=views.local_input,
         missing=views.MISSING,
         problem_notice=views.problem_notice,
         same_day=views.same_day,
@@ -184,26 +138,11 @@ def create_app(settings: Settings) -> FastAPI:
             return JSONResponse({"detail": detail}, status_code=code)
         return page(request, "error.html", {"code": code, "detail": detail}, status_code=code)
 
-    def flight_form_page(
-        request: Request,
-        view: FlightView | None,
-        error: str | None = None,
-        posted: dict[str, Any] | None = None,
-        *,
-        found: bool = False,
-    ) -> Response:
-        return page(
-            request,
-            "form.html",
-            {"view": view, "error": error, "form": posted or {}, "found": found},
-            status_code=400 if error else 200,
-        )
-
     def search_page(
         request: Request,
         error: str | None = None,
         posted: dict[str, Any] | None = None,
-        candidates: list[tuple[lookup.Candidate, str]] | None = None,
+        candidates: list[lookup.Candidate] | None = None,
     ) -> Response:
         return page(
             request,
@@ -310,17 +249,19 @@ def create_app(settings: Settings) -> FastAPI:
         return search_page(request)
 
     @app.post("/f/new")
-    async def find_flight(
+    async def add_flight(
         request: Request,
         session: SessionDep,
         flight_number: Annotated[str, Form()],
         departure_date: Annotated[str, Form()],
+        leg: Annotated[str, Form()] = "",
     ) -> Response:
-        """Ask the airline's schedule what that flight number is, that day.
+        """Ask the airline's schedule what that flight number is, that day, and add it.
 
-        Every way this can fail ends on the same page with a sentence and the way to
-        type the flight in by hand, because a lookup is a convenience and a flight
-        somebody is standing in an airport for is not.
+        A flight is the two things anybody can read off the pass in their hand; where
+        it goes and when are the airline's to say. A number that flies twice that day
+        comes back as a choice, and choosing one posts the same two boxes again with
+        the leg named, so nothing is ever saved that a schedule did not state.
         """
         posted = {"flight_number": flight_number, "departure_date": departure_date}
         flight = lookup.parse_flight_number(flight_number)
@@ -347,49 +288,33 @@ def create_app(settings: Settings) -> FastAPI:
             return search_page(
                 request, f"No {carrier}{number} is scheduled to leave that day.", posted
             )
-        if len(found) == 1:
-            return RedirectResponse(_details_url(found[0]), status_code=303)
-        return search_page(request, None, posted, [(one, _details_url(one)) for one in found])
+        if leg:
+            chosen = [candidate for candidate in found if candidate.leg == leg]
+            if not chosen:
+                return search_page(request, "That leg is no longer on the schedule.", posted, found)
+            found = chosen
+        if len(found) != 1:
+            return search_page(request, None, posted, found)
 
-    @app.get("/f/new/details")
-    async def new_flight_details(request: Request) -> Response:
-        """The whole form: filled in by a lookup, or empty to type a flight into."""
-        filled = {
-            name: value for name, value in request.query_params.items() if name in FORM_FIELDS
-        }
-        return flight_form_page(request, None, posted=filled, found=bool(filled))
-
-    @app.post("/f")
-    async def create_flight(request: Request, session: SessionDep, form: FormDep) -> Response:
-        if form.departure is None:
-            return flight_form_page(
-                request, None, "Departure needs a date and a time.", form.as_posted()
-            )
+        (candidate,) = found
         try:
             booking = await booking_repo.create_booking(
                 session,
-                marketing_carrier=form.marketing_carrier,
-                marketing_number=form.marketing_number,
-                origin_iata=form.origin_iata,
-                dest_iata=form.dest_iata,
-                departure_local=form.departure,
-                arrival_local=form.arrival,
-                confirmation_code=form.optional("confirmation_code"),
-                seat=form.optional("seat"),
-                notes=form.optional("notes"),
-                operating_carrier=form.optional("operating_carrier"),
-                operating_number=form.optional("operating_number"),
+                marketing_carrier=candidate.marketing_carrier,
+                marketing_number=candidate.marketing_number,
+                origin_iata=candidate.origin_iata,
+                dest_iata=candidate.dest_iata,
+                departure_local=candidate.departure_local,
+                arrival_local=candidate.arrival_local,
+                operating_carrier=candidate.operating_carrier,
+                operating_number=candidate.operating_number,
                 source=BookingSource.MANUAL,
             )
-        except UnknownAirport as exc:
-            return flight_form_page(request, None, _unknown_airport(exc), form.as_posted())
         except IntegrityError:
             # The dedupe index caught a flight already on the list. Roll back or every
-            # query behind the re-rendered form fails too.
+            # query behind the re-rendered page fails too.
             await session.rollback()
-            return flight_form_page(
-                request, None, "That flight is already on the list for that day.", form.as_posted()
-            )
+            return search_page(request, "That flight is already on the list for that day.", posted)
         return RedirectResponse(f"/f/{booking.id}", status_code=303)
 
     @app.get("/f/{booking_id}")
@@ -406,52 +331,22 @@ def create_app(settings: Settings) -> FastAPI:
             {"v": view, "events": list(events.scalars()), "cancelled_notice": CANCELLED_NOTICE},
         )
 
-    @app.get("/f/{booking_id}/edit")
-    async def edit_flight(request: Request, session: SessionDep, booking_id: int) -> Response:
-        return flight_form_page(request, await load(session, booking_id))
-
-    @app.post("/f/{booking_id}")
-    async def update_flight(
-        request: Request, session: SessionDep, booking_id: int, form: FormDep
+    @app.post("/f/{booking_id}/ticket")
+    async def update_ticket(
+        session: SessionDep,
+        booking_id: int,
+        confirmation_code: Annotated[str, Form()] = "",
+        seat: Annotated[str, Form()] = "",
+        notes: Annotated[str, Form()] = "",
     ) -> Response:
-        view = await load(session, booking_id)
-        if form.departure is None:
-            return flight_form_page(
-                request, view, "Departure needs a date and a time.", form.as_posted()
-            )
-        try:
-            departure_utc, arrival_utc = await views.utc_times(
-                session, form.origin_iata, form.dest_iata, form.departure, form.arrival
-            )
-            await booking_repo.update_booking(
-                session,
-                booking_id,
-                marketing_carrier=form.marketing_carrier,
-                marketing_number=form.marketing_number,
-                origin_iata=form.origin_iata,
-                dest_iata=form.dest_iata,
-                scheduled_departure_utc=departure_utc,
-                scheduled_arrival_utc=arrival_utc,
-                confirmation_code=form.optional("confirmation_code"),
-                seat=form.optional("seat"),
-                notes=form.optional("notes"),
-                operating_carrier=form.optional("operating_carrier"),
-                operating_number=form.optional("operating_number"),
-            )
-        except UnknownAirport as exc:
-            return flight_form_page(request, view, _unknown_airport(exc), form.as_posted())
-        except IntegrityError:
-            await session.rollback()
-            return flight_form_page(
-                request, view, "That flight is already on the list for that day.", form.as_posted()
-            )
-        return RedirectResponse(f"/f/{booking_id}", status_code=303)
-
-    @app.post("/f/{booking_id}/keep")
-    async def keep_flight(session: SessionDep, booking_id: int) -> Response:
-        """Confirm a booking we were unsure about, which is what starts it being polled."""
-        booking = await booking_repo.update_booking(
-            session, booking_id, status=BookingStatus.ACTIVE
+        """What is written on the ticket, which is the only part of a flight a person
+        gets to change. The flight itself is the airline's; a wrong one is deleted."""
+        booking = await booking_repo.update_ticket(
+            session,
+            booking_id,
+            confirmation_code=confirmation_code.strip() or None,
+            seat=seat.strip() or None,
+            notes=notes.strip() or None,
         )
         if booking is None:
             raise HTTPException(status_code=404, detail="No such flight.")
@@ -622,20 +517,11 @@ def create_app(settings: Settings) -> FastAPI:
     return app
 
 
-def _unknown_airport(exc: UnknownAirport) -> str:
-    return f"{exc.iata} is not an airport we know."
-
-
 def _parse_date(value: str) -> date | None:
     try:
         return date.fromisoformat(value.strip())
     except ValueError:
         return None
-
-
-def _details_url(candidate: lookup.Candidate) -> str:
-    """A found flight as a filled-in form, which is what choosing one comes down to."""
-    return f"/f/new/details?{urlencode(candidate.as_form())}"
 
 
 def _merged(names: tuple[str, ...], entered: dict[str, str], *, forget: bool) -> dict[str, str]:

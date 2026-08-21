@@ -96,6 +96,18 @@
 </div>
 {% endmacro %}
 
+{# A fact a person may change. The row is the control: tapping it opens the ticket
+   dialog on that box, so there is nothing to find and nothing to miss. #}
+{% macro editable(name, value, field, mono=false) %}
+<button class="item w-full text-left" data-size="xs" type="button"
+        onclick="editTicket('{{ field }}')" aria-label="Change {{ name|lower }}">
+  <section><p>{{ name }}</p></section>
+  <aside class="text-right {{ 'font-mono ' if mono }}{{ 'text-muted-foreground' if value == missing else 'font-medium' }}">
+    {{- value -}}
+  </aside>
+</button>
+{% endmacro %}
+
 {# A time that has resolved through scheduled -> estimated -> actual. The original is
    struck through only when it moved, so an on-time flight reads as one clean time. #}
 {% macro when(name, line, tz) %}

@@ -44,20 +44,15 @@ from .mail import (
     Marked,
     Message,
 )
-from .models import Booking, BookingSource, BookingStatus, IngestLog, IngestOutcome
+from .models import Booking, BookingSource, IngestLog, IngestOutcome
 from .notify import Notifier
 from .timezones import to_utc
 
 log = logging.getLogger(__name__)
 
-# Below this an extraction is booked for review rather than straight onto the board. The
-# model is asked to lower its confidence when a time or a code was inferred rather than
-# printed, and a flight that has to be checked is better than one that is quietly wrong.
-CONFIDENCE_THRESHOLD = 0.85
-
-# A message yields one outcome even when it carried several segments. Review wins over
-# a success because it is the one that still needs a person.
-_OUTCOME_PRECEDENCE = (IngestOutcome.REVIEW, IngestOutcome.CREATED, IngestOutcome.DUPLICATE)
+# A message yields one outcome even when it carried several segments. A flight added
+# wins over one already there because it is the one the push should name.
+_OUTCOME_PRECEDENCE = (IngestOutcome.CREATED, IngestOutcome.DUPLICATE)
 
 # The only outcome that keeps its flag, and so the only one that is ever tried again.
 # Everything else reached the board and is finished with. An email that held no flight is
@@ -199,14 +194,8 @@ def _unknown_airport(exc: UnknownAirport) -> Ingested:
 
 
 async def _book(session: AsyncSession, message: Message, extraction: Extraction) -> Ingested:
-    status = (
-        BookingStatus.ACTIVE
-        if extraction.confidence >= CONFIDENCE_THRESHOLD
-        else BookingStatus.PENDING_REVIEW
-    )
-
     booked = [
-        await _book_segment(session, message, extraction, segment, status)
+        await _book_segment(session, message, extraction, segment)
         for segment in extraction.segments
     ]
     outcomes = [outcome for outcome, _ in booked]
@@ -221,7 +210,6 @@ async def _book_segment(
     message: Message,
     extraction: Extraction,
     segment: Segment,
-    status: BookingStatus,
 ) -> tuple[IngestOutcome, int]:
     flight = f"{segment.marketing_carrier}{segment.marketing_number}"
     departure_local = segment.departure_at
@@ -257,21 +245,10 @@ async def _book_segment(
         source_message_id=message.id,
         confirmation_code=segment.confirmation_code,
         seat=segment.seat,
-        status=status,
         extraction_confidence=extraction.confidence,
     )
-    log.info(
-        "booked %s %s-%s as %s (%d)",
-        flight,
-        segment.origin_iata,
-        segment.dest_iata,
-        status,
-        booking.id,
-    )
-    outcome = (
-        IngestOutcome.REVIEW if status == BookingStatus.PENDING_REVIEW else IngestOutcome.CREATED
-    )
-    return outcome, booking.id
+    log.info("booked %s %s-%s (%d)", flight, segment.origin_iata, segment.dest_iata, booking.id)
+    return IngestOutcome.CREATED, booking.id
 
 
 # -- the log -------------------------------------------------------------------------

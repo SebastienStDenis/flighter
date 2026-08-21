@@ -15,7 +15,7 @@
 {% endif %}
 
 {% if configured %}
-<form id="find-form" method="post" action="/f/new">
+<form id="add-form" method="post" action="/f/new">
   <div class="card" data-size="sm">
     <header><h3>The flight</h3></header>
     <section>
@@ -47,9 +47,9 @@
   </svg>
   <strong>No FlightAware key</strong>
   <section>
-    <p>A flight number cannot be looked up until one is entered on the
-      <a class="btn" data-variant="link" href="/settings">settings page</a>.
-      Until then, a flight has to be typed in.</p>
+    <p>A flight is read out of the airline's published schedule, which needs a key
+      entered on the <a class="btn" data-variant="link" href="/settings">settings page</a>.
+      Until then, flag a booking email instead.</p>
   </section>
 </div>
 {% endif %}
@@ -58,28 +58,32 @@
 <h2 class="mt-5 mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
   That number flies more than once</h2>
 <div class="item-group">
-  {% for candidate, url in candidates %}
-  <a class="item" data-variant="outline" data-size="sm" href="{{ url }}">
-    <section>
-      <h3>
-        <span class="font-mono">{{ candidate.flight_number }}</span>
-        <span class="font-mono font-normal text-muted-foreground">
-          {{ candidate.origin_iata }} &rarr; {{ candidate.dest_iata }}</span>
-      </h3>
-      <p class="font-mono">{{ candidate.departure_local.strftime('%H:%M') }}
-        at {{ candidate.origin_iata }}</p>
-    </section>
-  </a>
+  {% for candidate in candidates %}
+  <form method="post" action="/f/new">
+    <input type="hidden" name="flight_number" value="{{ form['flight_number'] }}">
+    <input type="hidden" name="departure_date" value="{{ form['departure_date'] }}">
+    <input type="hidden" name="leg" value="{{ candidate.leg }}">
+    <button class="item w-full text-left" data-variant="outline" data-size="sm" type="submit">
+      <section>
+        <h3>
+          <span class="font-mono">{{ candidate.flight_number }}</span>
+          <span class="font-mono font-normal text-muted-foreground">
+            {{ candidate.origin_iata }} &rarr; {{ candidate.dest_iata }}</span>
+        </h3>
+        <p class="font-mono">{{ candidate.departure_local.strftime('%H:%M') }}
+          at {{ candidate.origin_iata }}</p>
+      </section>
+    </button>
+  </form>
   {% endfor %}
 </div>
 {% endif %}
 
+{% if configured %}
 <div class="action-bar flex gap-2">
-  {% if configured %}
-  <button class="btn flex-1" data-size="lg" type="submit" form="find-form">Find it</button>
-  {% endif %}
-  <a class="btn {{ 'flex-1' if not configured }}" data-variant="ghost" data-size="lg"
-     href="/f/new/details">By hand</a>
+  <button class="btn flex-1" data-size="lg" type="submit" form="add-form">Add it</button>
+  <a class="btn" data-variant="ghost" data-size="lg" href="/">Cancel</a>
 </div>
+{% endif %}
 
 {% endblock %}

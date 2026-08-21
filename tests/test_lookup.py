@@ -120,7 +120,7 @@ def test_what_is_not_a_flight_number_is_refused(typed: str) -> None:
 # --- What the schedule says ----------------------------------------------------------
 
 
-async def test_a_published_leg_comes_back_as_a_filled_in_form() -> None:
+async def test_a_published_leg_comes_back_as_a_flight() -> None:
     client = FakeClient(row())
 
     (found,) = await find(client)
@@ -131,14 +131,7 @@ async def test_a_published_leg_comes_back_as_a_filled_in_form() -> None:
     # 22:40Z is 18:40 in Montreal, and the arrival is read at Heathrow, not at Montreal.
     assert found.departure_local == datetime(2026, 9, 12, 18, 40)
     assert found.arrival_local == datetime(2026, 9, 13, 10, 25)
-    assert found.as_form() == {
-        "marketing_carrier": "AC",
-        "marketing_number": "871",
-        "origin_iata": "YUL",
-        "dest_iata": "LHR",
-        "departure_local": "2026-09-12T18:40",
-        "arrival_local": "2026-09-13T10:25",
-    }
+    assert found.leg == "YUL-LHR 18:40"
 
 
 async def test_the_window_asked_about_is_the_day_either_side() -> None:
@@ -192,7 +185,6 @@ async def test_the_airline_that_actually_flies_it_is_kept() -> None:
 
     assert found.marketing_carrier == "AC" and found.marketing_number == "871"
     assert found.operating_carrier == "LH" and found.operating_number == "479"
-    assert found.as_form()["operating_carrier"] == "LH"
 
 
 async def test_a_row_we_cannot_place_is_dropped_rather_than_raised_on() -> None:
