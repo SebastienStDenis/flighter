@@ -147,6 +147,7 @@ def create_app(settings: Settings) -> FastAPI:
         at=views.at,
         change_title=views.change_title,
         change_value=views.change_value,
+        clock=views.clock,
         dash=views.dash,
         day=views.day,
         duration=views.duration,
@@ -156,6 +157,7 @@ def create_app(settings: Settings) -> FastAPI:
         same_day=views.same_day,
         same_local_date=same_local_date,
         until=views.until,
+        zone=views.zone,
     )
 
     def page(request: Request, name: str, context: dict[str, Any], **kwargs: Any) -> Response:

@@ -29,6 +29,7 @@ from .phase import (
     DIVERTED,
     LANDED,
     TAXIING,
+    UPCOMING,
     Phase,
     airborne_window,
     arrival_estimate,
@@ -208,6 +209,21 @@ class FlightView:
     @property
     def phase(self) -> Phase:
         return compute_phase(self.booking, self.snapshot, datetime.now(UTC))
+
+    @property
+    def block_time(self) -> timedelta | None:
+        """Gate to gate as currently expected, for a flight that has yet to leave one.
+
+        The rule between the airports has nothing to measure until wheels up, so until
+        then it says how long the hop is. Once the flight is under way the aircraft's
+        place on the rule is the answer, and afterwards there is nothing left to expect.
+        """
+        if self.phase not in (UPCOMING, DAY_OF):
+            return None
+        arrival = self.arrival
+        if arrival is None or arrival <= self.departure:
+            return None
+        return arrival - self.departure
 
     @property
     def countdown(self) -> Countdown | None:
@@ -390,6 +406,27 @@ def at(instant: datetime | None, tz: str, *, with_date: bool = False) -> str:
     if instant is None:
         return MISSING
     return format_local(instant, tz, with_date=with_date)
+
+
+def clock(instant: datetime | None, tz: str, *, with_date: bool = False) -> str:
+    """`18:40`, or `Sat 12 Sep 18:40`: the time without its zone.
+
+    For the two places that set the zone beside it in their own type, or have just
+    shown it: the card's large time, and a struck time sitting next to the one that
+    replaced it at the same airport.
+    """
+    if instant is None:
+        return MISSING
+    fmt = "%a %-d %b %H:%M" if with_date else "%H:%M"
+    return to_local(instant, tz).strftime(fmt)
+
+
+def zone(instant: datetime | None, tz: str) -> str:
+    """`EDT`: the abbreviation `clock` left off, read at the same instant so that a
+    flight either side of a clock change carries the right one."""
+    if instant is None:
+        return ""
+    return to_local(instant, tz).strftime("%Z")
 
 
 def problem_notice(row: IngestLog) -> notices.Notice:

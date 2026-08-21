@@ -4,18 +4,26 @@
 {% endmacro %}
 
 {# The rule between two airports, with the aircraft at the fraction of the way it has
-   actually flown. The list and the flight page both draw it, so it is one piece. #}
+   actually flown. Until it leaves there is no fraction, so the rule carries how long
+   the hop is instead. The list and the flight page both draw it, so it is one piece. #}
 {% macro route_line(v) %}
 {% set progress = v.progress_percent %}
 {% set window = v.airborne_window %}
+{% set length = v.block_time %}
 <div class="route-line {{ 'text-live' if progress else 'text-muted-foreground/50' }}"
      style="--progress: {{ progress or 0 }}%"{% if window %} data-off="{{ window[0].isoformat() }}" data-on="{{ window[1].isoformat() }}"{% endif %}>
+  {% if length %}
+  <span class="route-mark left-1/2 bg-card px-1.5 font-mono text-[0.6875rem] whitespace-nowrap text-muted-foreground">
+    {{- duration(length) -}}
+  </span>
+  {% else %}
   <span class="route-mark rounded-full bg-card p-0.5" aria-hidden="true">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
       <path d="M22 12 13 7.5V2.8a1.3 1.3 0 0 0-2.6 0v4.7L1.4 12v1.7l9-2.6v4.2L7 17.7V19l4.7-1.1L16.4 19v-1.3l-3.4-2.4v-4.2l9 2.6z"
             transform="rotate(90 12 12)"/>
     </svg>
   </span>
+  {% endif %}
 </div>
 {% endmacro %}
 
@@ -39,30 +47,27 @@
 </div>
 {% endmacro %}
 
-{# The two ends of the flight, one row per fact: the city, the time each is now
-   expected, and where in the building. The pairs share rows, so the arrival's time sits
-   level with the departure's whatever else either side has to say. #}
+{# The two ends of the flight, one row per fact: the day and time each is now expected,
+   and where in the building. The pairs share rows, so the arrival's time sits level
+   with the departure's whatever else either side has to say. #}
 {% macro ends(v, s) %}
 {% set sides = [
-  {"airport": v.origin, "line": v.departs, "tz": v.origin_tz,
+  {"line": v.departs, "tz": v.origin_tz,
    "terminal": s.terminal_origin if s else none, "gate": s.gate_origin if s else none},
-  {"airport": v.dest, "line": v.arrives, "tz": v.dest_tz,
+  {"line": v.arrives, "tz": v.dest_tz,
    "terminal": s.terminal_destination if s else none, "gate": s.gate_destination if s else none},
 ] %}
 <div class="ends">
   {% for side in sides %}
-  <div class="text-sm font-medium">
-    {%- if side.airport and side.airport.city %}{{ side.airport.city }}{% endif -%}
-  </div>
-  {% endfor %}
-  {% for side in sides %}
-  <div class="mt-1.5 font-mono text-xl leading-tight font-bold {{ tone(side.line) or ('text-muted-foreground' if side.line.best is none) }}">
-    {{- at(side.line.best, side.tz) -}}
-  </div>
-  {% endfor %}
-  {% for side in sides %}
   <div class="font-mono text-xs text-muted-foreground">
     {%- if side.line.best is not none %}{{ day(side.line.best, side.tz) }}{% endif -%}
+  </div>
+  {% endfor %}
+  {% for side in sides %}
+  <div class="font-mono text-xl leading-tight font-bold {{ tone(side.line) or ('text-muted-foreground' if side.line.best is none) }}">
+    {{- clock(side.line.best, side.tz) -}}
+    {%- set abbr = zone(side.line.best, side.tz) -%}
+    {%- if abbr %}<span class="ml-1 text-[0.6875rem] font-medium text-muted-foreground">{{ abbr }}</span>{% endif -%}
   </div>
   {% endfor %}
   {% if v.departs.moved or v.arrives.moved %}
@@ -71,20 +76,28 @@
   {% endfor %}
   {% endif %}
   {% for side in sides %}
-  {{ where("Terminal", side.terminal, spaced=true) }}
-  {% endfor %}
-  {% for side in sides %}
-  {{ where("Gate", side.gate, "text-plan") }}
+  {{ building(side.terminal, side.gate) }}
   {% endfor %}
   <div></div>
-  {{ where("Baggage", s.baggage_claim if s else none) }}
+  {{ where("Bags", s.baggage_claim if s else none) }}
+</div>
+{% endmacro %}
+
+{# Terminal and gate on one line, `T1 · B22`. The gate is the one a person walks to, so
+   it keeps its colour and weight; the terminal is the building it is in. #}
+{% macro building(terminal, gate) %}
+<div class="mt-1.5 font-mono font-medium">
+  {%- if terminal %}T{{ terminal }}{% endif -%}
+  {%- if terminal and gate %}<span class="text-muted-foreground"> &middot; </span>{% endif -%}
+  {%- if gate %}<span class="font-semibold text-plan">{{ gate }}</span>{% endif -%}
+  {%- if not terminal and not gate %}<span class="text-muted-foreground">{{ missing }}</span>{% endif -%}
 </div>
 {% endmacro %}
 
 {# A place in the building, on one line. The label stays when the value is a dash. #}
-{% macro where(name, value, tone="", spaced=false) %}
+{% macro where(name, value, tone="") %}
 {% set shown = dash(value) %}
-<div{% if spaced %} class="mt-1.5"{% endif %}>
+<div>
   <span class="text-muted-foreground">{{ name }}</span>
   <span class="font-mono font-medium {{ tone if shown != missing else 'text-muted-foreground' }}">
     {{- shown -}}
@@ -169,10 +182,11 @@
 {%- endmacro %}
 
 {# What a time was before it moved. It names its day only when the move crossed
-   midnight, because then the bare time would read as the wrong side of it. #}
+   midnight, because then the bare time would read as the wrong side of it, and never
+   its zone, because the time that replaced it is read at the same airport. #}
 {% macro was(line, tz) -%}
 <s class="font-normal text-muted-foreground">
-  {{- at(line.scheduled, tz, with_date=not same_local_date(line.scheduled, line.best, tz)) -}}
+  {{- clock(line.scheduled, tz, with_date=not same_local_date(line.scheduled, line.best, tz)) -}}
 </s>
 {%- endmacro %}
 

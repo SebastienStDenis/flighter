@@ -31,7 +31,7 @@ from flighter.db import get_session
 from flighter.lookup import Candidate
 from flighter.models import KV, Airport, Booking, FlightEvent, FlightSnapshot, IngestLog
 from flighter.notify import Notifier
-from flighter.timezones import format_local
+from flighter.timezones import format_local, to_local
 from flighter.widget import LAST_SEEN_KEY
 
 NOW = datetime.now(UTC)
@@ -477,8 +477,7 @@ def test_a_flight_with_nothing_known_yet_still_renders(
     assert "YUL" in body and "LHR" in body
     assert "Montreal" in body and "London" in body
     # Every fact keeps its row and reads as a plain dash rather than disappearing.
-    for label in ("Departure", "Arrival", "Gate", "Terminal", "Baggage"):
-        assert label in body
+    assert "Bags" in body
     assert body.count(">-<") >= 6
     # Departure is the next thing to happen, and it is already on the card.
     assert "Departs in" in body
@@ -549,16 +548,27 @@ def test_the_card_names_one_runway_moment_at_a_time(
 
 
 def struck(was: datetime, tz: str, *, with_date: bool = False) -> str:
-    """The time a flight was booked for, as it is drawn once that time has moved."""
+    """The time a flight was booked for, as it is drawn once that time has moved: no
+    zone, because the time that replaced it is read at the same airport."""
+    local = to_local(was, tz)
+    shown = local.strftime("%a %-d %b %H:%M" if with_date else "%H:%M")
+    return f'<s class="font-normal text-muted-foreground">{shown}</s>'
+
+
+def big_time(instant: datetime, tz: str, tone: str = "") -> str:
+    """The card's large time: the clock in its tone, the zone small and grey beside it."""
+    local = to_local(instant, tz)
     return (
-        '<s class="font-normal text-muted-foreground">'
-        f"{format_local(was, tz, with_date=with_date)}</s>"
+        f'{tone}">{local:%H:%M}'
+        f'<span class="ml-1 text-[0.6875rem] font-medium text-muted-foreground">{local:%Z}</span>'
     )
 
 
 def moved_time(was: datetime, now: datetime, tz: str, tone: str) -> str:
     """A time that moved, as one line draws it: the original struck, the new one coloured."""
-    return f'{struck(was, tz)} <span class="{tone}">{format_local(now, tz)}</span>'
+    crossed_midnight = to_local(was, tz).date() != to_local(now, tz).date()
+    struck_was = struck(was, tz, with_date=crossed_midnight)
+    return f'{struck_was} <span class="{tone}">{format_local(now, tz)}</span>'
 
 
 def test_a_delay_is_shown_against_what_was_booked(
@@ -567,7 +577,7 @@ def test_a_delay_is_shown_against_what_was_booked(
     late = DEPARTURE + timedelta(minutes=40)
     show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=late))
     body = client.get("/f/1").text
-    assert f'text-stop">{format_local(late, "America/Toronto")}' in body
+    assert big_time(late, "America/Toronto", "text-stop") in body
     assert struck(DEPARTURE, "America/Toronto") in body
     # The struck time and the colour say it; no words repeat it.
     assert "late " not in body and "early " not in body
@@ -579,7 +589,7 @@ def test_a_time_brought_forward_is_green(
     earlier = DEPARTURE - timedelta(minutes=20)
     show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=earlier))
     body = client.get("/f/1").text
-    assert f'text-ok">{format_local(earlier, "America/Toronto")}' in body
+    assert big_time(earlier, "America/Toronto", "text-ok") in body
     assert struck(DEPARTURE, "America/Toronto") in body
 
 
@@ -613,9 +623,76 @@ def test_a_delay_past_midnight_keeps_the_day_it_was_booked_for(
 
     body = client.get("/f/1").text
     assert struck(booked, "America/Toronto", with_date=True) in body
-    assert "Sat 12 Sep 23:50 EDT" in body
-    assert 'text-stop">00:30 EDT' in body
+    assert "Sat 12 Sep 23:50" in body
+    assert "23:50 EDT" not in body
+    assert big_time(slipped, "America/Toronto", "text-stop") in body
     assert "Sun 13 Sep" in body
+
+
+def top_card(body: str) -> str:
+    """The flight card's route and times, before its footer."""
+    start = body.index('<div class="card">')
+    return body[start : body.index("</section>", start)]
+
+
+def day_of(instant: datetime, tz: str) -> str:
+    return to_local(instant, tz).strftime("%a %-d %b")
+
+
+def test_the_card_leads_with_the_city_over_the_code_and_the_day_over_the_time(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    show(monkeypatch, booking(), empty_snapshot())
+    card = top_card(client.get("/f/1").text)
+    assert re.search(r"Montreal</div>\s*<div[^>]*>YUL</div>", card)
+    assert re.search(r"London</div>\s*<div[^>]*>LHR</div>", card)
+    assert "Departure" not in card and "Arrival" not in card
+    # The day is read before the time, the way a ticket states it.
+    ends = card[card.index('class="ends"') :]
+    departs = big_time(DEPARTURE, "America/Toronto")
+    assert ends.index(day_of(DEPARTURE, "America/Toronto")) < ends.index(departs)
+
+
+def test_terminal_and_gate_share_a_line_and_the_gate_keeps_its_colour(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    show(monkeypatch, booking(), full_snapshot())
+    card = top_card(client.get("/f/1").text)
+    middot = '<span class="text-muted-foreground"> &middot; </span>'
+    assert f'T3{middot}<span class="font-semibold text-plan">B27</span>' in card
+    assert f'T2{middot}<span class="font-semibold text-plan">A14</span>' in card
+    assert "Terminal" not in card and "Gate" not in card
+    assert 'Bags</span>\n  <span class="font-mono font-medium ">7</span>' in card
+
+
+def test_half_a_place_is_shown_without_a_dot_and_none_of_it_is_a_dash(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    show(monkeypatch, booking(), replace_snapshot(terminal_origin="3", gate_destination="A14"))
+    card = top_card(client.get("/f/1").text)
+    assert ">T3</div>" in card
+    assert '><span class="font-semibold text-plan">A14</span></div>' in card
+    assert "&middot;" not in card
+
+    show(monkeypatch, booking(), empty_snapshot())
+    card = top_card(client.get("/f/1").text)
+    assert card.count('<span class="text-muted-foreground">-</span></div>') == 2
+
+
+def test_the_rule_says_how_long_the_hop_is_until_there_is_something_to_measure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    show(monkeypatch, booking(), None)
+    for path in ("/", "/f/1"):
+        body = client.get(path).text
+        assert ">7h 00m</span>" in body
+        assert "<svg" not in top_card(body) if path == "/f/1" else True
+
+    show(monkeypatch, booking(), full_snapshot())
+    for path in ("/", "/f/1"):
+        body = client.get(path).text
+        assert "7h 00m" not in body and "6h 45m" not in body
+        assert 'class="route-mark rounded-full' in body
 
 
 def test_the_lead_card_strikes_a_time_that_slipped_and_leaves_one_that_held(

@@ -15,14 +15,18 @@
     <div class="card-action">{{ m.badge(v.status) }}</div>
   </header>
   <section>
-    <div class="grid grid-cols-2 gap-4 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
-      <div>Departure</div>
-      <div class="text-right">Arrival</div>
-    </div>
-    <div class="route mt-1">
-      <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.origin_iata }}</div>
-      {{ m.route_line(v) }}
-      <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.dest_iata }}</div>
+    {# The ends of the row are two lines tall, so the rule is pulled up to the middle of
+       the code rather than the middle of the pair. #}
+    <div class="route items-end">
+      <div>
+        <div class="text-xs text-muted-foreground">{{ v.origin.city if v.origin }}</div>
+        <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.origin_iata }}</div>
+      </div>
+      <div class="mb-4">{{ m.route_line(v) }}</div>
+      <div class="text-right">
+        <div class="text-xs text-muted-foreground">{{ v.dest.city if v.dest }}</div>
+        <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.dest_iata }}</div>
+      </div>
     </div>
     <div class="mt-1">{{ m.ends(v, s) }}</div>
     {% if v.cancelled %}
