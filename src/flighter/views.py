@@ -308,6 +308,10 @@ class FlightView:
         )
 
     @property
+    def at_the_gate(self) -> bool:
+        return at_the_gate(self.phase, self.booking, self.snapshot, datetime.now(UTC))
+
+    @property
     def watched(self) -> bool:
         """Whether there is anything on the flight to watch yet.
 
@@ -401,6 +405,26 @@ def status(
         if word is not None:
             return Status(word, "plan")
     return Status("Scheduled", "quiet")
+
+
+def at_the_gate(
+    phase: Phase, booking: Booking, snapshot: FlightSnapshot | None, now: datetime
+) -> bool:
+    """Whether the aircraft is parked, as far as anyone can tell.
+
+    On-blocks is the one event the feed confirms unreliably: wheels down comes off the
+    radar, but the gate needs a word from the airline or the airport that often comes
+    late or never, and the poller stops asking ninety minutes after the landing. So a
+    landed flight whose gate time has come and gone counts as parked rather than left
+    taxiing for a confirmation that may not arrive. With no gate time at all there is
+    nothing to wait for, and it is parked too.
+    """
+    if phase != LANDED:
+        return False
+    if snapshot is not None and snapshot.actual_in is not None:
+        return True
+    expected = arrival_estimate(booking, snapshot)
+    return expected is None or expected <= now
 
 
 def day_word(instant: datetime, now: datetime, tz: str) -> str | None:

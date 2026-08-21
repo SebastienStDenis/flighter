@@ -173,12 +173,13 @@ def test_airborne_counts_down_to_landing_and_shows_progress(settings: Settings) 
     assert flight["status_tone"] == "warn"
 
 
-def test_landed_shows_the_carousel_and_counts_to_the_gate(settings: Settings) -> None:
+def test_landed_keeps_the_gate_while_it_counts_to_it(settings: Settings) -> None:
     landed = snapshot(
         actual_off=DEPARTURE,
         actual_on=ARRIVAL - timedelta(minutes=10),
         estimated_in=ARRIVAL,
         baggage_claim="7",
+        gate_destination="12",
         terminal_destination="B",
         gate_origin="B22",
         progress_percent=100,
@@ -187,7 +188,7 @@ def test_landed_shows_the_carousel_and_counts_to_the_gate(settings: Settings) ->
     assert flight["phase"] == "landed"
     assert flight["status_label"] == "Landed"
     assert flight["status_tone"] == "ok"
-    assert flight["subtitle"] == "Bag claim 7 · Terminal B"
+    assert flight["subtitle"] == "Gate 12 · Terminal B"
     assert flight["milestone_label"] == "At the gate in"
     assert flight["milestone_to"] == "2026-09-12T22:15:00Z"
     # A landed flight must never show the departure gate it left hours ago.
@@ -195,11 +196,39 @@ def test_landed_shows_the_carousel_and_counts_to_the_gate(settings: Settings) ->
 
 
 def test_at_the_gate_there_is_nothing_left_to_count(settings: Settings) -> None:
-    done = snapshot(actual_off=DEPARTURE, actual_on=ARRIVAL, actual_in=ARRIVAL, baggage_claim="7")
+    done = snapshot(
+        actual_off=DEPARTURE,
+        actual_on=ARRIVAL,
+        actual_in=ARRIVAL,
+        baggage_claim="7",
+        gate_destination="12",
+        terminal_destination="B",
+    )
     flight = payload([(booking(), done)], settings)["flights"][0]
     assert flight["status_label"] == "Arrived"
+    assert flight["subtitle"] == "Bag claim 7 · Terminal B"
     assert flight["milestone_label"] is None
     assert flight["milestone_to"] is None
+
+
+def test_a_landed_flight_past_its_gate_time_is_sent_to_the_belt(settings: Settings) -> None:
+    """On-blocks often never comes through the feed; the clock decides instead."""
+    overdue = snapshot(
+        actual_off=DEPARTURE,
+        actual_on=ARRIVAL - timedelta(minutes=20),
+        estimated_in=ARRIVAL - timedelta(minutes=8),
+        baggage_claim="7",
+        gate_destination="12",
+    )
+    late = build_payload(
+        [(booking(), overdue)],
+        settings=settings,
+        now=ARRIVAL,
+        base_url="https://flights.example.com",
+    )
+    flight = late.model_dump(mode="json")["flights"][0]
+    assert flight["status_label"] == "Landed"
+    assert flight["subtitle"] == "Bag claim 7"
 
 
 def test_cancelled_has_nothing_to_count_to(settings: Settings) -> None:

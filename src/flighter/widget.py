@@ -335,7 +335,7 @@ def _flight(
             f"{booking.marketing_carrier}{booking.marketing_number}"
             f"  {booking.origin_iata} → {views.destination_iata(booking, snapshot)}"
         ),
-        subtitle=_subtitle(phase, booking, snapshot),
+        subtitle=_subtitle(phase, booking, snapshot, now),
         status_label=pill.label,
         status_tone=pill.tone,
         milestone_label=views.milestone_label(next_up, now) if next_up else None,
@@ -346,7 +346,9 @@ def _flight(
     )
 
 
-def _subtitle(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> str | None:
+def _subtitle(
+    phase: Phase, booking: Booking, snapshot: FlightSnapshot | None, now: datetime
+) -> str | None:
     """Gate, terminal or carousel, whichever is the one to walk towards now."""
     if phase == CANCELLED:
         return None
@@ -356,8 +358,12 @@ def _subtitle(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -
 
     parts: list[str] = []
     if phase == LANDED:
-        if snapshot and snapshot.baggage_claim:
-            parts.append(f"Bag claim {snapshot.baggage_claim}")
+        # The belt once parked; until then the gate, which is still where the walk ends.
+        if views.at_the_gate(phase, booking, snapshot, now):
+            if snapshot and snapshot.baggage_claim:
+                parts.append(f"Bag claim {snapshot.baggage_claim}")
+        elif snapshot and snapshot.gate_destination:
+            parts.append(f"Gate {snapshot.gate_destination}")
         if snapshot and snapshot.terminal_destination:
             parts.append(f"Terminal {snapshot.terminal_destination}")
         return " · ".join(parts) if parts else "Landed"
