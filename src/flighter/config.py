@@ -171,6 +171,11 @@ def ensure_widget_token() -> Settings:
     settings = get_settings()
     if settings.widget_token:
         return settings
+    return mint_widget_token()
+
+
+def mint_widget_token() -> Settings:
+    """A fresh token. Every phone has to connect again; that is one tap, so rotating is cheap."""
     return write_secrets({"widget_token": secrets.token_hex(32)})
 
 

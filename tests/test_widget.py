@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime, timedelta
@@ -22,7 +23,11 @@ from flighter.widget import (
     FlightRow,
     authorize,
     build_payload,
+    connect_url,
+    last_seen,
     read_degraded,
+    script_body,
+    script_source,
 )
 
 NOW = datetime(2026, 9, 12, 18, 0, tzinfo=UTC)
@@ -338,6 +343,20 @@ def test_the_breaker_outranks_staleness(settings: Settings) -> None:
 # --- auth -----------------------------------------------------------------------------
 
 
+class FakeSession:
+    """Enough of a session to prove the stamp: a KV table and nothing else."""
+
+    def __init__(self) -> None:
+        self.kv: dict[str, KV] = {}
+
+    async def merge(self, row: KV) -> KV:
+        self.kv[row.key] = row
+        return row
+
+    async def get(self, model: type, key: str) -> KV | None:
+        return self.kv.get(key)
+
+
 @pytest.fixture
 def client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     async def fake_rows(session: Any, now: datetime) -> list[FlightRow]:
@@ -349,14 +368,17 @@ def client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     monkeypatch.setattr(widget, "load_flight_rows", fake_rows)
     monkeypatch.setattr(widget, "read_degraded", fake_degraded)
 
+    session = FakeSession()
+
     async def fake_session() -> Any:
-        yield None
+        yield session
 
     app = FastAPI()
     app.include_router(widget.router)
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_session] = fake_session
     with TestClient(app) as test_client:
+        test_client.session = session  # type: ignore[attr-defined]
         yield test_client
 
 
@@ -385,6 +407,25 @@ def test_a_header_that_is_not_a_bearer_is_rejected(client: TestClient) -> None:
     assert response.status_code == 401
 
 
+def test_a_fetch_that_got_through_is_stamped(client: TestClient) -> None:
+    """The settings page's only evidence that a phone is talking to this server."""
+    session = client.session  # type: ignore[attr-defined]
+    assert asyncio.run(last_seen(session)) is None
+
+    client.get("/api/widget", headers={"Authorization": "Bearer test-token"})
+
+    seen = asyncio.run(last_seen(session))
+    assert seen is not None
+    assert seen.tzinfo is UTC
+    assert datetime.now(UTC) - seen < timedelta(seconds=5)
+
+
+def test_a_rejected_fetch_leaves_no_stamp(client: TestClient) -> None:
+    """A wrong token must look like silence, not like a phone that is connected."""
+    client.get("/api/widget", headers={"Authorization": "Bearer nope"})
+    assert asyncio.run(last_seen(client.session)) is None  # type: ignore[attr-defined]
+
+
 def test_an_unset_token_refuses_everyone(settings: Settings) -> None:
     """A blank token must never mean "no authentication"."""
     unset = settings.model_copy(update={"widget_token": ""})
@@ -396,6 +437,48 @@ def test_an_unset_token_refuses_everyone(settings: Settings) -> None:
 
     with pytest.raises(HTTPException):
         authorize(unset, None, "")
+
+
+# --- install -------------------------------------------------------------------------
+
+
+def test_the_connect_link_runs_the_script_with_the_address_and_the_token(
+    settings: Settings,
+) -> None:
+    assert connect_url(settings) == (
+        "scriptable:///run/Flights?api=https%3A%2F%2Fflights.example.com&token=test-token"
+    )
+
+
+def test_the_script_is_the_same_for_everyone(settings: Settings) -> None:
+    """Address and token travel by the Connect link, so the file never has to change."""
+    source = script_source()
+    assert "flights.example.com" not in source
+    assert settings.widget_token not in source
+    assert "args.queryParameters" in source
+    assert "Keychain.set" in source
+
+
+def test_the_bundle_installs_the_script_under_the_name_the_connect_link_runs(
+    client: TestClient,
+) -> None:
+    response = client.get("/widget/Flights.scriptable")
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == 'attachment; filename="Flights.scriptable"'
+    bundle = response.json()
+    assert bundle["name"] == "Flights"
+    assert bundle["icon"] == {"color": "deep-blue", "glyph": "plane-departure"}
+    assert "Keychain.set" in bundle["script"]
+
+
+def test_the_bundle_leaves_the_header_to_scriptable() -> None:
+    """The app writes its own icon header on import; a second one would sit under it."""
+    source = script_source()
+    assert source.startswith("// Variables used by Scriptable.")
+    body = script_body()
+    assert not body.startswith("// Variables used by Scriptable.")
+    assert body in source
+    assert "icon-glyph" not in body
 
 
 def test_airborne_countdown_targets_touchdown_not_the_gate(settings: Settings) -> None:
