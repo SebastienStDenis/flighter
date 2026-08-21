@@ -704,6 +704,11 @@ def test_terminal_and_gate_share_a_line_and_the_gate_keeps_its_colour(
     assert place("Term", "3") in card and place("Gate", "B27", "text-plan font-semibold") in card
     assert place("Term", "2") in card and place("Gate", "A14", "text-plan font-semibold") in card
     assert "Terminal" not in card
+    # The arrival side mirrors the departure side: the terminal on the outside, the
+    # gate beside it.
+    gate = "text-plan font-semibold"
+    assert card.index(place("Term", "3")) < card.index(place("Gate", "B27", gate))
+    assert card.index(place("Gate", "A14", gate)) < card.index(place("Term", "2"))
     # Bags is a box of the same kind, on the arrival side with the gate it comes after.
     assert place("Bags", "7") in card and card.count(">Bags</div>") == 1
 
