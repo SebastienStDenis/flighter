@@ -8,25 +8,6 @@
 
 <h1 class="sr-only">{{ v.flight_number }}, {{ v.booking.origin_iata }} to {{ v.booking.dest_iata }}</h1>
 
-{% if v.unchecked %}
-<div class="card mb-3" data-size="sm">
-  <header>
-    <h3>Does this look right?</h3>
-    <p>It was read out of an email we were not certain about, so nothing is being
-      tracked until you say.</p>
-  </header>
-  <footer class="grid grid-cols-2 gap-2 border-t">
-    <form class="col-span-2" method="post" action="/f/{{ id }}/keep">
-      <button class="btn w-full" type="submit">Looks right</button>
-    </form>
-    <a class="btn" data-variant="outline" href="/f/{{ id }}/edit">Fix details</a>
-    <form method="post" action="/f/{{ id }}/delete">
-      <button class="btn w-full" data-variant="destructive" type="submit">Not a flight</button>
-    </form>
-  </footer>
-</div>
-{% endif %}
-
 <div class="card">
   <header>
     <h2 class="font-mono tracking-tight">{{ v.flight_number }}</h2>
@@ -76,13 +57,21 @@
   {% endif %}
 </div>
 
+{# The one card a person can write on. Each row opens the same dialog on its own box:
+   what the ticket says is theirs to correct, and nothing else on the page is. #}
 <div class="card mt-3" data-size="sm">
-  <header><h3>Booking</h3></header>
+  <header>
+    <h3>On the ticket</h3>
+    <div class="card-action">
+      <button class="btn" data-variant="ghost" data-size="sm" type="button"
+              onclick="editTicket('confirmation_code')">Edit</button>
+    </div>
+  </header>
   <section>
     <div class="item-group -mx-2.5">
-      {{ m.fact("Confirmation", dash(v.booking.confirmation_code), mono=true) }}
-      {{ m.fact("Seat", dash(v.booking.seat), mono=true) }}
-      {% if v.booking.notes %}{{ m.fact("Notes", v.booking.notes) }}{% endif %}
+      {{ m.editable("Confirmation", dash(v.booking.confirmation_code), "confirmation_code", mono=true) }}
+      {{ m.editable("Seat", dash(v.booking.seat), "seat", mono=true) }}
+      {{ m.editable("Notes", dash(v.booking.notes), "notes") }}
       {% if v.calendar_link %}
       <div class="item" data-size="xs">
         <section><p>Calendar</p></section>
@@ -130,6 +119,48 @@
   </section>
 </div>
 
+{% set ticket_footer %}
+<button class="btn" type="submit" form="ticket-form">Save</button>
+<button class="btn" data-variant="outline" type="button"
+        onclick="this.closest('dialog').close()">Cancel</button>
+{% endset %}
+{% call bc.dialog(
+     id='ticket',
+     title='On the ticket',
+     description='The flight itself is the airline\'s to state. If it is the wrong one, stop tracking it and add the right number.',
+     footer=ticket_footer,
+     close_button=false) %}
+<form id="ticket-form" method="post" action="/f/{{ id }}/ticket">
+  <fieldset class="fieldset gap-4">
+    <div class="grid grid-cols-2 gap-3">
+      <div role="group" class="field">
+        <label for="confirmation_code">Confirmation</label>
+        <input class="font-mono uppercase" type="text" id="confirmation_code"
+               name="confirmation_code" maxlength="12" autocapitalize="characters"
+               autocomplete="off" value="{{ v.booking.confirmation_code or '' }}">
+      </div>
+      <div role="group" class="field">
+        <label for="seat">Seat</label>
+        <input class="font-mono uppercase" type="text" id="seat" name="seat" maxlength="6"
+               autocapitalize="characters" autocomplete="off"
+               value="{{ v.booking.seat or '' }}">
+      </div>
+    </div>
+    <div role="group" class="field">
+      <label for="notes">Notes</label>
+      <textarea id="notes" name="notes" rows="3">{{ v.booking.notes or '' }}</textarea>
+    </div>
+  </fieldset>
+</form>
+{% endcall %}
+<script>
+  function editTicket(name) {
+    var dialog = document.getElementById("ticket");
+    dialog.showModal();
+    dialog.querySelector("[name=" + name + "]").focus();
+  }
+</script>
+
 {% set stop_footer %}
 <form method="post" action="/f/{{ id }}/delete">
   <button class="btn" data-variant="destructive" type="submit">Stop tracking</button>
@@ -144,9 +175,8 @@
      footer=stop_footer,
      close_button=false) }}
 
-<div class="action-bar flex gap-2">
-  <a class="btn flex-1" data-size="lg" href="/f/{{ id }}/edit">Edit</a>
-  <button class="btn" data-variant="ghost" data-size="lg" type="button"
+<div class="action-bar">
+  <button class="btn w-full" data-variant="outline" data-size="lg" type="button"
           onclick="document.getElementById('stop-tracking').showModal()">Stop tracking</button>
 </div>
 

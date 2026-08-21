@@ -15,13 +15,14 @@ from typing import Any
 
 import httpx
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from flighter import lookup, web
 from flighter.aeroapi import AeroAPIClient, TokenBucket
 from flighter.config import Settings
 from flighter.db import session_scope
-from flighter.models import Airport
+from flighter.models import Airport, Booking
 
 # Far enough out to be inside the published window whenever this runs.
 DAY = (datetime.now(UTC) + timedelta(days=30)).date()
@@ -96,6 +97,8 @@ async def test_looking_a_flight_up_holds_no_transaction_across_flightaware(
         )
 
     assert response.status_code == 303
-    location = response.headers["location"]
-    assert location.startswith("/f/new/details?")
-    assert "origin_iata=YUL" in location and "dest_iata=LHR" in location
+    async with database() as session:
+        booking = await session.scalar(select(Booking))
+    assert booking is not None
+    assert response.headers["location"] == f"/f/{booking.id}"
+    assert (booking.origin_iata, booking.dest_iata) == ("YUL", "LHR")

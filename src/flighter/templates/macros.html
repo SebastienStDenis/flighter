@@ -122,14 +122,16 @@
 </a>
 {% endmacro %}
 
-{# A row of the fact list. The label always says what it is; a missing value is a dash. #}
-{% macro fact(name, value, mono=false) %}
-<div class="item" data-size="xs">
+{# A fact a person may change. The row is the control: tapping it opens the ticket
+   dialog on that box, so there is nothing to find and nothing to miss. #}
+{% macro editable(name, value, field, mono=false) %}
+<button class="item w-full text-left" data-size="xs" type="button"
+        onclick="editTicket('{{ field }}')" aria-label="Change {{ name|lower }}">
   <section><p>{{ name }}</p></section>
   <aside class="text-right {{ 'font-mono ' if mono }}{{ 'text-muted-foreground' if value == missing else 'font-medium' }}">
     {{- value -}}
   </aside>
-</div>
+</button>
 {% endmacro %}
 
 {# A time that has resolved through scheduled -> estimated -> actual, on one line. The

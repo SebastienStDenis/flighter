@@ -185,15 +185,9 @@ async def test_an_import_links_to_the_flight_page(settings: Settings) -> None:
     assert sent["priority"] == "0"
 
 
-@pytest.mark.parametrize(
-    ("outcome", "title"),
-    [("review", "Flight needs review"), ("duplicate", "Already tracked")],
-)
-async def test_every_import_outcome_has_its_own_words(
-    settings: Settings, outcome: str, title: str
-) -> None:
-    sent = await imported(settings, outcome)
-    assert sent["title"] == title
+async def test_a_duplicate_import_says_nothing_was_added(settings: Settings) -> None:
+    sent = await imported(settings, "duplicate")
+    assert sent["title"] == "Already tracked"
     assert "DL1234 JFK -> LAX" in sent["message"]
 
 
