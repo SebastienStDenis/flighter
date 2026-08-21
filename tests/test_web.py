@@ -311,7 +311,7 @@ def test_the_problems_page_says_which_email_was_set_aside_and_why(client: TestCl
 
     body = client.get("/problems").text
 
-    assert "Nothing added from Your booking is confirmed" in body
+    assert "<strong>Your booking is confirmed</strong>" in body
     assert "the model timed out" in body
     assert "Try again" in body
     assert "Ignore" in body
@@ -323,7 +323,7 @@ def test_a_set_aside_email_is_kept_off_the_board(client: TestClient) -> None:
     """The board is read in a hurry for a gate; an email that would not parse is not
     news about any flight on it."""
     client.session.rows["IngestLog"] = [set_aside_row()]  # type: ignore[attr-defined]
-    assert "Nothing added from" not in client.get("/").text
+    assert "Your booking is confirmed" not in client.get("/").text
 
 
 def test_the_problems_tab_is_marked_only_while_something_is_waiting(client: TestClient) -> None:
