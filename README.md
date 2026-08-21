@@ -80,10 +80,10 @@ flight: anything asked earlier is a result set spent on an empty list. From ther
 interval tightens as departure approaches, and stops once the flight is on the ground and
 its bag belt is known.
 
-**The widget countdown is a real timer.** It is drawn with Scriptable's `applyTimerStyle`,
-so it ticks continuously, offline, without the widget refreshing. A countdown rendered as
-a pre-computed string is wrong within a minute of being drawn, which is worse than
-useless in an airport.
+**The widget is the board in miniature.** It draws the same status pill and the same
+next milestone the web UI does, in the web UI's colours, light or dark. The only thing it
+works out for itself is the figure beside the milestone, from the phone's clock, in whole
+days, hours and minutes, and never seconds.
 
 **Everything is configured in the app.** There is no file to fill in before first boot.
 You start the container, open `/settings`, and type your Apple ID, your FlightAware key

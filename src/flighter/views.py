@@ -2,8 +2,8 @@
 
 A template asks a view for a value rather than reaching into a snapshot, so "actual
 beats estimated beats scheduled" is decided once, in `phase`, instead of once per page.
-The widget reads the same countdown and the same ranking from here, which is what keeps
-the lock screen and the board naming the same flight.
+The widget reads the same status, the same milestone and the same ranking from here,
+which is what keeps the lock screen and the board saying the same thing about a flight.
 """
 
 from __future__ import annotations
@@ -132,17 +132,11 @@ class FlightView:
 
     @property
     def scheduled_departure(self) -> datetime:
-        snap = self.snapshot
-        if snap is not None and snap.scheduled_out is not None:
-            return snap.scheduled_out
-        return self.booking.scheduled_departure_utc
+        return scheduled_departure(self.booking, self.snapshot)
 
     @property
     def scheduled_arrival(self) -> datetime | None:
-        snap = self.snapshot
-        if snap is not None and snap.scheduled_in is not None:
-            return snap.scheduled_in
-        return self.booking.scheduled_arrival_utc
+        return scheduled_arrival(self.booking, self.snapshot)
 
     @property
     def departure(self) -> datetime:
@@ -263,36 +257,7 @@ class FlightView:
 
     @property
     def status(self) -> Status:
-        snap = self.snapshot
-        if self.cancelled:
-            # FlightAware's flag means "no longer tracked", so the badge asks rather
-            # than asserts and the flight page carries the sentence that explains it.
-            return Status("Maybe cancelled", "stop")
-        if snap is not None and snap.diverted:
-            return Status("Diverted", "stop")
-        phase = self.phase
-        if phase == LANDED:
-            return Status("Landed", "ok")
-        if phase == AIRBORNE:
-            # A late pushback is history once the aircraft is off the ground; the only
-            # question left is whether it still gets in late.
-            late = self.arrival_delay
-            if late is not None and late >= ARRIVAL_DELAY_THRESHOLD:
-                return Status("Arriving late", "warn")
-            return Status("In the air", "live")
-        if self.booking.status == BookingStatus.COMPLETED:
-            return Status("Flown", "quiet")
-        if phase == TAXIING:
-            return Status("Taxiing", "live")
-        if self.delay >= DEPARTURE_DELAY_THRESHOLD:
-            return Status("Departure delayed", "warn")
-        # Only a feed that has actually restated the departure can say it is on time;
-        # a booking on its own is just a plan.
-        if snap is not None and (snap.estimated_out or snap.scheduled_out):
-            return Status("On time", "ok")
-        if phase == DAY_OF:
-            return Status("Today", "plan")
-        return Status("Scheduled", "quiet")
+        return status(self.phase, self.booking, self.snapshot)
 
     @property
     def ended(self) -> datetime:
@@ -307,6 +272,54 @@ class FlightView:
         # Nothing anywhere says when it lands, so assume the longest plausible hop
         # rather than pinning a departed flight to the top of the list forever.
         return self.departure + timedelta(hours=3)
+
+
+def scheduled_departure(booking: Booking, snapshot: FlightSnapshot | None) -> datetime:
+    """The planned gate departure: the feed's schedule once it has one, else the ticket's."""
+    if snapshot is not None and snapshot.scheduled_out is not None:
+        return snapshot.scheduled_out
+    return booking.scheduled_departure_utc
+
+
+def scheduled_arrival(booking: Booking, snapshot: FlightSnapshot | None) -> datetime | None:
+    if snapshot is not None and snapshot.scheduled_in is not None:
+        return snapshot.scheduled_in
+    return booking.scheduled_arrival_utc
+
+
+def status(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> Status:
+    """The pill: where the flight stands, as a word and the tone it is drawn in."""
+    if phase == CANCELLED:
+        # FlightAware's flag means "no longer tracked", so the badge asks rather than
+        # asserts and the flight page carries the sentence that explains it.
+        return Status("Maybe cancelled", "stop")
+    if phase == DIVERTED:
+        return Status("Diverted", "stop")
+    if phase == LANDED:
+        return Status("Landed", "ok")
+    if phase == AIRBORNE:
+        # A late pushback is history once the aircraft is off the ground; the only
+        # question left is whether it still gets in late.
+        scheduled = scheduled_arrival(booking, snapshot)
+        expected = arrival_estimate(booking, snapshot)
+        late = expected - scheduled if scheduled is not None and expected is not None else None
+        if late is not None and late >= ARRIVAL_DELAY_THRESHOLD:
+            return Status("Arriving late", "warn")
+        return Status("In the air", "live")
+    if booking.status == BookingStatus.COMPLETED:
+        return Status("Flown", "quiet")
+    if phase == TAXIING:
+        return Status("Taxiing", "live")
+    delay = departure_estimate(booking, snapshot) - scheduled_departure(booking, snapshot)
+    if delay >= DEPARTURE_DELAY_THRESHOLD:
+        return Status("Departure delayed", "warn")
+    # Only a feed that has actually restated the departure can say it is on time; a
+    # booking on its own is just a plan.
+    if snapshot is not None and (snapshot.estimated_out or snapshot.scheduled_out):
+        return Status("On time", "ok")
+    if phase == DAY_OF:
+        return Status("Today", "plan")
+    return Status("Scheduled", "quiet")
 
 
 def milestone(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> Milestone | None:
@@ -332,21 +345,6 @@ def milestone(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -
         if target is not None:
             return Milestone(label, target)
     return None
-
-
-def countdown(
-    phase: Phase, booking: Booking, snapshot: FlightSnapshot | None
-) -> tuple[str | None, datetime | None]:
-    """The one instant the lock screen counts to, and what to call it."""
-    if phase in (AIRBORNE, DIVERTED):
-        # Wheels down, not the gate: this is the number someone stares at from a seat,
-        # and taxiing is not part of what they are counting.
-        landing = landing_estimate(booking, snapshot)
-        return ("Lands in", landing) if landing is not None else (None, None)
-    # Nothing upstream predicts how long a taxi takes, so the honest answer is no number.
-    if phase in (TAXIING, LANDED, CANCELLED):
-        return None, None
-    return "Departs in", departure_estimate(booking, snapshot)
 
 
 def phase_rank(phase: Phase) -> int:
