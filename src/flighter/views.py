@@ -299,7 +299,13 @@ class FlightView:
 
     @property
     def status(self) -> Status:
-        return status(self.phase, self.booking, self.snapshot)
+        return status(
+            self.phase,
+            self.booking,
+            self.snapshot,
+            now=datetime.now(UTC),
+            origin_tz=self.origin_tz,
+        )
 
     @property
     def watched(self) -> bool:
@@ -348,8 +354,19 @@ def scheduled_arrival(booking: Booking, snapshot: FlightSnapshot | None) -> date
     return booking.scheduled_arrival_utc
 
 
-def status(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> Status:
-    """The pill: where the flight stands, as a word and the tone it is drawn in."""
+def status(
+    phase: Phase,
+    booking: Booking,
+    snapshot: FlightSnapshot | None,
+    *,
+    now: datetime,
+    origin_tz: str,
+) -> Status:
+    """The pill: where the flight stands, as a word and the tone it is drawn in.
+
+    `now` and `origin_tz` serve the one word that names a day: a flight inside its
+    24-hour window is "Today" or "Tomorrow" by the clock at the airport it leaves from.
+    """
     if phase == CANCELLED:
         return Status("Cancelled", "stop")
     if phase == DIVERTED:
@@ -380,8 +397,26 @@ def status(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> S
     if snapshot is not None and (snapshot.estimated_out or snapshot.scheduled_out):
         return Status("On time", "ok")
     if phase == DAY_OF:
-        return Status("Today", "plan")
+        word = day_word(departure_estimate(booking, snapshot), now, origin_tz)
+        if word is not None:
+            return Status(word, "plan")
     return Status("Scheduled", "quiet")
+
+
+def day_word(instant: datetime, now: datetime, tz: str) -> str | None:
+    """The day the flight leaves, as the calendar at `tz` has it, else nothing.
+
+    The day-of window is a rolling twenty-four hours, so a morning flight enters it the
+    morning before. The pill still names a day, so it takes the day from the airport's
+    own date rather than from the width of the window. A departure already behind the
+    clock with no word from the feed is inside the window too, and gets no day at all.
+    """
+    ahead = (to_local(instant, tz).date() - to_local(now, tz).date()).days
+    if ahead == 0:
+        return "Today"
+    if ahead == 1:
+        return "Tomorrow"
+    return None
 
 
 def milestone(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> Milestone | None:
