@@ -93,7 +93,7 @@
    carrier nobody has drawn falls back to a plain tail. #}
 {% macro logo(carrier, size="size-6") %}
 <img class="{{ size }} shrink-0 p-0.5" alt=""
-     src="https://www.gstatic.com/flights/airline_logos/70px/{{ carrier }}.png"
+     src="{{ logo_url(carrier) }}"
      width="24" height="24" loading="lazy" decoding="async">
 {% endmacro %}
 

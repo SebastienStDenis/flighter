@@ -84,11 +84,11 @@ def test_upcoming_flight(settings: Settings) -> None:
         "phase": "upcoming",
         "title": "DL1234  JFK → LAX",
         "subtitle": None,
+        "logo_url": "https://www.gstatic.com/flights/airline_logos/70px/DL.png",
         "status_label": "Scheduled",
         "status_tone": "quiet",
         "milestone_label": "Scheduled",
         "milestone_to": "2026-09-18T18:00:00Z",
-        "progress_percent": None,
     }
 
 
@@ -151,7 +151,7 @@ def test_taxiing_counts_to_the_landing_and_does_not_name_the_gate_it_left(
     assert flight["subtitle"] is None
 
 
-def test_airborne_counts_down_to_landing_and_shows_progress(settings: Settings) -> None:
+def test_airborne_counts_down_to_landing(settings: Settings) -> None:
     flying = snapshot(
         scheduled_out=DEPARTURE - timedelta(hours=2),
         actual_out=DEPARTURE - timedelta(hours=2),
@@ -166,8 +166,6 @@ def test_airborne_counts_down_to_landing_and_shows_progress(settings: Settings) 
     assert flight["phase"] == "airborne"
     assert flight["milestone_label"] == "Lands in"
     assert flight["milestone_to"] == "2026-09-12T22:40:00Z"
-    # Eighty minutes into a six-hour span by the clock, whatever the last poll said.
-    assert flight["progress_percent"] == 22
     assert flight["subtitle"] == "Gate 12 · Terminal B"
     assert flight["status_label"] == "Arriving late"
     assert flight["status_tone"] == "warn"
@@ -190,8 +188,6 @@ def test_landed_shows_the_carousel_and_counts_to_the_gate(settings: Settings) ->
     assert flight["subtitle"] == "Bag claim 7 · Terminal B"
     assert flight["milestone_label"] == "At the gate in"
     assert flight["milestone_to"] == "2026-09-12T22:15:00Z"
-    # A landed flight must never show the departure gate it left hours ago.
-    assert flight["progress_percent"] is None
 
 
 def test_at_the_gate_there_is_nothing_left_to_count(settings: Settings) -> None:

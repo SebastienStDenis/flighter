@@ -1,10 +1,11 @@
 """The phone widget's only endpoint: every display decision, already made.
 
-The Scriptable script on the phone is deliberately stupid. It draws strings and colours
-one of them by a tone it is told; it does not know what a diversion is or which gate
-belongs to which end of the flight. The status pill and the milestone are the web UI's
-own, read from the same functions, so the lock screen and the board never disagree.
-Everything that could be got wrong is got wrong here, once, where it is covered by tests.
+The Scriptable script on the phone is deliberately stupid. It draws strings, colours
+one of them by a tone it is told, and fetches one picture from an address it is handed;
+it does not know what a diversion is or which gate belongs to which end of the flight.
+The status pill and the milestone are the web UI's own, read from the same functions, so
+the lock screen and the board never disagree. Everything that could be got wrong is got
+wrong here, once, where it is covered by tests.
 
 Two rules hold the contract together. Every instant is ISO-8601 UTC with a `Z`, because
 the phone measures it against its own clock and a missing zone silently shifts the
@@ -46,7 +47,6 @@ from .phase import (
     Phase,
     compute_phase,
     departure_estimate,
-    progress_estimate,
 )
 from .timezones import FALLBACK_TZ
 
@@ -100,11 +100,11 @@ class WidgetFlight(BaseModel):
     phase: Phase
     title: str
     subtitle: str | None
+    logo_url: str
     status_label: str
     status_tone: str
     milestone_label: str | None
     milestone_to: UtcInstant | None
-    progress_percent: int | None
 
 
 class WidgetPayload(BaseModel):
@@ -336,13 +336,11 @@ def _flight(
             f"  {booking.origin_iata} → {views.destination_iata(booking, snapshot)}"
         ),
         subtitle=_subtitle(phase, booking, snapshot),
+        logo_url=views.logo_url(booking.marketing_carrier),
         status_label=pill.label,
         status_tone=pill.tone,
         milestone_label=views.milestone_label(next_up, now) if next_up else None,
         milestone_to=next_up.target if next_up else None,
-        # Only while airborne: the feed reports 0 on the ground and 100 after landing,
-        # either of which draws a bar that says nothing.
-        progress_percent=progress_estimate(booking, snapshot, now) if phase == AIRBORNE else None,
     )
 
 

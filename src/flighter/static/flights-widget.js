@@ -5,11 +5,12 @@
 // Flight tracker widget.
 //
 // The server decides everything: which flights, in what order, what the pill says and
-// in which tone, what the next milestone is and the instant it is expected. This file
-// draws that and nothing else. The one thing it works out for itself is the figure
-// beside the milestone, because that depends on the phone's clock. It is built from the
-// same units the web page uses: whole days once a day or more away, hours and minutes
-// inside that, never seconds, and "ago" once the instant has gone by.
+// in which tone, what the next milestone is and the instant it is expected, and where
+// the airline's mark is to be fetched from. This file draws that and nothing else. The
+// one thing it works out for itself is the figure beside the milestone, because that
+// depends on the phone's clock. It is built from the same units the web page uses: whole
+// days once a day or more away, hours and minutes inside that, never seconds, and "ago"
+// once the instant has gone by.
 //
 // The figure is a string, so it is only as fresh as the last reload, and iOS reloads
 // widgets when it feels like it rather than when we ask. Nothing drawn here is finer
@@ -24,6 +25,9 @@ const API_KEY = "flighter-api";
 const TOKEN_KEY = "flighter-token";
 const SCRIPT_PATH = "/static/flights-widget.js";
 const CACHE_FILE = "flighter-widget.json";
+// An airline's mark does not change, so one fetch per carrier is kept for good and the
+// widget draws it whether or not the network is there.
+const LOGO_PREFIX = "flighter-logo-";
 const REQUEST_TIMEOUT_SECONDS = 15;
 // iOS budgets reloads and ignores an eager request anyway, so do not ask for one.
 const MIN_REFRESH_SECONDS = 60;
@@ -36,7 +40,6 @@ const IMMINENT_MS = 60 * 60 * 1000;
 const BACKGROUND = Color.dynamic(new Color("#ffffff"), new Color("#14171e"));
 const TEXT = Color.dynamic(new Color("#111720"), new Color("#e9edf2"));
 const MUTED = Color.dynamic(new Color("#5f656e"), new Color("#989fa9"));
-const TRACK = Color.dynamic(new Color("#dce0e5"), new Color("#2c3039"));
 
 // The six tones a status can be drawn in, light then dark. The pill's background is the
 // same colour let through at the strength the page mixes it into its card.
@@ -65,7 +68,7 @@ const supportsRowLinks = family === "medium" || family === "large";
 
 const server = connect();
 const result = server ? await load(server) : null;
-const widget = result ? buildWidget(result) : setupWidget();
+const widget = result ? await buildWidget(result) : setupWidget();
 
 if (config.runsInWidget) {
   Script.setWidget(widget);
@@ -217,9 +220,41 @@ function readCache() {
   }
 }
 
+// Each carrier's mark, by the address the server gave for it. A mark that cannot be had
+// is simply not drawn: the number beside it already names the airline.
+async function loadLogos(flights) {
+  const urls = [...new Set(flights.map((flight) => flight.logo_url).filter(Boolean))];
+  const images = await Promise.all(urls.map(loadLogo));
+  const logos = {};
+  urls.forEach((url, index) => {
+    if (images[index]) {
+      logos[url] = images[index];
+    }
+  });
+  return logos;
+}
+
+async function loadLogo(url) {
+  const fm = FileManager.local();
+  const path = fm.joinPath(fm.documentsDirectory(), LOGO_PREFIX + url.split("/").pop());
+  try {
+    if (fm.fileExists(path)) {
+      return fm.readImage(path);
+    }
+    const req = new Request(url);
+    req.timeoutInterval = REQUEST_TIMEOUT_SECONDS;
+    const image = await req.loadImage();
+    fm.writeImage(path, image);
+    return image;
+  } catch (error) {
+    console.warn(`could not load the logo at ${url}: ${error}`);
+    return null;
+  }
+}
+
 // --- widget ----------------------------------------------------------------------------
 
-function buildWidget(result) {
+async function buildWidget(result) {
   const widget = newWidget();
 
   if (result.rejected) {
@@ -240,12 +275,17 @@ function buildWidget(result) {
     return widget;
   }
 
+  // The Lock Screen draws everything in its own tint, which would turn a mark into a
+  // blot, so only the home screen sizes carry one.
   if (isAccessory) {
     renderAccessory(widget, flights[0], result);
-  } else if (family === "small") {
-    renderSmall(widget, flights[0], data, result);
+    return widget;
+  }
+  const logos = await loadLogos(flights);
+  if (family === "small") {
+    renderSmall(widget, flights[0], data, result, logos);
   } else {
-    renderList(widget, flights, data, result);
+    renderList(widget, flights, data, result, logos);
   }
   return widget;
 }
@@ -298,15 +338,11 @@ function renderAccessory(widget, flight, result) {
   }
 }
 
-function renderSmall(widget, flight, data, result) {
+function renderSmall(widget, flight, data, result, logos) {
   // Small widgets get a single tap target, set on the widget rather than a row.
   widget.url = flight.detail_url;
 
-  const title = widget.addText(flight.title);
-  title.font = Font.semiboldMonospacedSystemFont(13);
-  title.textColor = TEXT;
-  title.lineLimit = 1;
-  title.minimumScaleFactor = 0.7;
+  titleRow(widget, flight, logos, 13);
 
   widget.addSpacer(4);
   const line = widget.addStack();
@@ -329,18 +365,11 @@ function renderSmall(widget, flight, data, result) {
     subtitle.lineLimit = 2;
   }
 
-  if (hasProgress(flight)) {
-    widget.addSpacer(6);
-    progressBar(widget, flight.progress_percent, 110);
-  }
-
   widget.addSpacer();
   footer(widget, data, result);
 }
 
-function renderList(widget, flights, data, result) {
-  const barWidth = family === "large" ? 150 : 110;
-
+function renderList(widget, flights, data, result, logos) {
   flights.forEach((flight, index) => {
     if (index > 0) {
       widget.addSpacer(family === "large" ? 12 : 8);
@@ -356,11 +385,7 @@ function renderList(widget, flights, data, result) {
     left.layoutVertically();
     left.spacing = 3;
 
-    const title = left.addText(flight.title);
-    title.font = Font.semiboldMonospacedSystemFont(14);
-    title.textColor = TEXT;
-    title.lineLimit = 1;
-    title.minimumScaleFactor = 0.7;
+    titleRow(left, flight, logos, 14);
 
     const line = left.addStack();
     line.centerAlignContent();
@@ -372,11 +397,6 @@ function renderList(widget, flights, data, result) {
       subtitle.textColor = MUTED;
       subtitle.lineLimit = 1;
       subtitle.minimumScaleFactor = 0.7;
-    }
-
-    if (hasProgress(flight)) {
-      left.addSpacer(2);
-      progressBar(left, flight.progress_percent, barWidth);
     }
 
     row.addSpacer();
@@ -396,6 +416,25 @@ function renderList(widget, flights, data, result) {
 
   widget.addSpacer();
   footer(widget, data, result);
+}
+
+// The card's heading: the airline's mark, when it came, then the number and the route.
+function titleRow(container, flight, logos, size) {
+  const row = container.addStack();
+  row.centerAlignContent();
+  row.spacing = 5;
+  const logo = logos[flight.logo_url];
+  if (logo) {
+    const mark = row.addImage(logo);
+    mark.imageSize = new Size(size + 3, size + 3);
+    mark.cornerRadius = 3;
+  }
+  const title = row.addText(flight.title);
+  title.font = Font.semiboldMonospacedSystemFont(size);
+  title.textColor = TEXT;
+  title.lineLimit = 1;
+  title.minimumScaleFactor = 0.7;
+  return row;
 }
 
 // The board's badge: the word in its tone, on the same tone let through the card.
@@ -424,18 +463,6 @@ function figureText(container, flight, font, color, options = {}) {
     element.rightAlignText();
   }
   return element;
-}
-
-function progressBar(container, percent, width) {
-  const clamped = Math.max(0, Math.min(100, percent));
-  const track = container.addStack();
-  track.size = new Size(width, 4);
-  track.cornerRadius = 2;
-  track.backgroundColor = TRACK;
-  const fill = track.addStack();
-  fill.size = new Size((width * clamped) / 100, 4);
-  fill.cornerRadius = 2;
-  fill.backgroundColor = toneColor("plan");
 }
 
 function footer(widget, data, result) {
@@ -501,10 +528,6 @@ function toneColor(name, alpha = 1) {
 
 function hasMilestone(flight) {
   return Boolean(flight.milestone_to);
-}
-
-function hasProgress(flight) {
-  return flight.progress_percent !== null && flight.progress_percent !== undefined;
 }
 
 // The same string the page builds from the same milliseconds: whole days past a day,

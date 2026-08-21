@@ -492,6 +492,11 @@ def milestone_label(next_up: Milestone, now: datetime) -> str:
     return next_up.label
 
 
+def logo_url(carrier: str) -> str:
+    """The airline's mark, from the set Google draws for its own flight search."""
+    return f"https://www.gstatic.com/flights/airline_logos/70px/{carrier}.png"
+
+
 def destination_iata(booking: Booking, snapshot: FlightSnapshot | None) -> str:
     """Where the flight is going: the booked airport until a diversion names another."""
     if snapshot is not None and snapshot.diverted and snapshot.destination_iata:

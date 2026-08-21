@@ -151,6 +151,7 @@ def create_app(settings: Settings) -> FastAPI:
         day=views.day,
         duration=views.duration,
         email_url=message_url,
+        logo_url=views.logo_url,
         missing=views.MISSING,
         problem_notice=views.problem_notice,
         same_local_date=same_local_date,

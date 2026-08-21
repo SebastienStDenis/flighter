@@ -51,7 +51,7 @@ does the same thing at once, and says so.
 | `accessoryRectangular` (Lock Screen) | Next flight only, three tight lines. **iOS 16 or later.** |
 | Small | Next flight, its status pill, the next milestone large, gate or carousel underneath |
 | Medium | Up to three flights, one row each, each row tappable |
-| Large | Same rows with more room for the progress bar |
+| Large | Same rows, with room to breathe |
 
 Tapping opens the flight's page on your server. On medium and large each row deep-links
 to its own flight; small and Lock Screen widgets get a single tap target, which is an iOS
@@ -59,12 +59,18 @@ restriction and not a choice made here.
 
 ## What it shows
 
-Each flight is the board's card in miniature: the flight number and route, the same
-status pill the web UI shows ("On time", "Departure delayed", "In the air", "Arriving
+Each flight is the board's card in miniature: the airline's mark, the flight number and
+route, the same status pill the web UI shows ("On time", "Departure delayed", "In the air", "Arriving
 late", "Landed" and so on, in the same tone), the gate or carousel, and on the right the
 next milestone with a time against it: "Departs in", "Lands in", "At the gate in", or
 "Scheduled" with a whole-day figure while the flight is still days away. Every word and
 tone comes from the server; the script picks nothing on its own.
+
+The airline's mark is fetched once per carrier, from the address the server names, and
+kept in Scriptable's documents folder from then on, so it is drawn whether or not the
+network is there. The Lock Screen widget goes without it, because iOS draws everything
+there in a single tint. A mark that cannot be fetched is left out; the number beside it
+already names the airline.
 
 The figure beside the milestone is the one thing the script works out, because it
 depends on the phone's clock. It follows the page's rules: whole days once a day or more
