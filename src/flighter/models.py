@@ -61,6 +61,10 @@ class IngestOutcome(StrEnum):
 
 
 class EventKind(StrEnum):
+    # The two that come from a person rather than a snapshot: they exist so the calendar
+    # hears about a flight the moment it is on the board, not on the day a gate is set.
+    BOOKING_ADDED = "BookingAdded"
+    BOOKING_EDITED = "BookingEdited"
     GATE_ASSIGNED = "GateAssigned"
     GATE_CHANGED = "GateChanged"
     TERMINAL_CHANGED = "TerminalChanged"

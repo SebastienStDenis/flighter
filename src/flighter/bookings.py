@@ -18,7 +18,7 @@ from sqlalchemy.orm import aliased
 
 from .airports import airport_tz
 from .cadence import first_poll_at
-from .models import Booking, BookingStatus, FlightSnapshot
+from .models import Booking, BookingStatus, EventKind, FlightEvent, FlightSnapshot
 from .timezones import same_local_date, to_local, to_utc
 
 log = logging.getLogger(__name__)
@@ -118,7 +118,21 @@ async def create_booking(
     )
     session.add(booking)
     await session.flush()
+    if booking.status == BookingStatus.ACTIVE:
+        _record(session, booking, EventKind.BOOKING_ADDED)
+        await session.flush()
     return booking
+
+
+def _record(session: AsyncSession, booking: Booking, kind: EventKind) -> None:
+    """Queue the booking for the calendar by the same road every snapshot change takes.
+
+    Writing the calendar from here would put a network call inside a web request and
+    lose the entry outright when iCloud is down; a FlightEvent row is delivered by the
+    dispatcher, retried until it lands, and pushes nobody because neither kind is one
+    the notifier sends.
+    """
+    session.add(FlightEvent(booking_id=booking.id, kind=kind))
 
 
 async def get_booking(session: AsyncSession, booking_id: int) -> Booking | None:
@@ -141,9 +155,13 @@ async def update_ticket(
     booking = await session.get(Booking, booking_id)
     if booking is None:
         return None
+    shown = (booking.confirmation_code, booking.seat)
     booking.confirmation_code = confirmation_code
     booking.seat = seat
     booking.notes = notes
+    # The calendar entry carries the code and the seat; notes never leave the app.
+    if booking.status == BookingStatus.ACTIVE and (confirmation_code, seat) != shown:
+        _record(session, booking, EventKind.BOOKING_EDITED)
     await session.flush()
     return booking
 

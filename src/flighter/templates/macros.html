@@ -170,9 +170,11 @@
 {% macro change(e, tz) %}
 <p class="flex flex-wrap items-baseline gap-x-2 text-sm">
   <span class="font-medium">{{ change_title(e.kind) }}</span>
+  {% if e.old_value or e.new_value %}
   <span class="font-mono">
     {{- change_value(e.old_value, tz) }} &rarr; {{ change_value(e.new_value, tz) -}}
   </span>
+  {% endif %}
   <span class="font-mono text-xs text-muted-foreground">{{ at(e.occurred_at, tz) }}</span>
 </p>
 {% endmacro %}

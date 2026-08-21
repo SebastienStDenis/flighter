@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from flighter.airports import UnknownAirport
@@ -22,7 +23,7 @@ from flighter.bookings import (
 )
 from flighter.cadence import FEED_HORIZON
 from flighter.db import session_scope
-from flighter.models import Airport, Booking, FlightSnapshot
+from flighter.models import Airport, Booking, EventKind, FlightEvent, FlightSnapshot
 
 JFK = "America/New_York"
 LHR = "Europe/London"
@@ -149,6 +150,41 @@ async def test_the_ticket_is_the_only_thing_an_edit_touches(seeded: None) -> Non
         assert (changed.confirmation_code, changed.seat, changed.notes) == ("X7QW2P", "14A", None)
         assert changed.scheduled_departure_utc == booking.scheduled_departure_utc
         assert changed.departure_local_date == date(2026, 9, 12)
+
+
+async def events_for(session: AsyncSession, booking_id: int) -> list[str]:
+    stmt = (
+        select(FlightEvent.kind)
+        .where(FlightEvent.booking_id == booking_id)
+        .order_by(FlightEvent.id)
+    )
+    return list(await session.scalars(stmt))
+
+
+async def test_adding_a_flight_queues_it_for_the_calendar(seeded: None) -> None:
+    async with session_scope() as session:
+        booking = await book(session, datetime(2026, 9, 12, 9, 0))
+        assert await events_for(session, booking.id) == [EventKind.BOOKING_ADDED]
+
+
+async def test_a_finished_flight_is_not_queued(seeded: None) -> None:
+    async with session_scope() as session:
+        booking = await book(session, datetime(2026, 9, 12, 9, 0), status="completed")
+        assert await events_for(session, booking.id) == []
+
+
+async def test_a_ticket_edit_restates_the_flight_only_when_the_calendar_shows_it(
+    seeded: None,
+) -> None:
+    async with session_scope() as session:
+        booking = await book(session, datetime(2026, 9, 12, 9, 0))
+        await update_ticket(session, booking.id, confirmation_code=None, seat="12A", notes=None)
+        await update_ticket(session, booking.id, confirmation_code=None, seat="12A", notes=None)
+        await update_ticket(session, booking.id, confirmation_code=None, seat="12A", notes="aisle")
+        assert await events_for(session, booking.id) == [
+            EventKind.BOOKING_ADDED,
+            EventKind.BOOKING_EDITED,
+        ]
 
 
 async def test_a_ticket_for_a_flight_that_is_not_there_is_none(seeded: None) -> None:
