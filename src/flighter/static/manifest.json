@@ -1,6 +1,6 @@
 {
-  "name": "Flights",
-  "short_name": "Flights",
+  "name": "Flighter",
+  "short_name": "Flighter",
   "description": "Where the flights are, and what has changed since you looked.",
   "start_url": "/",
   "scope": "/",
