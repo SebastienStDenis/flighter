@@ -31,7 +31,7 @@ from flighter.db import get_session
 from flighter.lookup import Candidate
 from flighter.models import KV, Airport, Booking, FlightEvent, FlightSnapshot, IngestLog
 from flighter.notify import Notifier
-from flighter.timezones import format_local, to_local
+from flighter.timezones import to_local
 from flighter.widget import LAST_SEEN_KEY
 
 NOW = datetime.now(UTC)
@@ -242,13 +242,19 @@ def show(monkeypatch: pytest.MonkeyPatch, view_booking: Booking, snapshot: Any) 
     async def get_booking(_session: Any, booking_id: int) -> Booking | None:
         return view_booking if booking_id == view_booking.id else None
 
+    monkeypatch.setattr(web.booking_repo, "get_booking", get_booking)
+    show_board(monkeypatch, [(view_booking, snapshot)])
+
+
+def show_board(monkeypatch: pytest.MonkeyPatch, flights: Sequence[tuple[Booking, Any]]) -> None:
+    """Make these bookings, each with its newest snapshot, the whole of the board."""
+
     async def latest(_session: Any, _ids: Any) -> dict[int, Any]:
-        return {view_booking.id: snapshot} if snapshot is not None else {}
+        return {b.id: snap for b, snap in flights if snap is not None}
 
     async def list_bookings(_session: Any, **_kwargs: Any) -> list[Booking]:
-        return [view_booking]
+        return [b for b, _ in flights]
 
-    monkeypatch.setattr(web.booking_repo, "get_booking", get_booking)
     monkeypatch.setattr(web.booking_repo, "list_bookings", list_bookings)
     monkeypatch.setattr(web.views.booking_repo, "latest_snapshots", latest)
 
@@ -561,13 +567,6 @@ def big_time(instant: datetime, tz: str, tone: str = "") -> str:
     )
 
 
-def moved_time(was: datetime, now: datetime, tz: str, tone: str) -> str:
-    """A time that moved, as one line draws it: the original struck, the new one coloured."""
-    crossed_midnight = to_local(was, tz).date() != to_local(now, tz).date()
-    struck_was = struck(was, tz, with_date=crossed_midnight)
-    return f'{struck_was} <span class="{tone}">{format_local(now, tz)}</span>'
-
-
 def test_a_delay_is_shown_against_what_was_booked(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -692,7 +691,7 @@ def test_the_rule_says_how_long_the_hop_is_until_there_is_something_to_measure(
         assert 'class="route-mark rounded-full' in body
 
 
-def test_the_lead_card_strikes_a_time_that_slipped_and_leaves_one_that_held(
+def test_the_board_card_strikes_a_time_that_slipped_and_leaves_one_that_held(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Late is red next to what was planned; ten minutes on arrival is not worth a mark."""
@@ -700,10 +699,122 @@ def test_the_lead_card_strikes_a_time_that_slipped_and_leaves_one_that_held(
 
     body = client.get("/").text
     late = DEPARTURE + timedelta(minutes=25)
-    assert moved_time(DEPARTURE, late, "America/Toronto", "text-stop") in body
-    arrival = format_local(ARRIVAL + timedelta(minutes=10), "Europe/London")
-    assert f'<span class="">{arrival}</span>' in body
-    assert format_local(ARRIVAL, "Europe/London") not in body
+    assert big_time(late, "America/Toronto", "text-stop") in body
+    assert struck(DEPARTURE, "America/Toronto") in body
+    assert big_time(ARRIVAL + timedelta(minutes=10), "Europe/London") in body
+    assert struck(ARRIVAL, "Europe/London") not in body
+
+
+def cards(body: str) -> list[str]:
+    """The flights the board draws as full cards, in order, by the id each links to."""
+    return re.findall(r'<a class="card[^"]*" href="/f/(\d+)"', body)
+
+
+def rows(body: str) -> list[str]:
+    """The flights the board draws as one-line rows, in order, by the id each links to."""
+    return re.findall(r'<a class="item"[^>]*href="/f/(\d+)"', body)
+
+
+def test_the_board_card_is_the_flight_page_card_with_a_link_on_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    show(monkeypatch, booking(seat="14A"), full_snapshot())
+
+    board = client.get("/").text
+    assert cards(board) == ["1"]
+    page = client.get("/f/1").text
+    # Same header, cities, ends, gate line and footer: only the wrapper differs.
+    inside = slice(board.index("<header>"), board.index("</footer>"))
+    on_the_page = slice(page.index("<header>"), page.index("</footer>"))
+    assert board[inside] == page[on_the_page]
+    for piece in ("Montreal", 'class="ends"', "B27", "Bags", "Lands in"):
+        assert piece in board[inside]
+    # What the Details card says stays on the flight page.
+    assert "14A" not in board
+
+
+def test_every_flight_inside_its_day_is_a_full_card_and_the_rest_are_rows(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Taxiing in, under way, or leaving today: each is watched the way the lead is."""
+    down = NOW - timedelta(hours=7)
+    landed = booking(
+        id=1, scheduled_departure_utc=down, scheduled_arrival_utc=NOW + timedelta(minutes=15)
+    )
+    taxiing_in = replace_snapshot(
+        actual_out=down,
+        actual_off=down + timedelta(minutes=12),
+        actual_on=NOW - timedelta(minutes=10),
+        estimated_in=NOW + timedelta(minutes=15),
+    )
+    left = NOW - timedelta(hours=2)
+    in_the_air = booking(
+        id=2, scheduled_departure_utc=left, scheduled_arrival_utc=NOW + timedelta(hours=5)
+    )
+    flying = replace_snapshot(actual_out=left, actual_off=left + timedelta(minutes=12))
+    today = booking(
+        id=3,
+        scheduled_departure_utc=NOW + timedelta(hours=6),
+        scheduled_arrival_utc=NOW + timedelta(hours=13),
+    )
+    next_week = booking(
+        id=4,
+        scheduled_departure_utc=NOW + timedelta(days=6),
+        scheduled_arrival_utc=NOW + timedelta(days=6, hours=7),
+    )
+    show_board(
+        monkeypatch, [(landed, taxiing_in), (in_the_air, flying), (today, None), (next_week, None)]
+    )
+
+    body = client.get("/").text
+    assert cards(body) == ["1", "2", "3"]
+    assert rows(body) == ["4"]
+
+
+def test_a_board_of_flights_weeks_away_still_leads_with_one_card(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    soon = booking(
+        id=1,
+        scheduled_departure_utc=NOW + timedelta(days=10),
+        scheduled_arrival_utc=NOW + timedelta(days=10, hours=7),
+    )
+    later = booking(
+        id=2,
+        scheduled_departure_utc=NOW + timedelta(days=20),
+        scheduled_arrival_utc=NOW + timedelta(days=20, hours=7),
+    )
+    show_board(monkeypatch, [(soon, None), (later, None)])
+
+    body = client.get("/").text
+    assert cards(body) == ["1"]
+    assert rows(body) == ["2"]
+
+
+def test_a_cancelled_flight_keeps_to_a_row_unless_it_is_all_there_is_to_lead_with(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called_off = booking(
+        id=1,
+        scheduled_departure_utc=NOW + timedelta(hours=3),
+        scheduled_arrival_utc=NOW + timedelta(hours=10),
+    )
+    cancelled = replace_snapshot(cancelled=True)
+    left = NOW - timedelta(hours=1)
+    in_the_air = booking(
+        id=2, scheduled_departure_utc=left, scheduled_arrival_utc=NOW + timedelta(hours=6)
+    )
+    flying = replace_snapshot(actual_out=left, actual_off=left + timedelta(minutes=12))
+    show_board(monkeypatch, [(called_off, cancelled), (in_the_air, flying)])
+
+    body = client.get("/").text
+    assert cards(body) == ["2"]
+    assert rows(body) == ["1"]
+
+    show_board(monkeypatch, [(called_off, cancelled)])
+    body = client.get("/").text
+    assert cards(body) == ["1"]
+    assert "confirm with the airline" in body
 
 
 def test_a_cancelled_flight_says_who_said_so(

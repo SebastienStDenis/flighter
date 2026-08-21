@@ -477,6 +477,22 @@ def most_urgent(views: Sequence[FlightView]) -> int | None:
     return ranked[0].booking.id if ranked else None
 
 
+def featured(views: Sequence[FlightView]) -> set[int]:
+    """The booking ids the board draws as full cards rather than one-line rows.
+
+    A flight inside its day is what the board is opened for: leaving within the next
+    day, or gone and not yet at the gate. Each gets the same card the flight page opens
+    with, gate and all. A cancelled flight keeps to a row, because there is nothing on
+    it left to watch. The lead flight is always among them, so that a board of flights
+    weeks away still opens with one card to read.
+    """
+    ids = {view.booking.id for view in views if view.phase not in (UPCOMING, CANCELLED)}
+    lead = most_urgent(views)
+    if lead is not None:
+        ids.add(lead)
+    return ids
+
+
 def group_into_trips(views: Sequence[FlightView]) -> list[list[FlightView]]:
     """Split departure-ordered flights into the runs that belong to one journey."""
     trips: list[list[FlightView]] = []
