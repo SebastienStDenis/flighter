@@ -1501,7 +1501,7 @@ def test_a_diverted_flight_names_where_it_is_going_instead(
     assert "Manchester" in card
     # The new airport stands where the code goes, with the booked one struck under it.
     assert 'tracking-tight text-stop">MAN</div>' in card
-    assert '<s class="block font-mono text-sm text-muted-foreground">LHR</s>' in card
+    assert '<s class="-mt-1 mb-1 block font-mono text-sm text-muted-foreground">LHR</s>' in card
     assert "Diverted to" not in card
     assert "Lands in" in body
     # The board row follows the aircraft too.

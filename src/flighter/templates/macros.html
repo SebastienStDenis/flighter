@@ -46,6 +46,11 @@
   {% for side in sides %}
   {% set abbr = zone(side.line.best, side.tz) %}
   <div>
+    {# The airport a diversion was booked for, struck under the one it is going to. It
+       lives in this column rather than up with the codes so that only this side grows. #}
+    {% if side.right and v.diverted_to %}
+    <s class="-mt-1 mb-1 block font-mono text-sm text-muted-foreground">{{ v.booking.dest_iata }}</s>
+    {% endif %}
     <div class="font-mono text-xs text-muted-foreground">
       {%- if side.line.best is not none %}{{ day(side.line.best, side.tz) }}{% endif -%}
     </div>
@@ -101,9 +106,6 @@
       <div class="text-right">
         <div class="text-xs text-muted-foreground">{{ v.destination.city if v.destination }}</div>
         <div class="font-mono text-2xl font-bold tracking-tight{{ ' text-stop' if v.diverted_to }}">{{ v.destination_iata }}</div>
-        {% if v.diverted_to %}
-        <s class="block font-mono text-sm text-muted-foreground">{{ v.booking.dest_iata }}</s>
-        {% endif %}
       </div>
     </div>
     <div class="mt-1">{{ ends(v, s) }}</div>
