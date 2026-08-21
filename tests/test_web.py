@@ -100,6 +100,11 @@ def empty_snapshot() -> FlightSnapshot:
     return FlightSnapshot(id=1, booking_id=1, raw={})
 
 
+def replace_snapshot(**fields: Any) -> FlightSnapshot:
+    """An empty snapshot with just these observed, for one point in a flight's life."""
+    return FlightSnapshot(id=1, booking_id=1, observed_at=NOW, raw={}, **fields)
+
+
 def full_snapshot() -> FlightSnapshot:
     return FlightSnapshot(
         id=2,
@@ -475,10 +480,15 @@ def test_a_flight_with_nothing_known_yet_still_renders(
     body = page.text
     assert "AC871" in body
     assert "YUL" in body and "LHR" in body
+    assert "Montreal" in body and "London" in body
     # Every fact keeps its row and reads as a plain dash rather than disappearing.
-    for label in ("Gate", "Terminal", "Baggage", "Wheels up"):
+    for label in ("Departure", "Arrival", "Gate", "Terminal", "Baggage"):
         assert label in body
     assert body.count(">-<") >= 6
+    # Departure is the next thing to happen, and it is already on the card.
+    assert "Departs in" in body
+    for runway in ("Wheels up", "Lands", "At the gate"):
+        assert runway not in body
     assert "None" not in body
     # A missing value is a dash in its row, never the page-level empty state.
     assert 'class="empty"' not in body
@@ -497,6 +507,58 @@ def test_a_flight_in_the_air_renders_what_is_worth_knowing(
     # What is on the ticket, not what is in the flight plan.
     for gone in ("Filed route", "Distance", "Registration", "Timezone", "Last checked"):
         assert gone not in body
+    # The runway time that matters from a seat, and only that one.
+    assert "Lands" in body
+    assert "Wheels up" not in body and "At the gate" not in body
+
+
+def test_the_card_names_one_runway_moment_at_a_time(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Departure and arrival are always on the card. Wheels up, wheels down and the gate
+    take turns at the bottom, each only while it is the next thing to happen."""
+    pushed_back = replace_snapshot(actual_out=DEPARTURE + timedelta(minutes=5))
+    show(monkeypatch, booking(), pushed_back)
+    body = client.get("/f/1").text
+    assert "Wheels up" in body
+    assert "Lands" not in body and "At the gate" not in body
+
+    landed = replace_snapshot(
+        actual_out=DEPARTURE + timedelta(minutes=5),
+        actual_off=DEPARTURE + timedelta(minutes=15),
+        actual_on=ARRIVAL - timedelta(minutes=12),
+        estimated_in=ARRIVAL + timedelta(minutes=20),
+    )
+    show(monkeypatch, booking(), landed)
+    body = client.get("/f/1").text
+    assert "At the gate" in body
+    assert "Wheels up" not in body and "Lands" not in body
+    # The estimate still reads as a change against what was booked.
+    assert "late 20m" in body
+
+    at_the_gate = replace_snapshot(
+        actual_out=DEPARTURE + timedelta(minutes=5),
+        actual_off=DEPARTURE + timedelta(minutes=15),
+        actual_on=ARRIVAL - timedelta(minutes=12),
+        actual_in=ARRIVAL,
+    )
+    show(monkeypatch, booking(), at_the_gate)
+    body = client.get("/f/1").text
+    for runway in ("Wheels up", "Lands", "At the gate"):
+        assert runway not in body
+
+
+def test_a_delay_is_shown_against_what_was_booked(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    show(
+        monkeypatch,
+        booking(),
+        replace_snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=40)),
+    )
+    body = client.get("/f/1").text
+    assert "<s>" in body
+    assert "late 40m" in body
 
 
 def test_a_cancelled_flight_says_who_said_so(
