@@ -555,6 +555,8 @@ def test_the_landing_countdown_shows_the_runway_time_it_now_counts_to(
         moved_time(snapshot.scheduled_on, snapshot.estimated_on, "Europe/London", "text-stop")
         in body
     )
+    # The struck time and the colour already say it.
+    assert "late " not in body and "early " not in body
 
 
 def test_a_cancelled_flight_says_who_said_so(

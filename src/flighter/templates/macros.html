@@ -111,8 +111,7 @@
 </div>
 {% endmacro %}
 
-{# A time that has resolved through scheduled -> estimated -> actual, with how far it
-   drifted spelled out next to it. #}
+{# A time that has resolved through scheduled -> estimated -> actual. #}
 {% macro when(name, line, tz) %}
 <div class="item" data-size="xs">
   <section class="flex-none"><p>{{ name }}</p></section>
@@ -121,10 +120,6 @@
       {{ missing }}
     {%- else -%}
       {{ shift(line, tz) }}
-      {%- if line.moved %}
-      <span class="font-sans text-xs font-normal text-muted-foreground">
-        {{- 'late' if line.late else 'early' }} {{ duration(line.moved) }}</span>
-      {%- endif -%}
     {%- endif -%}
   </aside>
 </div>

@@ -174,7 +174,6 @@ def create_app(settings: Settings) -> FastAPI:
         change_value=views.change_value,
         dash=views.dash,
         day=views.day,
-        duration=views.duration,
         email_url=message_url,
         local_input=views.local_input,
         missing=views.MISSING,
