@@ -55,7 +55,6 @@ OPEN_APP = "Open flighter"
 # What each import outcome is called on the lock screen, and the line under it.
 _IMPORTED = {
     IngestOutcome.CREATED: ("Flight added", "{flights}"),
-    IngestOutcome.REVIEW: ("Flight needs review", "{flights}. Check the details."),
     IngestOutcome.DUPLICATE: ("Already tracked", "{flights}. Nothing added."),
 }
 
