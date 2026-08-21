@@ -702,7 +702,8 @@ def place(name: str, value: str, tone: str = "") -> str:
     """A terminal or gate box as the card draws it: the word, then the value under it."""
     shown = tone if value != "-" else "text-muted-foreground"
     return (
-        f'<div class="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">'
+        '<div class="text-[0.6875rem] leading-4 font-medium tracking-wide '
+        'text-muted-foreground uppercase">'
         f'{name}</div>\n  <div class="font-mono font-medium {shown}">{value}</div>'
     )
 
