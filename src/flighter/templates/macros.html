@@ -36,21 +36,21 @@
   {"line": v.arrives, "tz": v.dest_tz, "right": true},
 ] %}
 <div class="ends">
-  {% for side in sides %}
-  <div class="font-mono text-xs text-muted-foreground">
-    {%- if side.line.best is not none %}{{ day(side.line.best, side.tz) }}{% endif -%}
-  </div>
-  {% endfor %}
   {# The zone sits on the outside of each time, so the two clocks read from the edges
      of the card the way the codes above them do, and the struck time sits between. #}
   {% for side in sides %}
   {% set abbr = zone(side.line.best, side.tz) %}
-  <div class="mt-0.5 font-mono text-xl leading-tight font-bold {{ tone(side.line) or ('text-muted-foreground' if side.line.best is none) }}">
+  <div class="font-mono text-xl leading-tight font-bold {{ tone(side.line) or ('text-muted-foreground' if side.line.best is none) }}">
     {%- if abbr and side.right %}<span class="mr-1 text-[0.6875rem] font-medium text-muted-foreground">{{ abbr }}</span>{% endif -%}
     {%- if side.line.moved and side.right %}{{ was(side.line, side.tz, right=true) }}{% endif -%}
     {{- clock(side.line.best, side.tz) -}}
     {%- if side.line.moved and not side.right %}{{ was(side.line, side.tz) }}{% endif -%}
     {%- if abbr and not side.right %}<span class="ml-1 text-[0.6875rem] font-medium text-muted-foreground">{{ abbr }}</span>{% endif -%}
+  </div>
+  {% endfor %}
+  {% for side in sides %}
+  <div class="mt-0.5 font-mono text-xs text-muted-foreground">
+    {%- if side.line.best is not none %}{{ day(side.line.best, side.tz) }}{% endif -%}
   </div>
   {% endfor %}
 </div>
@@ -88,11 +88,11 @@
 </div>
 {% endmacro %}
 
-{# The airline's mark, on a tile the colour of the card so it sits in the card rather
-   than on it. The number beside it already names the carrier, so the image says nothing
-   of its own, and a carrier nobody has drawn falls back to a plain tail. #}
+{# The airline's mark, straight on the card with nothing drawn around it. The number
+   beside it already names the carrier, so the image says nothing of its own, and a
+   carrier nobody has drawn falls back to a plain tail. #}
 {% macro logo(carrier, size="size-6") %}
-<img class="{{ size }} shrink-0 rounded-md bg-card p-0.5 ring-1 ring-border" alt=""
+<img class="{{ size }} shrink-0 p-0.5" alt=""
      src="https://www.gstatic.com/flights/airline_logos/70px/{{ carrier }}.png"
      width="24" height="24" loading="lazy" decoding="async">
 {% endmacro %}
