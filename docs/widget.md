@@ -48,7 +48,7 @@ Update the server and tap Connect once; there is nothing to copy again.
 | Family | What it shows |
 | --- | --- |
 | `accessoryRectangular` (Lock Screen) | Next flight only, three tight lines. **iOS 16 or later.** |
-| Small | Next flight, large countdown, gate or carousel underneath |
+| Small | Next flight, its status pill, the next milestone large, gate or carousel underneath |
 | Medium | Up to three flights, one row each, each row tappable |
 | Large | Same rows with more room for the progress bar |
 
@@ -56,17 +56,31 @@ Tapping opens the flight's page on your server. On medium and large each row dee
 to its own flight; small and Lock Screen widgets get a single tap target, which is an iOS
 restriction and not a choice made here.
 
+## What it shows
+
+Each flight is the board's card in miniature: the flight number and route, the same
+status pill the web UI shows ("On time", "Departure delayed", "In the air", "Arriving
+late", "Landed" and so on, in the same tone), the gate or carousel, and on the right the
+next milestone with a time against it: "Departs in", "Lands in", "At the gate in", or
+"Scheduled" with a whole-day figure while the flight is still days away. Every word and
+tone comes from the server; the script picks nothing on its own.
+
+The figure beside the milestone is the one thing the script works out, because it
+depends on the phone's clock. It follows the page's rules: whole days once a day or more
+away, then hours and minutes (`1h 05m`), then minutes, `<1m` inside a minute, and
+`20m ago` once the instant has passed. There are never seconds.
+
+The colours are the web UI's own, light and dark, and follow the phone's appearance.
+The Lock Screen widget is drawn in the Lock Screen's own tint, as iOS requires.
+
 ## How it stays accurate
 
-The countdown is a system timer element (`addDate()` + `applyTimerStyle()`), not text the
-script formatted. It ticks every second on its own, with no widget reload and no network,
-which is what keeps it right between refreshes. iOS decides when a widget actually
-reloads: `refreshAfterDate` is a hint it can and does ignore, and it budgets reloads
-across all widgets on the device. Expect roughly quarter-hourly in practice.
-
-A timer whose instant has passed counts *up*, with no minus sign, so the script switches
-to a word ("Departing", "Taxiing", "Landing") once the countdown expires rather than
-showing a number that reads like a countdown but is not one.
+The figure is text drawn at reload, so it is only as fresh as the last reload. iOS
+decides when a widget actually reloads: `refreshAfterDate` is a hint it can and does
+ignore, and it budgets reloads across all widgets on the device. Expect roughly
+quarter-hourly in practice. Within an hour of a milestone the script asks for a reload on
+the minute, which is when the figure changes; further out it asks at the cadence the
+server names, since the data moves no faster than that.
 
 The last good response is cached to the Scriptable documents folder. If the server is
 unreachable the widget draws the cached data with a `Cached HH:MM` marker instead of
