@@ -295,6 +295,17 @@ def test_a_booking_nobody_has_checked_sits_on_the_board_with_a_badge(
     assert 'href="/f/1"' in body
 
 
+def test_a_codeshare_is_shown_under_the_number_booked_with_a_note_on_who_flies_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    show(monkeypatch, booking(operating_carrier="LH", operating_number="479"), None)
+
+    for path in ("/", "/f/1"):
+        body = client.get(path).text
+        assert '<h2 class="font-mono tracking-tight">AC871</h2>' in body
+        assert "Operated as LH479" in body
+
+
 def test_the_board_offers_one_tap_out_of_a_spent_budget(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -671,6 +682,7 @@ def test_a_number_that_flies_twice_that_day_is_a_choice_rather_than_a_guess(
     assert "flies more than once" in body
     assert "18:40" in body and "21:15" in body
     assert body.count("/f/new/details?") == 2
+    assert body.count("Operated as LH479") == 2
 
 
 def test_a_flight_number_nobody_publishes_says_so_and_offers_the_long_way(
