@@ -6,11 +6,12 @@ being processed twice. One bad email is never allowed to stop the loop.
 
 The flag is the queue, so the row is also the retry state. A message that failed keeps
 its flag and is swept again a couple of times, minutes apart; if it still fails it is set
-aside, and only a person asking for it on the Problems page brings it back. An email that held no
-flight is set aside at once, because reading it again reads it the same way. A message
-that reached the board is unflagged where it stands and never comes back. Either way
-the phone is told once, when there is nothing left to try, which is why the state already
-on file is read before the new one is written.
+aside, and only a person asking for it on the Problems page brings it back. An email that
+held no flight is set aside at once, because reading it again reads it the same way. A
+message that reached the board is unflagged where it stands and never comes back; one
+decided to hold no flight comes back only by being flagged again, which is the person
+overruling that decision. Either way the phone is told once, when there is nothing left
+to try, which is why the state already on file is read before the new one is written.
 
 No transaction is open while the model is reading an email. Every transaction here takes
 the database's one write lock the moment it begins, and a model call can take most of a
@@ -344,13 +345,15 @@ async def retry(session: AsyncSession, message_id: str) -> IngestLog | None:
 async def dismiss(session: AsyncSession, message_id: str) -> IngestLog | None:
     """Give up on a set-aside message for good, from the page rather than from Mail.
 
-    Recording it as holding no flight is what makes the next sweep take the flag off
-    without reading the email again: a decided row is never re-extracted.
+    Recording it as ignored is what makes the next sweep take the flag off without
+    reading the email again. Only once the flag is off does the row say no flight: a
+    flag found on a no-flight message is the person asking for it to be read again, and
+    that has to be told apart from the flag this decision has not yet taken off.
     """
     row = await session.get(IngestLog, message_id)
     if row is None or not set_aside(row):
         return None
-    row.outcome = IngestOutcome.NO_FLIGHT
+    row.outcome = IngestOutcome.IGNORED
     row.error = None
     row.attempts = 0
     row.retry_at = None
@@ -358,7 +361,26 @@ async def dismiss(session: AsyncSession, message_id: str) -> IngestLog | None:
     return row
 
 
+async def _settle_ignored(message_id: str) -> None:
+    """The flag is off an ignored message, so from here on it is simply one with no flight."""
+    async with session_scope() as session:
+        row = await session.get(IngestLog, message_id)
+        if row is not None and row.outcome == IngestOutcome.IGNORED:
+            row.outcome = IngestOutcome.NO_FLIGHT
+
+
 # -- the loop ------------------------------------------------------------------------
+
+
+# Set from the Problems page when a person hands an email back, so the watcher sweeps at
+# the end of its current idle rather than at the end of its cycle. Only ever set, read
+# and cleared, never awaited, so it belongs to no particular event loop.
+_wake = asyncio.Event()
+
+
+def wake() -> None:
+    """Ask the watcher to sweep as soon as it can rather than when its cycle is up."""
+    _wake.set()
 
 
 async def run_ingest_loop(stopping: asyncio.Event, *, settings: Settings | None = None) -> None:
@@ -387,7 +409,7 @@ async def run_ingest_loop(stopping: asyncio.Event, *, settings: Settings | None 
             # the new one rather than waiting for a restart.
             while not stopping.is_set() and mailbox.current:
                 await ingest_once(mailbox, settings, notifier)
-                await mailbox.wait_for_mail(IDLE_CYCLE_SECONDS)
+                await mailbox.wait_for_mail(IDLE_CYCLE_SECONDS, wake=_wake)
         except Exception:
             log.exception("the mail connection failed; reconnecting in %.0fs", backoff)
             await mailbox.close()
@@ -444,16 +466,24 @@ async def _import(
     message = marked.message
     before = await _on_file(message.id)
 
-    if before is not None and before.outcome != ERROR:
-        # Decided and reported on an earlier sweep. A crash between writing that row and
+    if before is not None and before.outcome == IngestOutcome.IGNORED:
+        # Decided on the Problems page; taking the flag off is what was left to do.
+        log.debug("%s was ignored; taking its flag off", message.id)
+        await mailbox.clear_mark(marked)
+        await _settle_ignored(message.id)
+        return before.outcome
+    if before is not None and before.outcome not in (ERROR, IngestOutcome.NO_FLIGHT):
+        # On the board from an earlier sweep. A crash between writing that row and
         # clearing the flag is the one way back here, so all that is left is the flag.
         log.debug("%s is already in the ingest log (%s)", message.id, before.outcome)
         await mailbox.clear_mark(marked)
         return before.outcome
-    if before is not None and not before.due:
+    if before is not None and before.outcome == ERROR and not before.due:
         log.debug("%s is not due to be tried again yet", message.id)
         return None
 
+    # A message on file as holding no flight lost its flag with that decision, so a flag
+    # on it now was put there since, by somebody who disagrees: it is read again.
     result = await process_message(message, settings=settings)
     # The phone hears once, and only when there is nothing left for the service to do: a
     # failure that is going to be retried in two minutes is not news. Nothing that was

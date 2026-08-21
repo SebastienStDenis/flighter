@@ -13,6 +13,7 @@ nothing is a completion line and nothing else, and the numbers in it are not UID
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import imaplib
 import os
@@ -20,7 +21,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from imap_tools import MailBox
 
 from flighter import mail, prefs
 from flighter.config import Settings
@@ -89,6 +89,7 @@ class FakeServer:
         # left to be inferred from the completion line. Both are in the wild.
         self.announces_empty_search = announces_empty_search
         self.selected: list[str] = []
+        self.connection: FakeSocket | None = None
         self.searches: list[tuple[str, str]] = []
         self.fetches: list[tuple[str, str]] = []
         self.stored: list[tuple[str, str, str]] = []
@@ -102,6 +103,7 @@ class FakeServer:
 
     def command(self, line: str, connection: FakeSocket) -> None:
         """One command line in, whatever the server would say back out."""
+        self.connection = connection
         if line.upper() == "DONE":
             connection.reply(f"{self._idle_tag} OK IDLE terminated.\r\n".encode())
             return
@@ -280,7 +282,7 @@ class FakeIMAP4(imaplib.IMAP4):
         self.sock.close()
 
 
-class FakeMailBox(MailBox):
+class FakeMailBox(mail.ICloudMailBox):
     """imap_tools in full, from the login down, over a connection that goes nowhere."""
 
     def __init__(self, server: FakeServer) -> None:
@@ -528,6 +530,34 @@ async def test_a_flagged_message_ends_the_wait_rather_than_waiting_it_out(
 
     # Far longer than the test would tolerate if the push were not what ended it.
     await mailbox.wait_for_mail(300)
+
+
+async def test_a_line_the_server_volunteers_before_idling_is_news_not_a_refusal(
+    settings: Settings,
+) -> None:
+    """iCloud announces a flag that has just changed before it says it is idling.
+
+    Read as the answer to IDLE, that line looks like the command being refused, and the
+    connection used to be hung up and reopened over it; it is what the wait was for.
+    """
+    server = FakeServer()
+    mailbox = await connected(settings, server)
+    assert server.connection is not None
+    server.connection.announce(b"* 6 FETCH (UID 5525 FLAGS (\\Flagged \\Seen $MailFlagBit2))\r\n")
+
+    await mailbox.wait_for_mail(300)
+
+
+async def test_a_wake_ends_the_wait_before_it_idles(settings: Settings) -> None:
+    """The Problems page handing an email back is nothing the server would announce."""
+    server = FakeServer()
+    mailbox = await connected(settings, server)
+    wake = asyncio.Event()
+    wake.set()
+
+    await mailbox.wait_for_mail(300, wake=wake)
+
+    assert not wake.is_set()
 
 
 # -- which flag counts ---------------------------------------------------------------
