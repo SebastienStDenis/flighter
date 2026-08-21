@@ -23,7 +23,16 @@ from flighter.phase import (
     UPCOMING,
     compute_phase,
 )
-from flighter.views import FlightView, Milestone, clock, milestone, until, zone
+from flighter.views import (
+    FlightView,
+    Milestone,
+    clock,
+    destination_iata,
+    milestone,
+    milestone_label,
+    until,
+    zone,
+)
 
 DEPARTURE = datetime(2026, 9, 12, 18, 40, tzinfo=UTC)
 ARRIVAL = datetime(2026, 9, 12, 22, 15, tzinfo=UTC)
@@ -330,3 +339,65 @@ def test_a_flight_that_has_landed_is_drawn_all_the_way_there() -> None:
         progress_percent=92,
     )
     assert view(booking(scheduled_departure_utc=leaves), airborne).progress_percent < 100
+
+
+# --- arrived, and a milestone whose time has passed ----------------------------------------
+
+
+def test_at_the_gate_is_arrived_not_merely_landed() -> None:
+    leaves = now_ish(hours=-3)
+    down = snapshot(actual_out=leaves, actual_off=leaves, actual_on=now_ish(minutes=-12))
+    assert view(booking(scheduled_departure_utc=leaves), down).status == ("Landed", "ok")
+    parked = snapshot(
+        actual_out=leaves, actual_off=leaves, actual_on=now_ish(minutes=-12), actual_in=now_ish()
+    )
+    assert view(booking(scheduled_departure_utc=leaves), parked).status == ("Arrived", "ok")
+
+
+def test_a_milestone_past_its_time_reads_as_due_rather_than_ago() -> None:
+    now = datetime(2026, 9, 12, 22, 0, tzinfo=UTC)
+    ahead = Milestone("At the gate in", now + timedelta(minutes=5))
+    assert milestone_label(ahead, now) == "At the gate in"
+    behind = Milestone("At the gate in", now - timedelta(minutes=18))
+    assert milestone_label(behind, now) == "Due at the gate"
+    assert milestone_label(Milestone("Lands in", now), now) == "Due to land"
+    assert milestone_label(Milestone("Departs in", now), now) == "Due to depart"
+    assert milestone_label(Milestone("Scheduled", now), now) == "Scheduled"
+
+
+def test_the_view_swaps_the_words_once_the_time_has_gone() -> None:
+    leaves = now_ish(hours=-3)
+    overdue = snapshot(
+        actual_out=leaves,
+        actual_off=leaves,
+        actual_on=now_ish(hours=-1),
+        estimated_in=now_ish(minutes=-18),
+    )
+    v = view(booking(scheduled_departure_utc=leaves), overdue)
+    assert v.milestone_label == "Due at the gate"
+    assert v.milestone_due == "Due at the gate"
+
+
+# --- where a diverted flight is going --------------------------------------------------------
+
+YOW = Airport(iata="YOW", name="Ottawa", city="Ottawa", country="CA", tz="America/Toronto")
+
+
+def test_a_diversion_moves_the_destination_and_its_zone() -> None:
+    booked = booking()
+    diverted = snapshot(diverted=True, destination_iata="YOW", actual_off=DEPARTURE)
+    v = FlightView(booked, diverted, JFK, LAX, diversion=YOW)
+    assert v.diverted_to == "YOW"
+    assert v.destination_iata == "YOW"
+    assert v.destination is YOW
+    assert v.dest_tz == "America/Toronto"
+    assert v.dest is LAX
+
+
+def test_a_flight_on_its_booked_route_has_no_diversion() -> None:
+    booked = booking()
+    assert view(booked, snapshot(destination_iata="LAX")).diverted_to is None
+    # Flagged but not yet told where: still the booked airport, without pretending.
+    v = view(booked, snapshot(diverted=True))
+    assert v.diverted_to is None and v.destination_iata == "LAX"
+    assert destination_iata(booked, None) == "LAX"

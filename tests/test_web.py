@@ -48,6 +48,9 @@ AIRPORTS = {
     "LHR": Airport(
         iata="LHR", name="London Heathrow", city="London", country="GB", tz="Europe/London"
     ),
+    "MAN": Airport(
+        iata="MAN", name="Manchester", city="Manchester", country="GB", tz="Europe/London"
+    ),
 }
 
 # Every field the preferences form posts, so a test can change one of them.
@@ -296,7 +299,7 @@ def test_a_codeshare_is_shown_under_the_number_booked_with_a_note_on_who_flies_i
     assert "Operated" not in client.get("/").text
 
 
-def test_a_flown_row_says_when_it_left_and_landed_and_where_you_sat(
+def test_a_row_is_the_flight_its_route_and_when_it_leaves(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     left = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
@@ -304,10 +307,12 @@ def test_a_flown_row_says_when_it_left_and_landed_and_where_you_sat(
     show(
         monkeypatch,
         booking(seat="14A", scheduled_departure_utc=left, scheduled_arrival_utc=landed),
-        None,
+        replace_snapshot(gate_origin="B27"),
     )
-
-    assert "08:00 EDT &rarr; 20:00 BST &middot; Seat 14A" in client.get("/").text
+    body = client.get("/").text
+    assert '<p class="font-mono">Sat 1 Aug 08:00 EDT</p>' in body
+    # The seat, the gate and the landing belong to the card; a row is only what to open.
+    assert "14A" not in body and "B27" not in body and "BST" not in body
 
 
 def test_the_plus_is_the_tab_that_lights_on_the_add_page(client: TestClient) -> None:
@@ -1470,3 +1475,78 @@ def test_the_settings_page_still_opens_when_icloud_cannot_be_reached(
     assert "iCloud did not answer" in page.text
     assert "CalendarUnavailable" not in page.text
     assert 'name="imap_flag_colour"' in page.text
+
+
+def test_a_diverted_flight_names_where_it_is_going_instead(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent_elsewhere = replace_snapshot(
+        diverted=True,
+        destination_iata="MAN",
+        actual_out=DEPARTURE,
+        actual_off=DEPARTURE + timedelta(minutes=12),
+        estimated_in=ARRIVAL + timedelta(minutes=50),
+    )
+    show(monkeypatch, booking(), sent_elsewhere)
+    page = client.get("/f/1")
+    body = page.text
+    assert "<title>AC871 YUL to MAN</title>" in body
+    card = top_card(body)
+    assert "Manchester" in card and 'tracking-tight text-stop">MAN</div>' in card
+    assert "Diverted to Manchester,\n      not London" in card
+    assert "Lands in" in body
+    # The board row follows the aircraft too.
+    show_board(monkeypatch, [(booking(), sent_elsewhere)])
+    assert "MAN" in client.get("/").text
+
+
+def test_the_footer_carries_the_words_for_when_its_time_has_passed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    landed = replace_snapshot(
+        actual_out=DEPARTURE,
+        actual_off=DEPARTURE + timedelta(minutes=12),
+        actual_on=ARRIVAL - timedelta(minutes=10),
+        estimated_in=ARRIVAL,
+    )
+    show(monkeypatch, booking(), landed)
+    body = client.get("/f/1").text
+    assert ">At the gate in</span>" in body
+    assert 'data-due="Due at the gate"' in body
+
+
+def test_a_flight_just_at_the_gate_stays_on_the_board_a_while(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    left = NOW - timedelta(hours=7)
+    parked = replace_snapshot(
+        actual_out=left,
+        actual_off=left + timedelta(minutes=12),
+        actual_on=NOW - timedelta(minutes=40),
+        actual_in=NOW - timedelta(minutes=30),
+        baggage_claim="7",
+    )
+    show(
+        monkeypatch,
+        booking(scheduled_departure_utc=left, scheduled_arrival_utc=NOW - timedelta(minutes=30)),
+        parked,
+    )
+    body = client.get("/").text
+    assert 'class="card' in body and "Flown" not in body
+    assert "Arrived" in body and place("Bags", "7") in body
+
+
+def test_a_flight_long_at_the_gate_is_filed_under_flown(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    left = NOW - timedelta(hours=10)
+    parked = replace_snapshot(
+        actual_out=left, actual_off=left, actual_on=left, actual_in=NOW - timedelta(hours=3)
+    )
+    show(
+        monkeypatch,
+        booking(scheduled_departure_utc=left, scheduled_arrival_utc=NOW - timedelta(hours=3)),
+        parked,
+    )
+    body = client.get("/").text
+    assert "Flown" in body and 'class="card' not in body

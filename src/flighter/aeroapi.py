@@ -431,6 +431,16 @@ def _flight_idents(flight: dict[str, Any]) -> set[str]:
     return {ident for ident in map(_normalised_ident, values) if ident is not None}
 
 
+def _iata_of(ref: Any) -> str | None:
+    """The IATA code of a FlightAirportRef, which is the code every booking is keyed by."""
+    if not isinstance(ref, dict):
+        return None
+    code = ref.get("code_iata")
+    if isinstance(code, str) and len(code.strip()) == 3:
+        return code.strip().upper()
+    return None
+
+
 def _airport_matches(ref: Any, iata: str) -> bool:
     if not isinstance(ref, dict):
         return False
@@ -611,6 +621,7 @@ def to_snapshot_fields(flight: dict[str, Any]) -> dict[str, Any]:
         # so nothing downstream reads it as more certain than it is.
         "cancelled": _as_bool(flight.get("cancelled")),
         "diverted": _as_bool(flight.get("diverted")),
+        "destination_iata": _iata_of(flight.get("destination")),
         "progress_percent": _as_int(flight.get("progress_percent")),
     }
     for key in _TEXT_FIELDS:

@@ -12,7 +12,7 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import NamedTuple
+from typing import Final, NamedTuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,6 +49,10 @@ MISSING = "-"
 # and a red-eye that lands tomorrow both fall inside a day; a return a week later does
 # not, which is the split a person means by "trip".
 TRIP_GAP = timedelta(hours=24)
+
+# How long after the gate a flight stays on the board. Long enough to collect bags and
+# get out of the building with the card still one tap away.
+LINGER: Final = timedelta(hours=2)
 
 
 class Status(NamedTuple):
@@ -111,6 +115,8 @@ class FlightView:
     snapshot: FlightSnapshot | None
     origin: Airport | None
     dest: Airport | None
+    # Where a diverted flight was sent instead, when that airport is on file.
+    diversion: Airport | None = None
 
     @property
     def flight_number(self) -> str:
@@ -127,8 +133,26 @@ class FlightView:
         return self.origin.tz if self.origin else "UTC"
 
     @property
+    def diverted_to(self) -> str | None:
+        """The code of the airport a diverted flight is now bound for, when it is a new one."""
+        code = destination_iata(self.booking, self.snapshot)
+        return code if code != self.booking.dest_iata else None
+
+    @property
+    def destination_iata(self) -> str:
+        return destination_iata(self.booking, self.snapshot)
+
+    @property
+    def destination(self) -> Airport | None:
+        """The airport the flight is actually heading for, diversion and all."""
+        return self.diversion if self.diverted_to else self.dest
+
+    @property
     def dest_tz(self) -> str:
-        return self.dest.tz if self.dest else "UTC"
+        """The zone the arrival is read in: the diversion's once there is one, since the
+        gate time the feed gives is at the airport it is actually going to."""
+        where = self.destination
+        return where.tz if where else "UTC"
 
     @property
     def scheduled_departure(self) -> datetime:
@@ -232,6 +256,17 @@ class FlightView:
         return milestone(self.phase, self.booking, self.snapshot)
 
     @property
+    def milestone_label(self) -> str | None:
+        next_up = self.milestone
+        return milestone_label(next_up, datetime.now(UTC)) if next_up else None
+
+    @property
+    def milestone_due(self) -> str | None:
+        """What the page calls the milestone once its time passes while it is open."""
+        next_up = self.milestone
+        return DUE.get(next_up.label, next_up.label) if next_up else None
+
+    @property
     def calendar_link(self) -> str | None:
         """A way into the Calendar app, once this flight has an entry there.
 
@@ -280,6 +315,15 @@ class FlightView:
         # rather than pinning a departed flight to the top of the list forever.
         return self.departure + timedelta(hours=3)
 
+    @property
+    def off_board_at(self) -> datetime:
+        """When the board files this flight under Flown.
+
+        Not the moment it is at the gate: the carousel and the terminal are what someone
+        is reading while they wait for their bags and find their way out.
+        """
+        return self.ended + LINGER
+
 
 def scheduled_departure(booking: Booking, snapshot: FlightSnapshot | None) -> datetime:
     """The planned gate departure: the feed's schedule once it has one, else the ticket's."""
@@ -303,6 +347,9 @@ def status(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> S
     if phase == DIVERTED:
         return Status("Diverted", "stop")
     if phase == LANDED:
+        # Wheels down and at the gate are ten minutes apart and two different waits.
+        if snapshot is not None and snapshot.actual_in is not None:
+            return Status("Arrived", "ok")
         return Status("Landed", "ok")
     if phase == AIRBORNE:
         # A late pushback is history once the aircraft is off the ground; the only
@@ -352,6 +399,29 @@ def milestone(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -
         if target is not None:
             return Milestone(label, target)
     return None
+
+
+# What a milestone is called once its time has gone by with no word that it happened. The
+# feed runs a few minutes behind the aircraft, so this is the normal state of things for
+# a short while at every rung, and it should read as waiting rather than as arithmetic.
+DUE: Final = {
+    "Departs in": "Due to depart",
+    "Lands in": "Due to land",
+    "At the gate in": "Due at the gate",
+}
+
+
+def milestone_label(next_up: Milestone, now: datetime) -> str:
+    if next_up.target <= now:
+        return DUE.get(next_up.label, next_up.label)
+    return next_up.label
+
+
+def destination_iata(booking: Booking, snapshot: FlightSnapshot | None) -> str:
+    """Where the flight is going: the booked airport until a diversion names another."""
+    if snapshot is not None and snapshot.diverted and snapshot.destination_iata:
+        return snapshot.destination_iata
+    return booking.dest_iata
 
 
 def phase_rank(phase: Phase) -> int:
@@ -515,7 +585,8 @@ async def build_views(session: AsyncSession, rows: Iterable[Booking]) -> list[Fl
 
     airports: dict[str, Airport | None] = {}
     for booking in bookings:
-        for iata in (booking.origin_iata, booking.dest_iata):
+        bound_for = destination_iata(booking, snapshots.get(booking.id))
+        for iata in (booking.origin_iata, booking.dest_iata, bound_for):
             if iata not in airports:
                 airports[iata] = await get_airport(session, iata)
 
@@ -525,6 +596,7 @@ async def build_views(session: AsyncSession, rows: Iterable[Booking]) -> list[Fl
             snapshot=snapshots.get(booking.id),
             origin=airports.get(booking.origin_iata),
             dest=airports.get(booking.dest_iata),
+            diversion=airports.get(destination_iata(booking, snapshots.get(booking.id))),
         )
         for booking in bookings
     ]

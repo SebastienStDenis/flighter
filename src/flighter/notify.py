@@ -114,7 +114,7 @@ def event_message(event: FlightEvent, *, origin_tz: str, dest_tz: str) -> str:
     if kind == EventKind.CANCELLED:
         return CANCELLED_NOTICE
     if kind == EventKind.DIVERTED:
-        return "Diverted"
+        return f"Diverted to {new}" if new and new != "true" else "Diverted"
     return kind
 
 

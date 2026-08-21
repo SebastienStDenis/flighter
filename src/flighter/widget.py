@@ -311,12 +311,12 @@ def _flight(
         phase=phase,
         title=(
             f"{booking.marketing_carrier}{booking.marketing_number}"
-            f"  {booking.origin_iata} → {booking.dest_iata}"
+            f"  {booking.origin_iata} → {views.destination_iata(booking, snapshot)}"
         ),
         subtitle=_subtitle(phase, booking, snapshot),
         status_label=pill.label,
         status_tone=pill.tone,
-        milestone_label=next_up.label if next_up else None,
+        milestone_label=views.milestone_label(next_up, now) if next_up else None,
         milestone_to=next_up.target if next_up else None,
         # Only while airborne: the feed reports 0 on the ground and 100 after landing,
         # either of which draws a bar that says nothing.
@@ -329,7 +329,8 @@ def _subtitle(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -
     if phase == CANCELLED:
         return CANCELLED_NOTICE
     if phase == DIVERTED:
-        return "Diverted"
+        bound_for = views.destination_iata(booking, snapshot)
+        return f"Diverted to {bound_for}" if bound_for != booking.dest_iata else "Diverted"
 
     parts: list[str] = []
     if phase == LANDED:

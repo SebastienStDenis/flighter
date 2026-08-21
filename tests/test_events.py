@@ -376,3 +376,18 @@ async def test_delivery_gives_up_on_stale_events(
         (EventKind.GATE_CHANGED, False, True),
         (EventKind.LANDED, False, False),
     ]
+
+
+def test_a_diversion_names_where_the_flight_is_now_going() -> None:
+    change = only(
+        diff_snapshots(snapshot(), snapshot(diverted=True, destination_iata="YOW")),
+        EventKind.DIVERTED,
+    )
+    assert (change.old_value, change.new_value) == (None, "YOW")
+    first = only(
+        diff_snapshots(None, snapshot(diverted=True, destination_iata="YOW")), EventKind.DIVERTED
+    )
+    assert first.new_value == "YOW"
+    # The feed can flag a diversion before it says where to.
+    unknown = only(diff_snapshots(snapshot(), snapshot(diverted=True)), EventKind.DIVERTED)
+    assert unknown.new_value == "true"

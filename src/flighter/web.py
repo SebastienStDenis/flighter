@@ -212,11 +212,19 @@ def create_app(settings: Settings) -> FastAPI:
         tracked = await build_views(
             session, await booking_repo.list_bookings(session, statuses=BOARD_STATUSES)
         )
-        now = datetime.now(UTC)
-        upcoming = [view for view in tracked if view.ended >= now]
-        landed = [view for view in tracked if view.ended < now]
+        # The poller closes a booking soon after it lands, so a flight someone is still
+        # walking off is found among the flown as often as among the tracked.
         flown = await build_views(session, await recently_flown(session, FLOWN_LIMIT))
-        past = sorted(landed + flown, key=lambda view: view.scheduled_departure, reverse=True)
+        now = datetime.now(UTC)
+        upcoming = sorted(
+            (view for view in tracked + flown if view.off_board_at >= now),
+            key=lambda view: view.scheduled_departure,
+        )
+        past = sorted(
+            (view for view in tracked + flown if view.off_board_at < now),
+            key=lambda view: view.scheduled_departure,
+            reverse=True,
+        )
         budget = await budget_status(session)
         return page(
             request,

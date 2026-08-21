@@ -200,6 +200,7 @@ def test_to_snapshot_fields_extracts_the_denormalised_columns() -> None:
         "status_text": "En Route / On Time",
         "cancelled": False,
         "diverted": False,
+        "destination_iata": "JFK",
         "gate_origin": "A12",
         "gate_destination": "B22",
         "terminal_origin": "5",

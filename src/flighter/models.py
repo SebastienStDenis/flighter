@@ -222,6 +222,9 @@ class FlightSnapshot(Base):
     status_text: Mapped[str | None] = mapped_column(Text)
     cancelled: Mapped[bool | None] = mapped_column(Boolean)
     diverted: Mapped[bool | None] = mapped_column(Boolean)
+    # Where this leg is bound for as the feed reports it. It is the booked airport until
+    # a diversion, after which it is the only record of where the aircraft is going.
+    destination_iata: Mapped[str | None] = mapped_column(String(3))
     gate_origin: Mapped[str | None] = mapped_column(Text)
     gate_destination: Mapped[str | None] = mapped_column(Text)
     terminal_origin: Mapped[str | None] = mapped_column(Text)
