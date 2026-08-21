@@ -17,6 +17,7 @@ from flighter.bookings import (
     flight_label,
     latest_snapshot,
     latest_snapshots,
+    on_board_from_message,
     operated_note,
     to_booking_times,
     update_ticket,
@@ -234,6 +235,16 @@ async def test_an_archived_booking_does_not_count(seeded: None) -> None:
         # And the index lets the same flight be added again.
         again = await book(session, datetime(2026, 9, 12, 9, 0))
         assert again.id != booking.id
+
+
+async def test_a_deleted_flight_leaves_its_email_with_nothing_on_the_board(seeded: None) -> None:
+    async with session_scope() as session:
+        booking = await book(
+            session, datetime(2026, 9, 12, 9, 0), source="email", source_message_id="<a@b>"
+        )
+        assert await on_board_from_message(session, "<a@b>")
+        await delete_booking(session, booking.id)
+        assert not await on_board_from_message(session, "<a@b>")
 
 
 async def test_the_index_backs_the_rule_up(seeded: None) -> None:

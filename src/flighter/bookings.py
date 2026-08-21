@@ -252,6 +252,24 @@ async def find_duplicate(
     return None
 
 
+async def on_board_from_message(session: AsyncSession, message_id: str) -> bool:
+    """Whether any flight this email put on the board is still there.
+
+    Deleting archives, so an email whose every flight is gone has nothing left to show
+    for having been read; the dedupe index lets the same flight back on, and flagging
+    the email again is how a person asks for it.
+    """
+    stmt = (
+        select(Booking.id)
+        .where(
+            Booking.source_message_id == message_id,
+            Booking.status != BookingStatus.ARCHIVED,
+        )
+        .limit(1)
+    )
+    return await session.scalar(stmt) is not None
+
+
 async def latest_snapshot(session: AsyncSession, booking_id: int) -> FlightSnapshot | None:
     """The newest observation of one booking, or None before the first poll."""
     return (await latest_snapshots(session, [booking_id])).get(booking_id)

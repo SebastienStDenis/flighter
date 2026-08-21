@@ -14,14 +14,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from decimal import Decimal
-from typing import Any
+from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Preferences
+from .models import KV, Preferences
 
 SINGLETON_ID = 1
+
+LAST_SEEN_ORIGIN_KEY: Final = "last_seen_origin"
 
 
 class Prefs(BaseModel):
@@ -69,6 +71,11 @@ class Prefs(BaseModel):
 
 _current = Prefs()
 
+# The scheme and host the app was last reached on. The calendar and the push
+# notifications are written from the poller and the mail import, with no request in
+# hand, and this is the address they fall back to until one is saved.
+_last_seen_origin: str | None = None
+
 
 def current() -> Prefs:
     """The live preferences.
@@ -79,30 +86,45 @@ def current() -> Prefs:
     return _current
 
 
-def public_base_url(origin: str) -> str:
-    """The saved address, or the one a request arrived on until there is one.
+def last_seen_origin() -> str | None:
+    return _last_seen_origin
+
+
+def public_base_url(origin: str | None = None) -> str:
+    """The saved address, or the best evidence of one until there is one.
 
     The default only ever resolves on the machine serving the page, and nothing that
     carries this address is read there. A request that reached this server came in on
     an address that demonstrably works from the outside, which is the better guess until
-    somebody saves one.
+    somebody saves one: the request in hand when there is one, otherwise the last one
+    the app was reached on. The default is the answer only before either has happened.
     """
     saved = _current.public_base_url
-    if saved == Prefs.model_fields["public_base_url"].default:
-        return origin
-    return saved
+    if saved != Prefs.model_fields["public_base_url"].default:
+        return saved
+    return origin or _last_seen_origin or saved
 
 
 async def load(session: AsyncSession) -> Prefs:
     """Read the row, creating it with the defaults the first time."""
-    global _current
+    global _current, _last_seen_origin
     row = await session.get(Preferences, SINGLETON_ID)
     if row is None:
         row = Preferences(id=SINGLETON_ID, values={})
         session.add(row)
         await session.flush()
     _current = Prefs.model_validate(row.values)
+    seen = await session.get(KV, LAST_SEEN_ORIGIN_KEY)
+    _last_seen_origin = seen.value["origin"] if seen is not None else None
     return _current
+
+
+async def remember_origin(session: AsyncSession, origin: str) -> None:
+    """Keep the address a request came in on, for the paths that have no request."""
+    global _last_seen_origin
+    await session.merge(KV(key=LAST_SEEN_ORIGIN_KEY, value={"origin": origin}))
+    await session.flush()
+    _last_seen_origin = origin
 
 
 async def save(session: AsyncSession, values: Mapping[str, Any]) -> Prefs:

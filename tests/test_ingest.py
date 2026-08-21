@@ -88,14 +88,22 @@ class Recorder:
 
     async def create_booking(self, session: Any, **kwargs: Any) -> Any:
         self.created.append(kwargs)
-        booking = _Booking(len(self.created))
+        booking = _Booking(len(self.created), kwargs.get("source_message_id"))
         session.bookings[booking.id] = booking
         return booking
 
+    async def on_board_from_message(self, session: Any, message_id: str) -> bool:
+        return any(
+            booking.source_message_id == message_id and booking.status != "archived"
+            for booking in session.bookings.values()
+        )
+
 
 class _Booking:
-    def __init__(self, booking_id: int) -> None:
+    def __init__(self, booking_id: int, source_message_id: str | None = None) -> None:
         self.id = booking_id
+        self.source_message_id = source_message_id
+        self.status = "active"
 
 
 @pytest.fixture
@@ -104,6 +112,7 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     monkeypatch.setattr(ingest, "airport_tz", rec.airport_tz)
     monkeypatch.setattr(ingest, "find_duplicate", rec.find_duplicate)
     monkeypatch.setattr(ingest, "create_booking", rec.create_booking)
+    monkeypatch.setattr(ingest, "on_board_from_message", rec.on_board_from_message)
     return rec
 
 
@@ -641,6 +650,43 @@ async def test_an_email_flagged_again_after_being_decided_no_flight_is_read_agai
     assert mailbox.cleared == [("INBOX", 1)]
     assert len(recorder.created) == 1
     assert [outcome for outcome, _ in notifier.imported] == ["created"]
+
+
+async def test_an_email_flagged_again_after_its_flight_was_deleted_is_read_again(
+    settings: Settings, recorder: Recorder, one_session: FakeSession
+) -> None:
+    """Deleting archives the flight, so the flag put back on the email asks for it back."""
+    notifier = FakeNotifier()
+    assert await sweep(FakeMailbox(message("flight_jsonld.eml")), notifier, settings) == ["created"]
+    one_session.bookings[1].status = "archived"
+
+    again = FakeMailbox(message("flight_jsonld.eml"))
+    assert await sweep(again, notifier, settings) == ["created"]
+
+    assert again.cleared == [("INBOX", 1)]
+    assert [booked["source_message_id"] for booked in recorder.created] == ["flight_jsonld.eml"] * 2
+    assert [[b.id for b in bookings] for _, bookings in notifier.imported] == [[1], [2]]
+    assert one_session.log["flight_jsonld.eml"].outcome == "created"
+
+
+async def test_an_email_flagged_again_while_its_flight_is_on_the_board_is_only_unflagged(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    use_model(monkeypatch, extraction())
+    notifier = FakeNotifier()
+    assert await sweep(FakeMailbox(message("flight_plain.eml")), notifier, settings) == ["created"]
+    # Were the email read again, this would fail the sweep rather than book it twice.
+    fails(monkeypatch)
+
+    again = FakeMailbox(message("flight_plain.eml"))
+    assert await sweep(again, notifier, settings) == ["created"]
+
+    assert again.cleared == [("INBOX", 1)]
+    assert len(recorder.created) == 1
+    assert len(notifier.imported) == 1
 
 
 async def test_an_ignored_email_is_unflagged_without_being_read_again(

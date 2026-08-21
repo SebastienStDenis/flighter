@@ -72,23 +72,20 @@
   // no-JS case, and this replaces it in place.
   (function () {
     function figure(ms) {
-      var total = Math.floor(Math.abs(ms) / 1000);
-      var days = Math.floor(total / 86400);
-      var hours = Math.floor(total / 3600) % 24;
-      var minutes = Math.floor(total / 60) % 60;
-      var seconds = total % 60;
-      function pad(n) { return n < 10 ? "0" + n : String(n); }
-      if (days) return days + "d " + hours + "h";
-      if (hours) return hours + "h " + pad(minutes) + "m";
-      return minutes + "m " + pad(seconds) + "s";
+      var total = Math.floor(Math.abs(ms) / 60000);
+      var days = Math.floor(total / 1440);
+      var hours = Math.floor(total / 60) % 24;
+      var minutes = total % 60;
+      if (days) return days + "d";
+      if (hours) return hours + "h " + (minutes < 10 ? "0" : "") + minutes + "m";
+      if (minutes) return minutes + "m";
+      return "<1m";
     }
     function tick() {
       var now = Date.now();
-      var nearest = Infinity;
       document.querySelectorAll("time.countdown[data-to]").forEach(function (el) {
         var target = Date.parse(el.dataset.to);
         if (isNaN(target)) return;
-        nearest = Math.min(nearest, Math.abs(target - now));
         // A target in the past counts up: "20m ago" is a fact, "-20m" is arithmetic.
         el.textContent = figure(target - now) + (target < now ? " ago" : "");
       });
@@ -101,9 +98,9 @@
         var fraction = Math.min(Math.max((now - off) / (on - off), 0), 1);
         el.style.setProperty("--progress", Math.round(fraction * 100) + "%");
       });
-      // Seconds are only on screen inside the last hour, so that is the only time this
-      // is allowed to wake the phone up every one of them.
-      setTimeout(tick, nearest < 3600000 ? 1000 : 60000);
+      // Nothing on screen is finer than a minute, and the feed's times are whole
+      // minutes, so the figures only ever change on the minute.
+      setTimeout(tick, 60000 - (now % 60000));
     }
     tick();
   })();

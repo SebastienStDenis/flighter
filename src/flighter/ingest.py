@@ -8,10 +8,12 @@ The flag is the queue, so the row is also the retry state. A message that failed
 its flag and is swept again a couple of times, minutes apart; if it still fails it is set
 aside, and only a person asking for it on the Problems page brings it back. An email that
 held no flight is set aside at once, because reading it again reads it the same way. A
-message that reached the board is unflagged where it stands and never comes back; one
-decided to hold no flight comes back only by being flagged again, which is the person
-overruling that decision. Either way the phone is told once, when there is nothing left
-to try, which is why the state already on file is read before the new one is written.
+message that reached the board is unflagged where it stands, and comes back only by being
+flagged again: that is the person overruling a decision that it held no flight, or asking
+for flights of its own that have since been deleted, and the email is read again; while
+what it booked is still on the board the flag simply comes off again. Either way the
+phone is told once, when there is nothing left to try, which is why the state already on
+file is read before the new one is written.
 
 No transaction is open while the model is reading an email. Every transaction here takes
 the database's one write lock the moment it begins, and a model call can take most of a
@@ -33,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import notices
 from .airports import UnknownAirport, airport_tz
-from .bookings import create_booking, find_duplicate
+from .bookings import create_booking, find_duplicate, on_board_from_message
 from .config import Settings, get_settings
 from .db import session_scope
 from .extract import Extraction, Segment, from_jsonld, from_model, looks_like_flight
@@ -90,7 +92,7 @@ class Ingested(NamedTuple):
 
 
 class Standing(NamedTuple):
-    """What the ingest log already says about a message, copied out of its row.
+    """What the ingest log already says about a message, and whether its flights are there.
 
     A copy rather than the row: the transaction it was read in has ended by the time it
     is consulted, and the pipeline is about to write a new row in its place.
@@ -99,6 +101,7 @@ class Standing(NamedTuple):
     outcome: str
     error: str | None
     retry_at: datetime | None
+    on_board: bool
 
     @property
     def due(self) -> bool:
@@ -109,7 +112,10 @@ class Standing(NamedTuple):
 async def _on_file(message_id: str) -> Standing | None:
     async with session_scope() as session:
         row = await session.get(IngestLog, message_id)
-        return None if row is None else Standing(row.outcome, row.error, row.retry_at)
+        if row is None:
+            return None
+        on_board = await on_board_from_message(session, message_id)
+        return Standing(row.outcome, row.error, row.retry_at, on_board)
 
 
 async def process_message(message: Message, *, settings: Settings | None = None) -> Ingested:
@@ -450,17 +456,21 @@ async def _import(
         await _settle_ignored(message.id)
         return before.outcome
     if before is not None and before.outcome not in (ERROR, IngestOutcome.NO_FLIGHT):
-        # On the board from an earlier sweep. A crash between writing that row and
-        # clearing the flag is the one way back here, so all that is left is the flag.
-        log.debug("%s is already in the ingest log (%s)", message.id, before.outcome)
-        await mailbox.clear_mark(marked)
-        return before.outcome
+        if before.on_board:
+            # On the board from an earlier sweep. A crash between writing that row and
+            # clearing the flag is the one way back here, so all that is left is the flag.
+            log.debug("%s is already in the ingest log (%s)", message.id, before.outcome)
+            await mailbox.clear_mark(marked)
+            return before.outcome
+        log.info("%s is flagged again with nothing it booked left on the board", message.id)
     if before is not None and before.outcome == ERROR and not before.due:
         log.debug("%s is not due to be tried again yet", message.id)
         return None
 
     # A message on file as holding no flight lost its flag with that decision, so a flag
-    # on it now was put there since, by somebody who disagrees: it is read again.
+    # on it now was put there since, by somebody who disagrees: it is read again. So is
+    # one whose every flight has since been deleted: the flag is the person asking for
+    # them back, and the dedupe rule skips archived rows, so it books them afresh.
     result = await process_message(message, settings=settings)
     # The phone hears once, and only when there is nothing left for the service to do: a
     # failure that is going to be retried in two minutes is not news. Nothing that was

@@ -84,6 +84,25 @@ async def note_problems(request: Request) -> None:
         request.state.problems = len(await ingest.list_set_aside(session))
 
 
+async def note_origin(request: Request) -> None:
+    """The address the app was reached on, for the links written with no request in hand.
+
+    The calendar and the push notifications are written by the poller and the mail
+    import, and until somebody saves an address on the settings page the only one they
+    can know is the last one a request arrived on. Compared in memory first, so the
+    database is written when the address changes and not on every page. The health
+    check is skipped because it arrives on the container's own loopback, which is the
+    one address nothing outside can reach.
+    """
+    if request.url.path == "/healthz":
+        return
+    origin = str(request.base_url).rstrip("/")
+    if origin == prefs.last_seen_origin():
+        return
+    async with session_scope() as session:
+        await prefs.remember_origin(session, origin)
+
+
 def ago(then: datetime, now: datetime) -> str:
     """`4m ago`, `3d ago`: how long since a phone was last heard from."""
     elapsed = now - then
@@ -118,7 +137,7 @@ def create_app(settings: Settings) -> FastAPI:
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
-        dependencies=[Depends(note_problems)],
+        dependencies=[Depends(note_problems), Depends(note_origin)],
     )
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     app.include_router(widget_router)
@@ -126,8 +145,10 @@ def create_app(settings: Settings) -> FastAPI:
     templates = Jinja2Templates(directory=str(TEMPLATES))
     templates.env.globals.update(
         at=views.at,
+        cancelled_notice=CANCELLED_NOTICE,
         change_title=views.change_title,
         change_value=views.change_value,
+        clock=views.clock,
         dash=views.dash,
         day=views.day,
         duration=views.duration,
@@ -137,6 +158,7 @@ def create_app(settings: Settings) -> FastAPI:
         same_day=views.same_day,
         same_local_date=same_local_date,
         until=views.until,
+        zone=views.zone,
     )
 
     def page(request: Request, name: str, context: dict[str, Any], **kwargs: Any) -> Response:
@@ -202,7 +224,7 @@ def create_app(settings: Settings) -> FastAPI:
             {
                 "trips": views.group_into_trips(upcoming),
                 "past": past[:FLOWN_LIMIT],
-                "urgent_id": views.most_urgent(upcoming),
+                "featured": views.featured(upcoming),
                 "budget": budget,
                 "raised_cap": budget.cap_usd + LIMIT_STEP,
                 # An empty board on a fresh deployment is not the same thing as an empty
@@ -339,11 +361,7 @@ def create_app(settings: Settings) -> FastAPI:
             .where(FlightEvent.booking_id == booking_id)
             .order_by(FlightEvent.occurred_at.desc())
         )
-        return page(
-            request,
-            "detail.html",
-            {"v": view, "events": list(events.scalars()), "cancelled_notice": CANCELLED_NOTICE},
-        )
+        return page(request, "detail.html", {"v": view, "events": list(events.scalars())})
 
     @app.post("/f/{booking_id}/ticket")
     async def update_ticket(

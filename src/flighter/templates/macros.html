@@ -4,65 +4,50 @@
 {% endmacro %}
 
 {# The rule between two airports, with the aircraft at the fraction of the way it has
-   actually flown. The list and the flight page both draw it, so it is one piece. #}
+   actually flown. Until it leaves there is no fraction, so the rule carries how long
+   the hop is instead. The list and the flight page both draw it, so it is one piece. #}
 {% macro route_line(v) %}
 {% set progress = v.progress_percent %}
 {% set window = v.airborne_window %}
+{% set length = v.block_time %}
 <div class="route-line {{ 'text-live' if progress else 'text-muted-foreground/50' }}"
      style="--progress: {{ progress or 0 }}%"{% if window %} data-off="{{ window[0].isoformat() }}" data-on="{{ window[1].isoformat() }}"{% endif %}>
+  {% if length %}
+  <span class="route-mark left-1/2 bg-card px-1.5 font-mono text-[0.6875rem] whitespace-nowrap text-muted-foreground">
+    {{- duration(length) -}}
+  </span>
+  {% else %}
   <span class="route-mark rounded-full bg-card p-0.5" aria-hidden="true">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
       <path d="M22 12 13 7.5V2.8a1.3 1.3 0 0 0-2.6 0v4.7L1.4 12v1.7l9-2.6v4.2L7 17.7V19l4.7-1.1L16.4 19v-1.3l-3.4-2.4v-4.2l9 2.6z"
             transform="rotate(90 12 12)"/>
     </svg>
   </span>
+  {% endif %}
 </div>
 {% endmacro %}
 
-{# The route at list size: origin, destination, when each happens, and the rule. Each
-   end carries its own day: a red-eye lands on a different one from the one it left. #}
-{% macro route(v) %}
-<div class="route">
-  <div>
-    <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.origin_iata }}</div>
-    <div class="font-mono text-xs text-muted-foreground">{{ moment(v.departs, v.origin_tz) }}</div>
-    <div class="font-mono text-xs text-muted-foreground">{{ day(v.departs.best, v.origin_tz) }}</div>
-  </div>
-  {{ route_line(v) }}
-  <div class="text-right">
-    <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.dest_iata }}</div>
-    <div class="font-mono text-xs text-muted-foreground">{{ moment(v.arrives, v.dest_tz) }}</div>
-    {% if v.arrives.best is not none %}
-    <div class="font-mono text-xs text-muted-foreground">{{ day(v.arrives.best, v.dest_tz) }}</div>
-    {% endif %}
-  </div>
-</div>
-{% endmacro %}
-
-{# The two ends of the flight, one row per fact: the city, the time each is now
-   expected, and where in the building. The pairs share rows, so the arrival's time sits
-   level with the departure's whatever else either side has to say. #}
+{# The two ends of the flight, one row per fact: the day and time each is now expected,
+   and where in the building. The pairs share rows, so the arrival's time sits level
+   with the departure's whatever else either side has to say. #}
 {% macro ends(v, s) %}
 {% set sides = [
-  {"airport": v.origin, "line": v.departs, "tz": v.origin_tz,
+  {"line": v.departs, "tz": v.origin_tz,
    "terminal": s.terminal_origin if s else none, "gate": s.gate_origin if s else none},
-  {"airport": v.dest, "line": v.arrives, "tz": v.dest_tz,
+  {"line": v.arrives, "tz": v.dest_tz,
    "terminal": s.terminal_destination if s else none, "gate": s.gate_destination if s else none},
 ] %}
 <div class="ends">
   {% for side in sides %}
-  <div class="text-sm font-medium">
-    {%- if side.airport and side.airport.city %}{{ side.airport.city }}{% endif -%}
-  </div>
-  {% endfor %}
-  {% for side in sides %}
-  <div class="mt-1.5 font-mono text-xl leading-tight font-bold {{ tone(side.line) or ('text-muted-foreground' if side.line.best is none) }}">
-    {{- at(side.line.best, side.tz) -}}
-  </div>
-  {% endfor %}
-  {% for side in sides %}
   <div class="font-mono text-xs text-muted-foreground">
     {%- if side.line.best is not none %}{{ day(side.line.best, side.tz) }}{% endif -%}
+  </div>
+  {% endfor %}
+  {% for side in sides %}
+  <div class="font-mono text-xl leading-tight font-bold {{ tone(side.line) or ('text-muted-foreground' if side.line.best is none) }}">
+    {{- clock(side.line.best, side.tz) -}}
+    {%- set abbr = zone(side.line.best, side.tz) -%}
+    {%- if abbr %}<span class="ml-1 text-[0.6875rem] font-medium text-muted-foreground">{{ abbr }}</span>{% endif -%}
   </div>
   {% endfor %}
   {% if v.departs.moved or v.arrives.moved %}
@@ -71,20 +56,28 @@
   {% endfor %}
   {% endif %}
   {% for side in sides %}
-  {{ where("Terminal", side.terminal, spaced=true) }}
-  {% endfor %}
-  {% for side in sides %}
-  {{ where("Gate", side.gate, "text-plan") }}
+  {{ building(side.terminal, side.gate) }}
   {% endfor %}
   <div></div>
-  {{ where("Baggage", s.baggage_claim if s else none) }}
+  {{ where("Bags", s.baggage_claim if s else none) }}
+</div>
+{% endmacro %}
+
+{# Terminal and gate on one line, `T1 · B22`. The gate is the one a person walks to, so
+   it keeps its colour and weight; the terminal is the building it is in. #}
+{% macro building(terminal, gate) %}
+<div class="mt-1.5 font-mono font-medium">
+  {%- if terminal %}T{{ terminal }}{% endif -%}
+  {%- if terminal and gate %}<span class="text-muted-foreground"> &middot; </span>{% endif -%}
+  {%- if gate %}<span class="font-semibold text-plan">{{ gate }}</span>{% endif -%}
+  {%- if not terminal and not gate %}<span class="text-muted-foreground">{{ missing }}</span>{% endif -%}
 </div>
 {% endmacro %}
 
 {# A place in the building, on one line. The label stays when the value is a dash. #}
-{% macro where(name, value, tone="", spaced=false) %}
+{% macro where(name, value, tone="") %}
 {% set shown = dash(value) %}
-<div{% if spaced %} class="mt-1.5"{% endif %}>
+<div>
   <span class="text-muted-foreground">{{ name }}</span>
   <span class="font-mono font-medium {{ tone if shown != missing else 'text-muted-foreground' }}">
     {{- shown -}}
@@ -92,40 +85,56 @@
 </div>
 {% endmacro %}
 
-{# One number, large, above the word for what it is. #}
-{% macro stat(name, value, tone="") %}
-<div>
-  <div class="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">{{ name }}</div>
-  <div class="font-mono text-xl leading-tight font-bold {{ tone or ('text-muted-foreground' if value == missing) }}">
-    {{- value -}}
-  </div>
-</div>
-{% endmacro %}
-
-{# The flight the list leads with: the gate large enough to read while walking. #}
-{% macro hero(v) %}
-<a class="card transition-shadow hover:ring-primary/40" href="/f/{{ v.booking.id }}">
+{# The flight's card: the number and its pill, the two airports with the rule between
+   them, what each end reads, and what it counts to. The flight page opens with it and
+   the board draws it for every flight inside its day, so the two cannot drift apart.
+   With a link it is the way onto the flight page. #}
+{% macro flight_card(v, link=none) %}
+{% set s = v.snapshot %}
+{% if link %}
+<a class="card transition-shadow hover:ring-primary/40" href="{{ link }}">
+{% else %}
+<div class="card">
+{% endif %}
   <header>
     <h2 class="font-mono tracking-tight">{{ v.flight_number }}</h2>
+    <p>{{ day(v.scheduled_departure, v.origin_tz) }}</p>
     <div class="card-action">{{ badge(v.status) }}</div>
   </header>
-  <section>{{ route(v) }}</section>
-  <section class="grid grid-cols-3 gap-3 border-t pt-4">
-    {{ stat("Gate", dash(v.gate), "text-plan" if v.gate else "") }}
-    {{ stat("Terminal", dash(v.terminal)) }}
-    {{ stat("Seat", dash(v.booking.seat)) }}
+  <section>
+    {# The ends of the row are two lines tall, so the rule is pulled up to the middle of
+       the code rather than the middle of the pair. #}
+    <div class="route items-end">
+      <div>
+        <div class="text-xs text-muted-foreground">{{ v.origin.city if v.origin }}</div>
+        <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.origin_iata }}</div>
+      </div>
+      <div class="mb-4">{{ route_line(v) }}</div>
+      <div class="text-right">
+        <div class="text-xs text-muted-foreground">{{ v.dest.city if v.dest }}</div>
+        <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.dest_iata }}</div>
+      </div>
+    </div>
+    <div class="mt-1">{{ ends(v, s) }}</div>
+    {% if v.cancelled %}
+    <p class="mt-3 text-sm text-stop">{{ cancelled_notice }}</p>
+    {% endif %}
   </section>
-  {% if v.countdown %}
+  {% if v.milestone %}
   <footer class="border-t">
-    <span class="text-sm text-muted-foreground">{{ v.countdown.label }}</span>
+    <span class="text-sm text-muted-foreground">{{ v.milestone.label }}</span>
     <time class="countdown ml-auto font-mono text-lg font-bold"
-          data-to="{{ v.countdown.target.isoformat() }}">{{ until(v.countdown.target) }}</time>
+          data-to="{{ v.milestone.target.isoformat() }}">{{ until(v.milestone.target) }}</time>
   </footer>
   {% endif %}
+{% if link %}
 </a>
+{% else %}
+</div>
+{% endif %}
 {% endmacro %}
 
-{# Everything that is not next. Same facts, one line each. #}
+{# A flight still days away, or already flown. Same facts, one line each. #}
 {% macro row(v) %}
 <a class="item" data-variant="outline" data-size="sm" href="/f/{{ v.booking.id }}">
   <section>
@@ -171,24 +180,13 @@
 {%- endmacro %}
 
 {# What a time was before it moved. It names its day only when the move crossed
-   midnight, because then the bare time would read as the wrong side of it. #}
+   midnight, because then the bare time would read as the wrong side of it, and never
+   its zone, because the time that replaced it is read at the same airport. #}
 {% macro was(line, tz) -%}
 <s class="font-normal text-muted-foreground">
-  {{- at(line.scheduled, tz, with_date=not same_local_date(line.scheduled, line.best, tz)) -}}
+  {{- clock(line.scheduled, tz, with_date=not same_local_date(line.scheduled, line.best, tz)) -}}
 </s>
 {%- endmacro %}
-
-{# A time that has resolved through scheduled -> estimated -> actual, on one line. The
-   original is struck through only when it moved, so an on-time flight reads as one
-   clean time. #}
-{% macro moment(line, tz) %}
-{%- if line.best is none -%}
-<span class="text-muted-foreground">{{ missing }}</span>
-{%- else -%}
-{%- if line.moved %}{{ was(line, tz) }} {% endif -%}
-<span class="{{ tone(line) }}">{{ at(line.best, tz) }}</span>
-{%- endif -%}
-{% endmacro %}
 
 {# One change, on one line: what moved, from what to what, and when we were told. #}
 {% macro change(e, tz) %}
