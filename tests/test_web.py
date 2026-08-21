@@ -7,12 +7,14 @@ and a page that raises on one of them is a page that fails exactly when it is ne
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -27,6 +29,7 @@ from flighter.config import Settings
 from flighter.db import get_session
 from flighter.lookup import Candidate
 from flighter.models import KV, Airport, Booking, FlightEvent, FlightSnapshot, IngestLog
+from flighter.notify import Notifier
 from flighter.widget import LAST_SEEN_KEY
 
 NOW = datetime.now(UTC)
@@ -311,19 +314,48 @@ def test_the_problems_page_says_which_email_was_set_aside_and_why(client: TestCl
 
     body = client.get("/problems").text
 
-    assert "Nothing added from Your booking is confirmed" in body
-    assert "the model timed out" in body
+    assert "Email could not be imported" in body
+    assert "Subject: Your booking is confirmed" in body
+    assert "RuntimeError: the model timed out. It is still flagged in Mail." in body
     assert "Try again" in body
     assert "Ignore" in body
     # The email itself, in Mail, is where the other half of the decision is made.
     assert 'href="message://%3Cabc@icloud.invalid%3E"' in body
 
 
+def test_the_page_and_the_push_say_the_same_thing(client: TestClient, settings: Settings) -> None:
+    """One email, one wording: a person who read the push and then opened the page is
+    not told two different stories about it."""
+    row = set_aside_row()
+    client.session.rows["IngestLog"] = [row]
+
+    sent = asyncio.run(_push_about(row, settings))
+    body = client.get("/problems").text
+
+    assert sent["title"] in body
+    for line in sent["message"].split("\n"):
+        assert line in body
+
+
+async def _push_about(row: IngestLog, settings: Settings) -> dict[str, str]:
+    """The form fields of the push the service would have sent about this email."""
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": 1, "request": "a-uuid"})
+
+    await Notifier(settings, transport=httpx.MockTransport(handle)).mail_failed(
+        message_id=row.message_id, subject=row.subject, reason=row.error
+    )
+    return {name: values[0] for name, values in parse_qs(requests[0].content.decode()).items()}
+
+
 def test_a_set_aside_email_is_kept_off_the_board(client: TestClient) -> None:
     """The board is read in a hurry for a gate; an email that would not parse is not
     news about any flight on it."""
     client.session.rows["IngestLog"] = [set_aside_row()]  # type: ignore[attr-defined]
-    assert "Nothing added from" not in client.get("/").text
+    assert "Email could not be imported" not in client.get("/").text
 
 
 def test_the_problems_tab_is_marked_only_while_something_is_waiting(client: TestClient) -> None:
@@ -345,7 +377,7 @@ def test_trying_a_set_aside_message_again_puts_it_back_in_the_queue(
     client: TestClient,
 ) -> None:
     row = set_aside_row()
-    client.session.rows["IngestLog"] = [row]  # type: ignore[attr-defined]
+    client.session.rows["IngestLog"] = [row]
 
     response = client.post(
         "/mail/retry", data={"message_id": row.message_id}, follow_redirects=False
@@ -362,7 +394,7 @@ def test_ignoring_a_set_aside_message_lets_the_next_sweep_unflag_it(
     client: TestClient,
 ) -> None:
     row = set_aside_row()
-    client.session.rows["IngestLog"] = [row]  # type: ignore[attr-defined]
+    client.session.rows["IngestLog"] = [row]
 
     response = client.post(
         "/mail/ignore", data={"message_id": row.message_id}, follow_redirects=False

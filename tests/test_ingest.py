@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from flighter import ingest
+from flighter import ingest, notices
 from flighter.airports import UnknownAirport
 from flighter.config import Settings
 from flighter.extract import Extraction, Segment
@@ -373,8 +373,7 @@ async def test_a_confirmation_the_model_could_not_read_is_not_called_no_flight(
     assert result.outcome == "error"
     logged = one_session.log["flight_plain.eml"]
     assert ingest.set_aside(logged)
-    assert logged.error is not None and "could be read" in logged.error
-    assert "no flight in it" not in logged.error
+    assert logged.error == notices.UNREADABLE
     assert recorder.created == []
 
 
@@ -550,7 +549,6 @@ async def test_a_message_that_keeps_failing_is_set_aside_and_reported_once(
     assert logged.attempts == len(ingest.RETRY_DELAYS) + 1
     assert [subject for _, subject, _ in notifier.failed] == ["Your booking is confirmed - WS 1502"]
     assert "the model timed out" in notifier.failed[0][2]
-    assert "set aside" in notifier.failed[0][2]
     # And the flag is still on, so the email is where the person left it.
     assert mailbox.cleared == []
 
@@ -641,8 +639,7 @@ async def test_a_marked_email_with_no_flight_is_reported_and_left_flagged(
     (message_id, _, reason) = notifier.failed[0]
     assert len(notifier.failed) == 1
     assert message_id == "airline_promo.eml"
-    assert "no flight" in reason
-    assert "set aside" in reason
+    assert reason == notices.NO_FLIGHT
     assert notifier.imported == []
 
 
@@ -709,7 +706,6 @@ async def test_a_flagged_email_naming_an_unknown_airport_is_set_aside_at_once(
 
     (_, _, reason) = notifier.failed[0]
     assert len(notifier.failed) == 1
-    assert "JFK is not an airport we know" in reason
-    assert "set aside" in reason
+    assert reason == "JFK is not an airport we know."
     # The flag is still on, so the email is where the person left it.
     assert mailbox.cleared == []

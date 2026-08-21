@@ -17,9 +17,10 @@ from typing import NamedTuple
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import bookings as booking_repo
+from . import notices
 from .airports import airport_tz, get_airport
 from .caldav import calendar_link
-from .models import Airport, Booking, BookingStatus, FlightSnapshot
+from .models import Airport, Booking, BookingStatus, FlightSnapshot, IngestLog
 from .phase import (
     AIRBORNE,
     CANCELLED,
@@ -347,6 +348,15 @@ def at(instant: datetime | None, tz: str, *, with_date: bool = False) -> str:
     if instant is None:
         return MISSING
     return format_local(instant, tz, with_date=with_date)
+
+
+def problem_notice(row: IngestLog) -> notices.Notice:
+    """What the Problems page says about one email the service gave up on.
+
+    The same words the phone was sent when it gave up, from the same place, so that a
+    person who read the push and then opened the page is not told two different stories.
+    """
+    return notices.import_failed(subject=row.subject, reason=row.error)
 
 
 def dash(value: object) -> str:
