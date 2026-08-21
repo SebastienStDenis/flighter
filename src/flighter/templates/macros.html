@@ -56,24 +56,27 @@
   {% endfor %}
   {% endif %}
   {% for side in sides %}
-  <div class="mt-1.5 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Term &middot; Gate</div>
-  {% endfor %}
-  {% for side in sides %}
-  {{ building(side.terminal, side.gate) }}
+  {{ building(side.terminal, side.gate, right=loop.index0 == 1) }}
   {% endfor %}
   <div></div>
   {{ where("Bags", s.baggage_claim if s else none) }}
 </div>
 {% endmacro %}
 
-{# Terminal and gate on one line, `T1 · B22`, each keeping its place as a dash until it
-   is known. The gate is the one a person walks to, so it keeps its colour and weight;
-   the terminal is the building it is in. #}
-{% macro building(terminal, gate) %}
-<div class="font-mono font-medium">
-  {%- if terminal %}T{{ terminal }}{% else %}<span class="text-muted-foreground">{{ missing }}</span>{% endif -%}
-  <span class="text-muted-foreground"> &middot; </span>
-  {%- if gate %}<span class="font-semibold text-plan">{{ gate }}</span>{% else %}<span class="text-muted-foreground">{{ missing }}</span>{% endif -%}
+{# Terminal and gate, each a small word over its value so the two line up across the
+   card, and each keeping its place as a dash until it is known. The gate is the one a
+   person walks to, so it keeps its colour and weight. #}
+{% macro building(terminal, gate, right=false) %}
+<div class="mt-1.5 flex gap-4{{ ' justify-end' if right }}">
+  {{ place("Term", terminal) }}
+  {{ place("Gate", gate, "text-plan font-semibold") }}
+</div>
+{% endmacro %}
+
+{% macro place(name, value, tone="") %}
+<div>
+  <div class="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">{{ name }}</div>
+  <div class="font-mono font-medium {{ tone if value else 'text-muted-foreground' }}">{{ dash(value) }}</div>
 </div>
 {% endmacro %}
 
