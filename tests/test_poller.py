@@ -25,7 +25,15 @@ from flighter.cadence import (
     retry_poll_at,
 )
 from flighter.db import session_scope
-from flighter.models import Airport, ApiUsage, Booking, BookingStatus, FlightEvent, FlightSnapshot
+from flighter.models import (
+    Airport,
+    ApiUsage,
+    Booking,
+    BookingStatus,
+    EventKind,
+    FlightEvent,
+    FlightSnapshot,
+)
 from flighter.poller import HISTORY_RETENTION, USAGE_RETENTION, poll_once, prune_history
 
 NOW = datetime(2026, 9, 12, 12, 0, tzinfo=UTC)
@@ -346,5 +354,6 @@ async def test_prune_drops_only_what_is_finished_and_old(
     async with session_scope() as session:
         snapshots = (await session.scalars(select(FlightSnapshot.booking_id))).all()
         assert sorted(snapshots) == sorted([done.id, live.id])
-        assert await session.scalar(select(func.count()).select_from(FlightEvent)) == 1
+        kept = (await session.scalars(select(FlightEvent.kind).order_by(FlightEvent.id))).all()
+        assert kept == [EventKind.BOOKING_ADDED, EventKind.LANDED]
         assert await session.scalar(select(func.count()).select_from(ApiUsage)) == 1

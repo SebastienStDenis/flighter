@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from flighter.airports import UnknownAirport
@@ -23,7 +24,7 @@ from flighter.bookings import (
 )
 from flighter.cadence import FEED_HORIZON
 from flighter.db import session_scope
-from flighter.models import Airport, Booking, FlightSnapshot
+from flighter.models import Airport, Booking, EventKind, FlightEvent, FlightSnapshot
 
 JFK = "America/New_York"
 LHR = "Europe/London"
@@ -141,6 +142,41 @@ async def test_a_booking_carries_its_local_date_and_a_first_poll(seeded: None) -
         assert booking.scheduled_departure_utc == datetime(2026, 9, 13, 3, 30, tzinfo=UTC)
         assert booking.departure_local_date == date(2026, 9, 12)
         assert booking.next_poll_at == booking.scheduled_departure_utc - FEED_HORIZON
+
+
+async def events_for(session: AsyncSession, booking_id: int) -> list[str]:
+    stmt = (
+        select(FlightEvent.kind)
+        .where(FlightEvent.booking_id == booking_id)
+        .order_by(FlightEvent.id)
+    )
+    return list(await session.scalars(stmt))
+
+
+async def test_adding_a_flight_queues_it_for_the_calendar(seeded: None) -> None:
+    async with session_scope() as session:
+        booking = await book(session, datetime(2026, 9, 12, 9, 0))
+        assert await events_for(session, booking.id) == [EventKind.BOOKING_ADDED]
+
+
+async def test_a_review_booking_is_added_only_once_it_is_kept(seeded: None) -> None:
+    async with session_scope() as session:
+        booking = await book(session, datetime(2026, 9, 12, 9, 0), status="pending_review")
+        assert await events_for(session, booking.id) == []
+        await update_booking(session, booking.id, status="active")
+        assert await events_for(session, booking.id) == [EventKind.BOOKING_ADDED]
+
+
+async def test_an_edit_restates_the_flight_and_a_no_op_does_not(seeded: None) -> None:
+    async with session_scope() as session:
+        booking = await book(session, datetime(2026, 9, 12, 9, 0))
+        await update_booking(session, booking.id, seat="12A")
+        await update_booking(session, booking.id, seat="12A")
+        await update_booking(session, booking.id, next_poll_at=datetime.now(UTC))
+        assert await events_for(session, booking.id) == [
+            EventKind.BOOKING_ADDED,
+            EventKind.BOOKING_EDITED,
+        ]
 
 
 async def test_a_review_booking_is_not_queued(seeded: None) -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from flighter.bookings import create_booking, delete_booking
@@ -199,9 +199,32 @@ async def tracked(database: async_sessionmaker[AsyncSession], *events: FlightEve
             departure_local=datetime(2026, 9, 12, 15, 0),
             source="manual",
         )
+        # Already on the calendar: what is under test is what the poller finds later.
+        now = datetime.now(UTC)
+        await session.execute(
+            update(FlightEvent)
+            .where(FlightEvent.booking_id == booking.id)
+            .values(notified_at=now, calendar_synced_at=now)
+        )
         for event in events:
             event.booking_id = booking.id
         session.add_all(events)
+        return booking.id
+
+
+async def fresh(database: async_sessionmaker[AsyncSession]) -> int:
+    async with session_scope() as session:
+        session.add_all(airports())
+        await session.flush()
+        booking = await create_booking(
+            session,
+            marketing_carrier="DL",
+            marketing_number="1234",
+            origin_iata="JFK",
+            dest_iata="LAX",
+            departure_local=datetime(2026, 9, 12, 15, 0),
+            source="manual",
+        )
         return booking.id
 
 
@@ -212,6 +235,24 @@ async def pending() -> list[tuple[str, bool, bool]]:
             (row.kind, row.notified_at is not None, row.calendar_synced_at is not None)
             for row in rows
         ]
+
+
+async def test_a_new_flight_reaches_the_calendar_without_a_push(
+    database: async_sessionmaker[AsyncSession],
+) -> None:
+    """Adding a flight is news to the calendar months before any snapshot exists, and
+    is not news to the person who just typed it in."""
+    booking_id = await fresh(database)
+
+    notifier, calendar = FakeNotifier(), FakeCalendar()
+    await dispatch_pending(notifier, calendar)
+    assert notifier.sent == []
+    assert calendar.upserts == [(booking_id, None)]
+    assert await pending() == [(EventKind.BOOKING_ADDED, True, True)]
+    async with session_scope() as session:
+        booking = await session.get(Booking, booking_id)
+        assert booking is not None
+        assert booking.calendar_event_uid == f"flighter-{booking_id}@flighter.invalid"
 
 
 async def test_a_delivered_event_is_stamped_on_both_sides(
@@ -232,6 +273,7 @@ async def test_a_delivered_event_is_stamped_on_both_sides(
     assert notifier.sent == [(booking_id, EventKind.GATE_CHANGED, "America/New_York")]
     assert calendar.upserts == [(booking_id, "C14")]
     assert await pending() == [
+        (EventKind.BOOKING_ADDED, True, True),
         (EventKind.GATE_CHANGED, True, True),
         (EventKind.ARRIVAL_TIME_CHANGED, True, True),
     ]
@@ -247,13 +289,19 @@ async def test_a_failed_push_is_not_stamped_and_is_retried(
     await tracked(database, FlightEvent(kind=EventKind.GATE_CHANGED, old_value="B", new_value="C"))
 
     await dispatch_pending(FakeNotifier(failing=True), FakeCalendar(failing=True))
-    assert await pending() == [(EventKind.GATE_CHANGED, False, False)]
+    assert await pending() == [
+        (EventKind.BOOKING_ADDED, True, True),
+        (EventKind.GATE_CHANGED, False, False),
+    ]
 
     notifier, calendar = FakeNotifier(), FakeCalendar()
     await dispatch_pending(notifier, calendar)
     assert len(notifier.sent) == 1
     assert len(calendar.upserts) == 1
-    assert await pending() == [(EventKind.GATE_CHANGED, True, True)]
+    assert await pending() == [
+        (EventKind.BOOKING_ADDED, True, True),
+        (EventKind.GATE_CHANGED, True, True),
+    ]
 
 
 async def test_one_failure_does_not_hold_up_the_events_behind_it(
@@ -278,6 +326,7 @@ async def test_one_failure_does_not_hold_up_the_events_behind_it(
 
     await dispatch_pending(FlakyNotifier(), FakeCalendar())
     assert await pending() == [
+        (EventKind.BOOKING_ADDED, True, True),
         (EventKind.GATE_CHANGED, False, True),
         (EventKind.LANDED, True, True),
     ]
@@ -294,7 +343,10 @@ async def test_a_deleted_flight_is_neither_pushed_nor_put_back_on_the_calendar(
     await dispatch_pending(notifier, calendar)
     assert notifier.sent == []
     assert calendar.upserts == []
-    assert await pending() == [(EventKind.GATE_CHANGED, False, False)]
+    assert await pending() == [
+        (EventKind.BOOKING_ADDED, True, True),
+        (EventKind.GATE_CHANGED, False, False),
+    ]
 
 
 async def test_delivery_gives_up_on_stale_events(
@@ -320,6 +372,7 @@ async def test_delivery_gives_up_on_stale_events(
     # for either.
     assert len(calendar.upserts) == 1
     assert await pending() == [
+        (EventKind.BOOKING_ADDED, True, True),
         (EventKind.GATE_CHANGED, False, True),
         (EventKind.LANDED, False, False),
     ]

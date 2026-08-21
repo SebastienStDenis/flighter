@@ -1,9 +1,9 @@
 """Change detection over consecutive AeroAPI snapshots, and the fan-out to push and calendar.
 
-The poller writes a snapshot and calls straight in here. Everything a person or a
-calendar ever hears about a flight starts life as a FlightEvent row written by this
-module, which is what makes delivery restartable: the two `*_at` columns are the only
-record of what has already gone out.
+The poller writes a snapshot and calls straight in here; `bookings` writes a row of its
+own when a flight is added or edited by hand. Everything a person or a calendar ever
+hears about a flight starts life as a FlightEvent row, which is what makes delivery
+restartable: the two `*_at` columns are the only record of what has already gone out.
 
 Delivery never holds a database transaction open across a network call. Each pass reads
 what is pending and closes the session, talks to Pushover or iCloud, then opens a fresh

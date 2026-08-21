@@ -18,7 +18,7 @@ from sqlalchemy.orm import aliased
 
 from .airports import airport_tz
 from .cadence import first_poll_at
-from .models import Booking, BookingStatus, FlightSnapshot
+from .models import Booking, BookingStatus, EventKind, FlightEvent, FlightSnapshot
 from .timezones import same_local_date, to_local, to_utc
 
 log = logging.getLogger(__name__)
@@ -30,6 +30,9 @@ _EDITABLE_FIELDS = frozenset(Booking.__table__.columns.keys()) - {
     "updated_at",
     "departure_local_date",
 }
+
+# Poller bookkeeping, not a fact about the trip; moving it is not an edit worth a sync.
+_UNTRACKED_EDITS = frozenset({"next_poll_at"})
 
 # Wide enough to catch every booking that could share a local calendar day with the
 # departure being checked, on any pair of zones; the local date decides from there.
@@ -126,7 +129,21 @@ async def create_booking(
     )
     session.add(booking)
     await session.flush()
+    if booking.status == BookingStatus.ACTIVE:
+        _record(session, booking, EventKind.BOOKING_ADDED)
+        await session.flush()
     return booking
+
+
+def _record(session: AsyncSession, booking: Booking, kind: EventKind) -> None:
+    """Queue the booking for the calendar by the same road every snapshot change takes.
+
+    Writing the calendar from here would put a network call inside a web request and
+    lose the entry outright when iCloud is down; a FlightEvent row is delivered by the
+    dispatcher, retried until it lands, and pushes nobody because neither kind is one
+    the notifier sends.
+    """
+    session.add(FlightEvent(booking_id=booking.id, kind=kind))
 
 
 async def get_booking(session: AsyncSession, booking_id: int) -> Booking | None:
@@ -144,8 +161,10 @@ async def update_booking(
     if unknown:
         raise ValueError(f"not booking columns: {', '.join(sorted(unknown))}")
 
+    before = {name: getattr(booking, name) for name in fields}
     for name, value in fields.items():
         setattr(booking, name, _normalised(name, value))
+    changed = {name for name in fields if getattr(booking, name) != before[name]}
 
     if "scheduled_departure_utc" in fields or "origin_iata" in fields:
         booking.departure_local_date = await _local_date(
@@ -160,6 +179,12 @@ async def update_booking(
         and booking.next_poll_at is None
     ):
         booking.next_poll_at = first_poll_at(datetime.now(UTC), booking.scheduled_departure_utc)
+
+    # A booking kept after review is reaching the calendar for the first time, so it is
+    # added rather than edited; one that was already active and moved is restated.
+    if booking.status == BookingStatus.ACTIVE and changed - _UNTRACKED_EDITS:
+        kind = EventKind.BOOKING_ADDED if "status" in changed else EventKind.BOOKING_EDITED
+        _record(session, booking, kind)
 
     await session.flush()
     return booking
