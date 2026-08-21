@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from flighter.cadence import ABANDON_AFTER
 from flighter.models import Airport, Booking, BookingStatus, FlightSnapshot
 from flighter.phase import (
     AIRBORNE,
@@ -38,6 +39,7 @@ from flighter.views import (
 
 DEPARTURE = datetime(2026, 9, 12, 18, 40, tzinfo=UTC)
 ARRIVAL = datetime(2026, 9, 12, 22, 15, tzinfo=UTC)
+NOW = DEPARTURE - timedelta(hours=1)
 
 JFK = Airport(iata="JFK", name="Kennedy", city="New York", country="US", tz="America/New_York")
 LAX = Airport(
@@ -85,12 +87,12 @@ def test_a_flight_days_out_or_called_off_has_nothing_to_watch_yet() -> None:
 
 
 def test_days_out_is_scheduled_rather_than_counted_down() -> None:
-    assert milestone(UPCOMING, booking(), None) == Milestone("Scheduled", DEPARTURE)
+    assert milestone(UPCOMING, booking(), None, now=NOW) == Milestone("Scheduled", DEPARTURE)
 
 
 def test_on_the_day_the_card_counts_to_departure() -> None:
     moved = snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=20))
-    assert milestone(DAY_OF, booking(), moved) == Milestone(
+    assert milestone(DAY_OF, booking(), moved, now=NOW) == Milestone(
         "Departs in", DEPARTURE + timedelta(minutes=20)
     )
 
@@ -101,7 +103,7 @@ def test_pushback_skips_wheels_up_and_counts_to_the_landing() -> None:
         actual_out=DEPARTURE + timedelta(minutes=3),
         estimated_on=ARRIVAL - timedelta(minutes=9),
     )
-    assert milestone(TAXIING, booking(), taxiing) == Milestone(
+    assert milestone(TAXIING, booking(), taxiing, now=NOW) == Milestone(
         "Lands in", ARRIVAL - timedelta(minutes=9)
     )
 
@@ -113,14 +115,14 @@ def test_in_the_air_counts_to_touchdown_not_the_gate() -> None:
         estimated_on=ARRIVAL - timedelta(minutes=9),
         estimated_in=ARRIVAL,
     )
-    assert milestone(AIRBORNE, booking(), airborne) == Milestone(
+    assert milestone(AIRBORNE, booking(), airborne, now=NOW) == Milestone(
         "Lands in", ARRIVAL - timedelta(minutes=9)
     )
 
 
 def test_without_a_runway_time_the_landing_is_the_gate_time() -> None:
     airborne = snapshot(actual_out=DEPARTURE, actual_off=DEPARTURE + timedelta(minutes=12))
-    assert milestone(AIRBORNE, booking(), airborne) == Milestone("Lands in", ARRIVAL)
+    assert milestone(AIRBORNE, booking(), airborne, now=NOW) == Milestone("Lands in", ARRIVAL)
 
 
 def test_wheels_down_counts_to_the_gate() -> None:
@@ -129,30 +131,45 @@ def test_wheels_down_counts_to_the_gate() -> None:
         actual_on=ARRIVAL - timedelta(minutes=10),
         estimated_in=ARRIVAL + timedelta(minutes=4),
     )
-    assert milestone(LANDED, booking(), landed) == Milestone(
+    assert milestone(LANDED, booking(), landed, now=NOW) == Milestone(
         "At the gate in", ARRIVAL + timedelta(minutes=4)
     )
 
 
 def test_at_the_gate_there_is_nothing_left_to_count() -> None:
     done = snapshot(actual_off=DEPARTURE, actual_on=ARRIVAL, actual_in=ARRIVAL)
-    assert milestone(LANDED, booking(), done) is None
+    assert milestone(LANDED, booking(), done, now=NOW) is None
 
 
 def test_a_diversion_still_lands_somewhere() -> None:
     diverted = snapshot(diverted=True, actual_off=DEPARTURE, estimated_on=ARRIVAL)
-    assert milestone(DIVERTED, booking(), diverted) == Milestone("Lands in", ARRIVAL)
+    assert milestone(DIVERTED, booking(), diverted, now=NOW) == Milestone("Lands in", ARRIVAL)
 
 
 def test_nothing_known_ahead_is_no_milestone_rather_than_a_guess() -> None:
     no_arrival = booking(scheduled_arrival_utc=None)
     taxiing = snapshot(actual_out=DEPARTURE)
-    assert milestone(TAXIING, no_arrival, taxiing) is None
-    assert milestone(LANDED, no_arrival, snapshot(actual_on=ARRIVAL)) is None
+    assert milestone(TAXIING, no_arrival, taxiing, now=NOW) is None
+    assert milestone(LANDED, no_arrival, snapshot(actual_on=ARRIVAL), now=NOW) is None
 
 
 def test_a_cancelled_flight_counts_to_nothing() -> None:
-    assert milestone(CANCELLED, booking(), snapshot(cancelled=True)) is None
+    assert milestone(CANCELLED, booking(), snapshot(cancelled=True), now=NOW) is None
+
+
+def test_a_rung_long_overdue_is_not_waiting_on_the_feed_any_more() -> None:
+    """Past the poller's own patience, the count stops rather than growing for good,
+    whatever stopped the news."""
+    airborne = snapshot(actual_out=DEPARTURE, actual_off=DEPARTURE, estimated_on=ARRIVAL)
+    still_late = ARRIVAL + ABANDON_AFTER - timedelta(minutes=1)
+    assert milestone(AIRBORNE, booking(), airborne, now=still_late) == Milestone(
+        "Lands in", ARRIVAL
+    )
+    given_up = ARRIVAL + ABANDON_AFTER + timedelta(minutes=1)
+    assert milestone(AIRBORNE, booking(), airborne, now=given_up) is None
+    # A booking nothing ever polled, days past its departure, counts to nothing either.
+    assert milestone(DAY_OF, booking(), None, now=DEPARTURE + timedelta(days=2)) is None
+    assert view(booking(scheduled_departure_utc=now_ish(days=-2)), None).milestone is None
 
 
 def test_the_view_asks_the_same_question() -> None:
@@ -408,6 +425,49 @@ def test_the_view_swaps_the_words_once_the_time_has_gone() -> None:
     v = view(booking(scheduled_departure_utc=leaves), overdue)
     assert v.milestone_label == "Due at the gate"
     assert v.milestone_due == "Due at the gate"
+
+
+def test_a_flight_the_feed_lost_is_flown_with_nothing_left_to_count_to() -> None:
+    """The poller closes a booking it never saw land, and the last snapshot stands.
+
+    Left to itself the card would read "Due to land 3d ago", and keep growing.
+    """
+    leaves = now_ish(days=-3)
+    flown = booking(scheduled_departure_utc=leaves, status=BookingStatus.COMPLETED)
+    lost_airborne = snapshot(
+        actual_out=leaves,
+        actual_off=leaves + timedelta(minutes=12),
+        estimated_on=leaves + timedelta(hours=5),
+        progress_percent=40,
+    )
+    v = view(flown, lost_airborne)
+    assert v.flown
+    assert v.status == ("Flown", "quiet")
+    assert v.milestone is None and v.milestone_label is None
+    assert v.airborne_window is None
+    assert v.progress_percent == 100
+
+    lost_taxiing = snapshot(actual_out=leaves, estimated_in=leaves + timedelta(hours=5))
+    assert view(flown, lost_taxiing).status == ("Flown", "quiet")
+    assert view(flown, lost_taxiing).milestone is None
+
+    never_seen = view(flown, None)
+    assert never_seen.status == ("Flown", "quiet")
+    assert never_seen.milestone is None
+    assert never_seen.block_time is None
+
+
+def test_a_flown_flight_that_was_seen_to_land_keeps_saying_so() -> None:
+    leaves = now_ish(days=-3)
+    flown = booking(scheduled_departure_utc=leaves, status=BookingStatus.COMPLETED)
+    down = snapshot(
+        actual_out=leaves,
+        actual_off=leaves,
+        actual_on=leaves + timedelta(hours=5),
+        estimated_in=leaves + timedelta(hours=5, minutes=10),
+    )
+    assert view(flown, down).status == ("Landed", "ok")
+    assert view(flown, down).milestone is None
 
 
 # --- where a diverted flight is going --------------------------------------------------------

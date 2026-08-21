@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import bookings as booking_repo
 from . import notices
 from .airports import get_airport
+from .cadence import ABANDON_AFTER
 from .caldav import calendar_link
 from .models import Airport, Booking, BookingStatus, FlightSnapshot, IngestLog
 from .phase import (
@@ -39,7 +40,7 @@ from .phase import (
     landing_estimate,
     progress_estimate,
 )
-from .timezones import format_local, parse_instant, to_local
+from .timezones import ensure_utc, format_local, parse_instant, to_local
 
 # What a value looks like when we simply do not have it. Gates and baggage belts stay
 # null until close to the event, so this is one of the most common things on the page.
@@ -216,19 +217,25 @@ class FlightView:
         return bool(self.snapshot is not None and self.snapshot.cancelled)
 
     @property
+    def flown(self) -> bool:
+        return flown(self.booking)
+
+    @property
     def progress_percent(self) -> int | None:
         """How far along the rule the aircraft is drawn.
 
         A flight that has landed is all the way there whatever the feed last said: its
         figure stops at the last poll, which may have been well short of the runway.
         """
-        if self.phase == LANDED or self.booking.status == BookingStatus.COMPLETED:
+        if self.phase == LANDED or self.flown:
             return 100
         return progress_estimate(self.booking, self.snapshot, datetime.now(UTC))
 
     @property
     def airborne_window(self) -> tuple[datetime, datetime] | None:
         """Wheels-up and wheels-down, for the page to move the aircraft between loads."""
+        if self.flown:
+            return None
         return airborne_window(self.booking, self.snapshot, datetime.now(UTC))
 
     @property
@@ -243,7 +250,7 @@ class FlightView:
         then it says how long the hop is. Once the flight is under way the aircraft's
         place on the rule is the answer, and afterwards there is nothing left to expect.
         """
-        if self.phase not in (UPCOMING, DAY_OF):
+        if self.flown or self.phase not in (UPCOMING, DAY_OF):
             return None
         arrival = self.arrival
         if arrival is None or arrival <= self.departure:
@@ -253,7 +260,7 @@ class FlightView:
     @property
     def milestone(self) -> Milestone | None:
         """The one number worth looking at, and what to call it."""
-        return milestone(self.phase, self.booking, self.snapshot)
+        return milestone(self.phase, self.booking, self.snapshot, now=datetime.now(UTC))
 
     @property
     def milestone_label(self) -> str | None:
@@ -341,6 +348,18 @@ class FlightView:
         return self.ended + LINGER
 
 
+def flown(booking: Booking) -> bool:
+    """Whether the poller has closed the book on this flight.
+
+    Usually that is an hour and a half after the wheels stopped. It is also what happens
+    when the feed loses a flight part-way through and nothing more is ever heard: the
+    snapshot then says airborne, or taxiing, or nothing at all, for good. Whatever it
+    says, there is nothing left to count to, and a countdown past its time would go on
+    growing for as long as the page exists.
+    """
+    return booking.status == BookingStatus.COMPLETED
+
+
 def scheduled_departure(booking: Booking, snapshot: FlightSnapshot | None) -> datetime:
     """The planned gate departure: the feed's schedule once it has one, else the ticket's."""
     if snapshot is not None and snapshot.scheduled_out is not None:
@@ -376,6 +395,8 @@ def status(
         if snapshot is not None and snapshot.actual_in is not None:
             return Status("Arrived", "ok")
         return Status("Landed", "ok")
+    if flown(booking):
+        return Status("Flown", "quiet")
     if phase == AIRBORNE:
         # A late pushback is history once the aircraft is off the ground; the only
         # question left is whether it still gets in late.
@@ -385,8 +406,6 @@ def status(
         if late is not None and late >= ARRIVAL_DELAY_THRESHOLD:
             return Status("Arriving late", "warn")
         return Status("In the air", "live")
-    if booking.status == BookingStatus.COMPLETED:
-        return Status("Flown", "quiet")
     if phase == TAXIING:
         return Status("Taxiing", "live")
     delay = departure_estimate(booking, snapshot) - scheduled_departure(booking, snapshot)
@@ -419,16 +438,29 @@ def day_word(instant: datetime, now: datetime, tz: str) -> str | None:
     return None
 
 
-def milestone(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> Milestone | None:
+def milestone(
+    phase: Phase, booking: Booking, snapshot: FlightSnapshot | None, *, now: datetime
+) -> Milestone | None:
     """The first thing still ahead of the flight that has a time against it.
 
     The ladder is departure, wheels up, landing, the gate. A rung is skipped once it has
     happened, and also when nobody has said when it will: nothing upstream estimates
     wheels up, so a flight taxiing out counts to its landing, and a flight with no
     arrival time at all has no milestone rather than a made-up one.
+
+    A rung whose time passed as long ago as the poller's own patience is not waiting on
+    the feed any more. Whatever stopped the news - a lost flight, a tripped budget, no
+    key to poll with - the count would otherwise grow for as long as the booking stands.
     """
-    if phase == CANCELLED:
+    if phase == CANCELLED or flown(booking):
         return None
+    next_up = _next_rung(phase, booking, snapshot)
+    if next_up is None or next_up.target <= ensure_utc(now) - ABANDON_AFTER:
+        return None
+    return next_up
+
+
+def _next_rung(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> Milestone | None:
     if phase == UPCOMING:
         return Milestone("Scheduled", departure_estimate(booking, snapshot))
     if phase == DAY_OF:
