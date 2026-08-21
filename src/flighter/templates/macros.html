@@ -145,6 +145,13 @@
 
 {# A fact a person may change. The row is the control: tapping it opens the ticket
    dialog on that box, so there is nothing to find and nothing to miss. #}
+{% macro detail(name, value, mono=false) %}
+<div class="item" data-size="xs">
+  <section><p>{{ name }}</p></section>
+  <aside class="text-right font-medium{{ ' font-mono' if mono }}">{{ value }}</aside>
+</div>
+{% endmacro %}
+
 {% macro editable(name, value, field, mono=false) %}
 <button class="item w-full text-left" data-size="xs" type="button"
         onclick="editTicket('{{ field }}')" aria-label="Change {{ name|lower }}">
