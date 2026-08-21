@@ -136,7 +136,9 @@
     </h3>
     <p class="font-mono">
       {{- at(v.departure, v.origin_tz) }}
-      {%- if v.gate %} &middot; <span class="font-semibold text-plan">Gate {{ v.gate }}</span>{% endif -%}
+      {%- if v.arrival %} &rarr; {{ at(v.arrival, v.dest_tz) }}{% endif %}
+      {%- if v.gate %} &middot; <span class="font-semibold text-plan">Gate {{ v.gate }}</span>{% endif %}
+      {%- if v.booking.seat %} &middot; Seat {{ v.booking.seat }}{% endif -%}
     </p>
   </section>
   <aside>{{ badge(v.status) }}</aside>

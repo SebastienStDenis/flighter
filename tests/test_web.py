@@ -290,6 +290,30 @@ def test_a_codeshare_is_shown_under_the_number_booked_with_a_note_on_who_flies_i
     assert "Operated" not in client.get("/").text
 
 
+def test_a_flown_row_says_when_it_left_and_landed_and_where_you_sat(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    left = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    landed = left + timedelta(hours=7)
+    show(
+        monkeypatch,
+        booking(seat="14A", scheduled_departure_utc=left, scheduled_arrival_utc=landed),
+        None,
+    )
+
+    assert "08:00 EDT &rarr; 20:00 BST &middot; Seat 14A" in client.get("/").text
+
+
+def test_the_plus_is_the_tab_that_lights_on_the_add_page(client: TestClient) -> None:
+    board = client.get("/").text
+    assert 'href="/" data-variant="secondary" aria-current="page"' in " ".join(board.split())
+    assert 'aria-label="Add a flight" data-variant="ghost"' in " ".join(board.split())
+
+    add = " ".join(client.get("/f/new").text.split())
+    assert 'href="/" data-variant="ghost"' in add
+    assert 'aria-label="Add a flight" data-variant="secondary" aria-current="page"' in add
+
+
 def test_the_board_offers_one_tap_out_of_a_spent_budget(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
