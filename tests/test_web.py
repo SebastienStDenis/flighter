@@ -587,9 +587,15 @@ def struck(was: datetime, tz: str, *, with_date: bool = False) -> str:
     return f'<s class="font-normal text-muted-foreground">{shown}</s>'
 
 
-def big_time(instant: datetime, tz: str, tone: str = "") -> str:
-    """The card's large time: the clock in its tone, the zone small and grey beside it."""
+def big_time(instant: datetime, tz: str, tone: str = "", *, arrival: bool = False) -> str:
+    """The card's large time: the clock in its tone, the zone small and grey on its
+    outer side, which is after a departure and before an arrival."""
     local = to_local(instant, tz)
+    if arrival:
+        return (
+            f'{tone}"><span class="mr-1 text-[0.6875rem] font-medium text-muted-foreground">'
+            f"{local:%Z}</span>{local:%H:%M}"
+        )
     return (
         f'{tone}">{local:%H:%M}'
         f'<span class="ml-1 text-[0.6875rem] font-medium text-muted-foreground">{local:%Z}</span>'
@@ -696,7 +702,8 @@ def place(name: str, value: str, tone: str = "") -> str:
     """A terminal or gate box as the card draws it: the word, then the value under it."""
     shown = tone if value != "-" else "text-muted-foreground"
     return (
-        f'<div class="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">'
+        '<div class="text-[0.6875rem] leading-4 font-medium tracking-wide '
+        'text-muted-foreground uppercase">'
         f'{name}</div>\n  <div class="font-mono font-medium {shown}">{value}</div>'
     )
 
@@ -740,7 +747,7 @@ def test_the_board_card_strikes_a_time_that_slipped_and_leaves_one_that_held(
     late = DEPARTURE + timedelta(minutes=25)
     assert big_time(late, "America/Toronto", "text-stop") in body
     assert struck(DEPARTURE, "America/Toronto") in body
-    assert big_time(ARRIVAL + timedelta(minutes=10), "Europe/London") in body
+    assert big_time(ARRIVAL + timedelta(minutes=10), "Europe/London", arrival=True) in body
     assert struck(ARRIVAL, "Europe/London") not in body
 
 
@@ -1492,8 +1499,11 @@ def test_a_diverted_flight_names_where_it_is_going_instead(
     body = page.text
     assert "<title>AC871 YUL to MAN</title>" in body
     card = top_card(body)
-    assert "Manchester" in card and 'tracking-tight text-stop">MAN</div>' in card
-    assert "Diverted to Manchester,\n      not London" in card
+    assert "Manchester" in card
+    # The new airport stands where the code goes, with the booked one struck under it.
+    assert 'tracking-tight text-stop">MAN</div>' in card
+    assert '<s class="-mt-3.5 mb-2.5 block font-mono text-sm text-muted-foreground">LHR</s>' in card
+    assert "Diverted to" not in card
     assert "Lands in" in body
     # The board row follows the aircraft too.
     show_board(monkeypatch, [(booking(), sent_elsewhere)])

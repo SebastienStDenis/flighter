@@ -32,44 +32,54 @@
    with the departure's whatever else either side has to say. #}
 {% macro ends(v, s) %}
 {% set sides = [
-  {"line": v.departs, "tz": v.origin_tz,
-   "terminal": s.terminal_origin if s else none, "gate": s.gate_origin if s else none},
-  {"line": v.arrives, "tz": v.dest_tz,
-   "terminal": s.terminal_destination if s else none, "gate": s.gate_destination if s else none},
+  {"line": v.departs, "tz": v.origin_tz, "right": false, "places": [
+    ("Term", s.terminal_origin if s else none, ""),
+    ("Gate", s.gate_origin if s else none, "text-plan font-semibold"),
+  ]},
+  {"line": v.arrives, "tz": v.dest_tz, "right": true, "places": [
+    ("Bags", s.baggage_claim if s else none, ""),
+    ("Term", s.terminal_destination if s else none, ""),
+    ("Gate", s.gate_destination if s else none, "text-plan font-semibold"),
+  ]},
 ] %}
 <div class="ends">
+  {# The airport a diversion was booked for, struck under the one it is going to. A row
+     of its own, so the days below stay level. #}
+  {% if v.diverted_to %}
+  <div></div>
+  <s class="-mt-3.5 mb-2.5 block font-mono text-sm text-muted-foreground">{{ v.booking.dest_iata }}</s>
+  {% endif %}
   {% for side in sides %}
   <div class="font-mono text-xs text-muted-foreground">
     {%- if side.line.best is not none %}{{ day(side.line.best, side.tz) }}{% endif -%}
   </div>
   {% endfor %}
+  {# The zone sits on the outside of each time, so the two clocks read from the edges
+     of the card the way the codes above them do. #}
   {% for side in sides %}
-  <div class="font-mono text-xl leading-tight font-bold {{ tone(side.line) or ('text-muted-foreground' if side.line.best is none) }}">
+  {% set abbr = zone(side.line.best, side.tz) %}
+  <div class="mt-0.5 font-mono text-xl leading-tight font-bold {{ tone(side.line) or ('text-muted-foreground' if side.line.best is none) }}">
+    {%- if abbr and side.right %}<span class="mr-1 text-[0.6875rem] font-medium text-muted-foreground">{{ abbr }}</span>{% endif -%}
     {{- clock(side.line.best, side.tz) -}}
-    {%- set abbr = zone(side.line.best, side.tz) -%}
-    {%- if abbr %}<span class="ml-1 text-[0.6875rem] font-medium text-muted-foreground">{{ abbr }}</span>{% endif -%}
+    {%- if abbr and not side.right %}<span class="ml-1 text-[0.6875rem] font-medium text-muted-foreground">{{ abbr }}</span>{% endif -%}
   </div>
   {% endfor %}
   {% if v.departs.moved or v.arrives.moved %}
   {% for side in sides %}
-  <div class="font-mono text-xs">{% if side.line.moved %}{{ was(side.line, side.tz) }}{% endif %}</div>
+  <div class="mt-0.5 font-mono text-xs">{% if side.line.moved %}{{ was(side.line, side.tz) }}{% endif %}</div>
   {% endfor %}
   {% endif %}
-  <div class="mt-1.5 flex gap-4">
-    {{ place("Term", s.terminal_origin if s else none) }}
-    {{ place("Gate", s.gate_origin if s else none, "text-plan font-semibold") }}
+  {% for side in sides %}
+  <div class="mt-3 flex gap-4{{ ' justify-end' if side.right }}">
+    {% for name, value, tone_class in side.places %}{{ place(name, value, tone_class) }}{% endfor %}
   </div>
-  <div class="mt-1.5 flex justify-end gap-4">
-    {{ place("Bags", s.baggage_claim if s else none) }}
-    {{ place("Term", s.terminal_destination if s else none) }}
-    {{ place("Gate", s.gate_destination if s else none, "text-plan font-semibold") }}
-  </div>
+  {% endfor %}
 </div>
 {% endmacro %}
 
 {% macro place(name, value, tone="") %}
 <div>
-  <div class="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">{{ name }}</div>
+  <div class="text-[0.6875rem] leading-4 font-medium tracking-wide text-muted-foreground uppercase">{{ name }}</div>
   <div class="font-mono font-medium {{ tone if value else 'text-muted-foreground' }}">{{ dash(value) }}</div>
 </div>
 {% endmacro %}
@@ -87,30 +97,25 @@
 {% endif %}
   <header>
     <h2 class="font-mono tracking-tight">{{ v.flight_number }}</h2>
-    <p>{{ day(v.scheduled_departure, v.origin_tz) }}</p>
     <div class="card-action">{{ badge(v.status) }}</div>
   </header>
   <section>
-    {# The ends of the row are two lines tall, so the rule is pulled up to the middle of
+    {# The ends of the row are two lines tall, so the rule is pushed down to the middle of
        the code rather than the middle of the pair. #}
-    <div class="route items-end">
+    <div class="route items-start">
       <div>
         <div class="text-xs text-muted-foreground">{{ v.origin.city if v.origin }}</div>
         <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.origin_iata }}</div>
       </div>
-      <div class="mb-4">{{ route_line(v) }}</div>
+      <div class="mt-8">{{ route_line(v) }}</div>
       <div class="text-right">
         <div class="text-xs text-muted-foreground">{{ v.destination.city if v.destination }}</div>
         <div class="font-mono text-2xl font-bold tracking-tight{{ ' text-stop' if v.diverted_to }}">{{ v.destination_iata }}</div>
       </div>
     </div>
-    <div class="mt-1">{{ ends(v, s) }}</div>
+    <div class="mt-2.5">{{ ends(v, s) }}</div>
     {% if v.cancelled %}
     <p class="mt-3 text-sm text-stop">{{ cancelled_notice }}</p>
-    {% endif %}
-    {% if v.diverted_to %}
-    <p class="mt-3 text-sm text-stop">Diverted to {{ v.destination.city if v.destination else v.diverted_to }},
-      not {{ v.dest.city if v.dest else v.booking.dest_iata }}</p>
     {% endif %}
   </section>
   {% if v.milestone %}
