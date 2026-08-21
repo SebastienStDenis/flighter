@@ -92,10 +92,12 @@ async def no_session() -> AsyncIterator[Any]:
     yield None
 
 
-async def find(client: FakeClient, day: date = DAY, number: str = "871") -> list[Candidate]:
+async def find(
+    client: FakeClient, day: date = DAY, number: str = "871", carrier: str = "AC"
+) -> list[Candidate]:
     """Look up a flight as though the day being asked about were today."""
     lookup_client: Any = client
-    return await find_flights("AC", number, day, lookup_client, sessions=no_session, today=DAY)
+    return await find_flights(carrier, number, day, lookup_client, sessions=no_session, today=DAY)
 
 
 # --- What somebody types -------------------------------------------------------------
@@ -194,6 +196,34 @@ async def test_the_airline_that_actually_flies_it_is_kept() -> None:
 
     assert found.marketing_carrier == "AC" and found.marketing_number == "871"
     assert found.operating_carrier == "LH" and found.operating_number == "479"
+
+
+async def test_the_number_typed_is_the_one_kept_when_the_operator_answers() -> None:
+    """LH8811 is AC871 with a Lufthansa number on it; the board should say LH8811."""
+    (found,) = await find(FakeClient(row()), carrier="LH", number="8811")
+
+    assert found.marketing_carrier == "LH" and found.marketing_number == "8811"
+    assert found.operating_carrier == "AC" and found.operating_number == "871"
+    assert found.operated == "Operated as AC871"
+
+
+async def test_the_answer_is_the_same_whichever_row_comes_back_first() -> None:
+    codeshare = row(
+        ident="DLH8811", ident_icao="DLH8811", ident_iata="LH8811", actual_ident_iata="AC871"
+    )
+
+    first = await find(FakeClient(row(), codeshare), carrier="LH", number="8811")
+    second = await find(FakeClient(codeshare, row()), carrier="LH", number="8811")
+
+    assert first == second
+    assert first[0].flight_number == "LH8811" and first[0].operating_number == "871"
+
+
+async def test_an_icao_spelling_is_offered_the_way_the_ticket_prints_it() -> None:
+    (found,) = await find(FakeClient(row()), carrier="ACA")
+
+    assert found.flight_number == "AC871"
+    assert found.operating_carrier is None
 
 
 async def test_a_row_we_cannot_place_is_dropped_rather_than_raised_on() -> None:

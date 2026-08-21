@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .aeroapi import AeroAPIClient, SessionFactory, shared_client, split_ident
 from .airports import UnknownAirport, airport_tz
+from .bookings import operated_note
 from .db import session_scope
 from .timezones import parse_instant, to_local
 
@@ -78,6 +79,10 @@ class Candidate:
         choice is made by looking the number up again and picking the leg that matches.
         """
         return f"{self.origin_iata}-{self.dest_iata} {self.departure_local:%H:%M}"
+
+    @property
+    def operated(self) -> str | None:
+        return operated_note(self.operating_carrier, self.operating_number)
 
 
 def parse_flight_number(typed: str) -> tuple[str, str] | None:
@@ -168,10 +173,23 @@ async def _candidate(
         return None
 
     arrival_utc = parse_instant(row.get("scheduled_in"))
-    marketing = split_ident(row.get("ident_iata")) or (carrier, number)
-    operating = split_ident(row.get("actual_ident_iata")) or split_ident(
+    typed = (carrier, number)
+    published = split_ident(row.get("ident_iata"))
+    published_icao = split_ident(row.get("ident_icao")) or split_ident(row.get("ident"))
+    operator = split_ident(row.get("actual_ident_iata")) or split_ident(
         row.get("actual_ident_icao")
     )
+    if typed in (published, published_icao):
+        # Published under the number typed, so the row's IATA spelling is the ticket's
+        # even when the ICAO one was typed.
+        marketing = published or typed
+    else:
+        # A codeshare is answered with the operator's own row too. The number booked is
+        # the one typed, whichever row came back, and the row's own number is who flies
+        # it unless the row says otherwise.
+        marketing = typed
+        operator = operator or published or published_icao
+    operating = operator if operator and operator != marketing else None
     return Candidate(
         marketing_carrier=marketing[0],
         marketing_number=marketing[1],
@@ -181,8 +199,8 @@ async def _candidate(
         arrival_local=(
             to_local(arrival_utc, dest_tz).replace(tzinfo=None) if arrival_utc else None
         ),
-        operating_carrier=operating[0] if operating and operating != marketing else None,
-        operating_number=operating[1] if operating and operating != marketing else None,
+        operating_carrier=operating[0] if operating else None,
+        operating_number=operating[1] if operating else None,
     )
 
 

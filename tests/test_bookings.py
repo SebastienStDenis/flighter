@@ -16,6 +16,7 @@ from flighter.bookings import (
     flight_label,
     latest_snapshot,
     latest_snapshots,
+    operated_note,
     to_booking_times,
     update_ticket,
 )
@@ -86,6 +87,12 @@ def test_the_label_is_the_ticket_not_the_operator() -> None:
         dest_iata="JFK",
     )
     assert flight_label(booking) == "AA6141 LHR -> JFK"
+
+
+def test_the_note_names_the_operator_only_when_there_is_one() -> None:
+    assert operated_note("BA", "112") == "Operated as BA112"
+    assert operated_note("BA", None) == "Operated by BA"
+    assert operated_note(None, None) is None
 
 
 # --- Against the database ------------------------------------------------------------

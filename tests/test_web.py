@@ -276,6 +276,17 @@ def test_the_board_says_what_to_do_when_there_are_no_flights(client: TestClient)
     assert "/f/new" in page.text
 
 
+def test_a_codeshare_is_shown_under_the_number_booked_with_a_note_on_who_flies_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    show(monkeypatch, booking(operating_carrier="LH", operating_number="479"), None)
+
+    for path in ("/", "/f/1"):
+        body = client.get(path).text
+        assert '<h2 class="font-mono tracking-tight">AC871</h2>' in body
+        assert "Operated as LH479" in body
+
+
 def test_the_board_offers_one_tap_out_of_a_spent_budget(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -669,6 +680,7 @@ def test_a_number_that_flies_twice_that_day_is_a_choice_rather_than_a_guess(
     assert 'name="leg" value="YUL-LHR 18:40"' in body
     assert 'name="leg" value="YUL-LHR 21:15"' in body
     assert "origin_iata" not in body
+    assert body.count("Operated as LH479") == 2
     assert written == {}
 
 

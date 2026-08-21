@@ -36,6 +36,17 @@ def flight_label(booking: Booking) -> str:
     )
 
 
+def operated_note(carrier: str | None, number: str | None) -> str | None:
+    """`Operated as LH479`: the number on the aeroplane, when it is not the one booked.
+
+    An email sometimes names the airline flying the leg without its number, and then
+    `Operated by LH` is as much as can be said.
+    """
+    if not carrier:
+        return None
+    return f"Operated as {carrier}{number}" if number else f"Operated by {carrier}"
+
+
 def to_booking_times(
     departure_local: datetime,
     origin_tz: str,

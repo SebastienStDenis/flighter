@@ -13,6 +13,7 @@
     <h2 class="font-mono tracking-tight">{{ v.flight_number }}</h2>
     <p>{{ day(v.scheduled_departure, v.origin_tz) }}
       {%- if s and s.aircraft_type %} &middot; {{ s.aircraft_type }}{% endif -%}
+      {%- if v.operated %} &middot; {{ v.operated }}{% endif -%}
     </p>
     <div class="card-action">{{ m.badge(v.status) }}</div>
   </header>

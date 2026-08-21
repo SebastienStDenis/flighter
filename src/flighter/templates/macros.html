@@ -83,6 +83,7 @@
 <a class="card transition-shadow hover:ring-primary/40" href="/f/{{ v.booking.id }}">
   <header>
     <h2 class="font-mono tracking-tight">{{ v.flight_number }}</h2>
+    {% if v.operated %}<p>{{ v.operated }}</p>{% endif %}
     <div class="card-action">{{ badge(v.status) }}</div>
   </header>
   <section>{{ route(v) }}</section>
@@ -113,6 +114,7 @@
     <p class="font-mono">
       {{- at(v.departure, v.origin_tz) }}
       {%- if v.gate %} &middot; <span class="font-semibold text-plan">Gate {{ v.gate }}</span>{% endif -%}
+      {%- if v.operated %} &middot; <span class="text-muted-foreground">{{ v.operated }}</span>{% endif -%}
     </p>
   </section>
   <aside>{{ badge(v.status) }}</aside>
