@@ -678,25 +678,35 @@ def test_terminal_and_gate_share_a_line_and_the_gate_keeps_its_colour(
 ) -> None:
     show(monkeypatch, booking(), full_snapshot())
     card = top_card(client.get("/f/1").text)
-    middot = '<span class="text-muted-foreground"> &middot; </span>'
-    assert f'T3{middot}<span class="font-semibold text-plan">B27</span>' in card
-    assert f'T2{middot}<span class="font-semibold text-plan">A14</span>' in card
-    assert "Terminal" not in card and "Gate" not in card
-    assert 'Bags</span>\n  <span class="font-mono font-medium ">7</span>' in card
+    # Each is a small word over its value, so the two line up across the card.
+    assert card.count(">Term</div>") == 2 and card.count(">Gate</div>") == 2
+    assert place("Term", "3") in card and place("Gate", "B27", "text-plan font-semibold") in card
+    assert place("Term", "2") in card and place("Gate", "A14", "text-plan font-semibold") in card
+    assert "Terminal" not in card
+    # Bags is a box of the same kind, on the arrival side with the gate it comes after.
+    assert place("Bags", "7") in card and card.count(">Bags</div>") == 1
 
 
-def test_half_a_place_is_shown_without_a_dot_and_none_of_it_is_a_dash(
+def place(name: str, value: str, tone: str = "") -> str:
+    """A terminal or gate box as the card draws it: the word, then the value under it."""
+    shown = tone if value != "-" else "text-muted-foreground"
+    return (
+        f'<div class="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">'
+        f'{name}</div>\n  <div class="font-mono font-medium {shown}">{value}</div>'
+    )
+
+
+def test_a_place_not_yet_known_keeps_its_box_with_a_dash(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     show(monkeypatch, booking(), replace_snapshot(terminal_origin="3", gate_destination="A14"))
     card = top_card(client.get("/f/1").text)
-    assert ">T3</div>" in card
-    assert '><span class="font-semibold text-plan">A14</span></div>' in card
-    assert "&middot;" not in card
+    assert place("Term", "3") in card and place("Gate", "-") in card
+    assert place("Term", "-") in card and place("Gate", "A14", "text-plan font-semibold") in card
 
     show(monkeypatch, booking(), empty_snapshot())
     card = top_card(client.get("/f/1").text)
-    assert card.count('<span class="text-muted-foreground">-</span></div>') == 2
+    assert card.count(place("Term", "-")) == 2 and card.count(place("Gate", "-")) == 2
 
 
 def test_the_rule_says_how_long_the_hop_is_until_there_is_something_to_measure(

@@ -10,7 +10,7 @@
 {% set progress = v.progress_percent %}
 {% set window = v.airborne_window %}
 {% set length = v.block_time %}
-<div class="route-line {{ 'text-live' if progress else 'text-muted-foreground/50' }}"
+<div class="route-line {{ 'text-plan' if progress else 'text-muted-foreground/50' }}"
      style="--progress: {{ progress or 0 }}%"{% if window %} data-off="{{ window[0].isoformat() }}" data-on="{{ window[1].isoformat() }}"{% endif %}>
   {% if length %}
   <span class="route-mark left-1/2 bg-card px-1.5 font-mono text-[0.6875rem] whitespace-nowrap text-muted-foreground">
@@ -55,33 +55,22 @@
   <div class="font-mono text-xs">{% if side.line.moved %}{{ was(side.line, side.tz) }}{% endif %}</div>
   {% endfor %}
   {% endif %}
-  {% for side in sides %}
-  {{ building(side.terminal, side.gate) }}
-  {% endfor %}
-  <div></div>
-  {{ where("Bags", s.baggage_claim if s else none) }}
+  <div class="mt-1.5 flex gap-4">
+    {{ place("Term", s.terminal_origin if s else none) }}
+    {{ place("Gate", s.gate_origin if s else none, "text-plan font-semibold") }}
+  </div>
+  <div class="mt-1.5 flex justify-end gap-4">
+    {{ place("Bags", s.baggage_claim if s else none) }}
+    {{ place("Term", s.terminal_destination if s else none) }}
+    {{ place("Gate", s.gate_destination if s else none, "text-plan font-semibold") }}
+  </div>
 </div>
 {% endmacro %}
 
-{# Terminal and gate on one line, `T1 · B22`. The gate is the one a person walks to, so
-   it keeps its colour and weight; the terminal is the building it is in. #}
-{% macro building(terminal, gate) %}
-<div class="mt-1.5 font-mono font-medium">
-  {%- if terminal %}T{{ terminal }}{% endif -%}
-  {%- if terminal and gate %}<span class="text-muted-foreground"> &middot; </span>{% endif -%}
-  {%- if gate %}<span class="font-semibold text-plan">{{ gate }}</span>{% endif -%}
-  {%- if not terminal and not gate %}<span class="text-muted-foreground">{{ missing }}</span>{% endif -%}
-</div>
-{% endmacro %}
-
-{# A place in the building, on one line. The label stays when the value is a dash. #}
-{% macro where(name, value, tone="") %}
-{% set shown = dash(value) %}
+{% macro place(name, value, tone="") %}
 <div>
-  <span class="text-muted-foreground">{{ name }}</span>
-  <span class="font-mono font-medium {{ tone if shown != missing else 'text-muted-foreground' }}">
-    {{- shown -}}
-  </span>
+  <div class="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">{{ name }}</div>
+  <div class="font-mono font-medium {{ tone if value else 'text-muted-foreground' }}">{{ dash(value) }}</div>
 </div>
 {% endmacro %}
 
@@ -121,7 +110,7 @@
     {% endif %}
   </section>
   {% if v.milestone %}
-  <footer class="border-t">
+  <footer class="-mt-3 -mb-3 border-t pt-3">
     <span class="text-sm text-muted-foreground">{{ v.milestone.label }}</span>
     <time class="countdown ml-auto font-mono text-lg font-bold"
           data-to="{{ v.milestone.target.isoformat() }}">{{ until(v.milestone.target) }}</time>
@@ -157,14 +146,14 @@
 {# A fact a person may change. The row is the control: tapping it opens the ticket
    dialog on that box, so there is nothing to find and nothing to miss. #}
 {% macro detail(name, value, mono=false) %}
-<div class="item" data-size="xs">
+<div class="item py-1" data-size="xs">
   <section><p>{{ name }}</p></section>
   <aside class="text-right font-medium{{ ' font-mono' if mono }}">{{ value }}</aside>
 </div>
 {% endmacro %}
 
 {% macro editable(name, value, field, mono=false) %}
-<button class="item w-full text-left" data-size="xs" type="button"
+<button class="item w-full py-1 text-left" data-size="xs" type="button"
         onclick="editTicket('{{ field }}')" aria-label="Change {{ name|lower }}">
   <section><p>{{ name }}</p></section>
   <aside class="text-right {{ 'font-mono ' if mono }}{{ 'text-muted-foreground' if value == missing else 'font-medium' }}">

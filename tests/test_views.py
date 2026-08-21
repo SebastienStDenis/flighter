@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from flighter.models import Airport, Booking, FlightSnapshot
+from flighter.models import Airport, Booking, BookingStatus, FlightSnapshot
 from flighter.phase import (
     AIRBORNE,
     CANCELLED,
@@ -309,3 +309,24 @@ def test_block_time_stops_once_the_flight_is_under_way() -> None:
     assert view(booking(scheduled_departure_utc=leaves), airborne).block_time is None
     cancelled = snapshot(cancelled=True)
     assert view(booking(scheduled_departure_utc=now_ish(days=2)), cancelled).block_time is None
+
+
+def test_a_flight_that_has_landed_is_drawn_all_the_way_there() -> None:
+    """The feed's figure stops at the last poll, which may be short of the runway."""
+    leaves = now_ish(hours=-3)
+    landed = snapshot(
+        actual_out=leaves,
+        actual_off=leaves + timedelta(minutes=15),
+        actual_on=now_ish(minutes=-5),
+        progress_percent=92,
+    )
+    assert view(booking(scheduled_departure_utc=leaves), landed).progress_percent == 100
+    flown = booking(scheduled_departure_utc=now_ish(days=-3), status=BookingStatus.COMPLETED)
+    assert view(flown, None).progress_percent == 100
+    airborne = snapshot(
+        actual_out=leaves,
+        actual_off=leaves + timedelta(minutes=15),
+        estimated_on=now_ish(hours=1),
+        progress_percent=92,
+    )
+    assert view(booking(scheduled_departure_utc=leaves), airborne).progress_percent < 100

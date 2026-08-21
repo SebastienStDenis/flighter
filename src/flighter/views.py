@@ -193,6 +193,13 @@ class FlightView:
 
     @property
     def progress_percent(self) -> int | None:
+        """How far along the rule the aircraft is drawn.
+
+        A flight that has landed is all the way there whatever the feed last said: its
+        figure stops at the last poll, which may have been well short of the runway.
+        """
+        if self.phase == LANDED or self.booking.status == BookingStatus.COMPLETED:
+            return 100
         return progress_estimate(self.booking, self.snapshot, datetime.now(UTC))
 
     @property
