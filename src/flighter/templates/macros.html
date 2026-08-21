@@ -3,36 +3,69 @@
 <span class="badge" data-variant="{{ status.tone }}">{{ status.label }}</span>
 {% endmacro %}
 
-{# The route rule: origin, destination, and how far along the aircraft is. One hairline
-   carries all three, so the list and the flight page say the same thing at two sizes. #}
-{% macro route(v, names=false) %}
+{# The rule between two airports, with the aircraft at the fraction of the way it has
+   actually flown. The list and the flight page both draw it, so it is one piece. #}
+{% macro route_line(v) %}
 {% set progress = v.progress_percent %}
-<div class="route" style="--progress: {{ progress or 0 }}%">
+<div class="route-line {{ 'text-live' if progress else 'text-muted-foreground/50' }}"
+     style="--progress: {{ progress or 0 }}%">
+  <span class="route-mark rounded-full bg-card p-0.5" aria-hidden="true">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M22 12 13 7.5V2.8a1.3 1.3 0 0 0-2.6 0v4.7L1.4 12v1.7l9-2.6v4.2L7 17.7V19l4.7-1.1L16.4 19v-1.3l-3.4-2.4v-4.2l9 2.6z"
+            transform="rotate(90 12 12)"/>
+    </svg>
+  </span>
+</div>
+{% endmacro %}
+
+{# The route at list size: origin, destination, when each happens, and the rule. #}
+{% macro route(v) %}
+<div class="route">
   <div>
     <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.origin_iata }}</div>
     <div class="font-mono text-xs text-muted-foreground">{{ at(v.departure, v.origin_tz) }}</div>
   </div>
-  <div class="route-line {{ 'text-live' if progress else 'text-muted-foreground/50' }}">
-    <span class="route-mark rounded-full bg-card p-0.5" aria-hidden="true">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M22 12 13 7.5V2.8a1.3 1.3 0 0 0-2.6 0v4.7L1.4 12v1.7l9-2.6v4.2L7 17.7V19l4.7-1.1L16.4 19v-1.3l-3.4-2.4v-4.2l9 2.6z"
-              transform="rotate(90 12 12)"/>
-      </svg>
-    </span>
-  </div>
+  {{ route_line(v) }}
   <div class="text-right">
     <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.dest_iata }}</div>
     <div class="font-mono text-xs text-muted-foreground">{{ at(v.arrival, v.dest_tz) }}</div>
   </div>
 </div>
-{# The names get their own line under the rule, so they can be as long as airports make
-   them without eating the rule. #}
-{% if names and (v.origin or v.dest) %}
-<div class="mt-1 flex gap-4 text-xs leading-tight text-muted-foreground">
-  <div class="flex-1">{{ v.origin.name if v.origin }}</div>
-  <div class="flex-1 text-right">{{ v.dest.name if v.dest }}</div>
+{% endmacro %}
+
+{# One end of the flight: the place, the time it is now expected, and where in the
+   building. The arrival is right-aligned so the two ends mirror across the card. #}
+{% macro end(airport, line, tz, terminal, gate, baggage=none, arrival=false) %}
+<div{% if arrival %} class="text-right"{% endif %}>
+  {% if airport %}
+  {% if airport.city %}<div class="text-sm font-medium">{{ airport.city }}</div>{% endif %}
+  <div class="text-xs leading-tight text-muted-foreground">{{ airport.name }}</div>
+  {% endif %}
+  <div class="mt-2 font-mono text-xl leading-tight font-bold {{ 'text-warn' if line.late else ('text-muted-foreground' if line.best is none) }}">
+    {{- at(line.best, tz) -}}
+  </div>
+  {% if line.moved %}
+  <div class="font-mono text-xs text-muted-foreground">
+    <s>{{ at(line.scheduled, tz) }}</s> <span class="font-sans">{{ line.drift }}</span>
+  </div>
+  {% endif %}
+  <div class="mt-2 space-y-0.5 text-sm">
+    {{ where("Terminal", terminal) }}
+    {{ where("Gate", gate, "text-plan") }}
+    {% if arrival %}{{ where("Baggage", baggage) }}{% endif %}
+  </div>
 </div>
-{% endif %}
+{% endmacro %}
+
+{# A place in the building, on one line. The label stays when the value is a dash. #}
+{% macro where(name, value, tone="") %}
+{% set shown = dash(value) %}
+<div>
+  <span class="text-muted-foreground">{{ name }}</span>
+  <span class="font-mono font-medium {{ tone if shown != missing else 'text-muted-foreground' }}">
+    {{- shown -}}
+  </span>
+</div>
 {% endmacro %}
 
 {# One number, large, above the word for what it is. #}
@@ -86,16 +119,6 @@
 </a>
 {% endmacro %}
 
-{# A row of the fact list. The label always says what it is; a missing value is a dash. #}
-{% macro fact(name, value, mono=false) %}
-<div class="item" data-size="xs">
-  <section><p>{{ name }}</p></section>
-  <aside class="text-right {{ 'font-mono ' if mono }}{{ 'text-muted-foreground' if value == missing else 'font-medium' }}">
-    {{- value -}}
-  </aside>
-</div>
-{% endmacro %}
-
 {# A fact a person may change. The row is the control: tapping it opens the ticket
    dialog on that box, so there is nothing to find and nothing to miss. #}
 {% macro editable(name, value, field, mono=false) %}
@@ -108,24 +131,17 @@
 </button>
 {% endmacro %}
 
-{# A time that has resolved through scheduled -> estimated -> actual. The original is
-   struck through only when it moved, so an on-time flight reads as one clean time. #}
-{% macro when(name, line, tz) %}
-<div class="item" data-size="xs">
-  <section class="flex-none"><p>{{ name }}</p></section>
-  <aside class="flex-1 flex-wrap justify-end gap-x-2 gap-y-0 font-mono {{ 'text-muted-foreground' if line.best is none else 'font-medium' }}">
-    {%- if line.best is none -%}
-      {{ missing }}
-    {%- else -%}
-      {%- if line.moved %}<s class="font-normal text-muted-foreground">{{ at(line.scheduled, tz) }}</s>{% endif -%}
-      <span class="{{ 'text-warn' if line.moved and line.moved.total_seconds() > 0 }}">{{ at(line.best, tz) }}</span>
-      {%- if line.moved %}
-      <span class="font-sans text-xs font-normal text-muted-foreground">
-        {{- 'late' if line.moved.total_seconds() > 0 else 'early' }} {{ duration(line.moved) }}</span>
-      {%- endif -%}
-    {%- endif -%}
-  </aside>
-</div>
+{# A time that has resolved through scheduled -> estimated -> actual, on one line. The
+   original is struck through only when it moved, so an on-time flight reads as one
+   clean time. #}
+{% macro moment(line, tz) %}
+{%- if line.best is none -%}
+<span class="text-muted-foreground">{{ missing }}</span>
+{%- else -%}
+{%- if line.moved %}<s class="font-normal text-muted-foreground">{{ at(line.scheduled, tz) }}</s> {% endif -%}
+<span class="font-medium {{ 'text-warn' if line.late }}">{{ at(line.best, tz) }}</span>
+{%- if line.moved %} <span class="font-sans text-xs text-muted-foreground">{{ line.drift }}</span>{% endif -%}
+{%- endif -%}
 {% endmacro %}
 
 {# One change, on one line: what moved, from what to what, and when we were told. #}

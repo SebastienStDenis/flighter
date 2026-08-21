@@ -90,6 +90,29 @@ class Timeline:
         shift = self.best - self.scheduled
         return shift if abs(shift) >= DEPARTURE_DELAY_THRESHOLD else None
 
+    @property
+    def late(self) -> bool:
+        return self.moved is not None and self.moved > timedelta(0)
+
+    @property
+    def drift(self) -> str | None:
+        """`late 25m` or `early 10m`, or nothing while it is inside the band."""
+        if self.moved is None:
+            return None
+        return f"{'late' if self.late else 'early'} {duration(self.moved)}"
+
+
+class Checkpoint(NamedTuple):
+    """The next thing to happen to a flight that has left its gate, read at its airport.
+
+    Wheels up, then wheels down, then the gate: each is shown only while it is the next
+    one, so the page never lists three runway times against the two a ticket names.
+    """
+
+    name: str
+    line: Timeline
+    tz: str
+
 
 @dataclass(frozen=True)
 class FlightView:
@@ -187,6 +210,26 @@ class FlightView:
         if label is None or target is None:
             return None
         return Countdown(label, target)
+
+    @property
+    def checkpoint(self) -> Checkpoint | None:
+        """What the flight is working towards now, once departure is behind it.
+
+        Nothing until pushback, because until then the departure time on the card is
+        the answer; nothing after the doors open, because then the arrival time is.
+        """
+        snap = self.snapshot
+        if snap is None:
+            return None
+        phase = self.phase
+        if phase == TAXIING:
+            # Nobody upstream estimates wheels up, so the name stands without a time.
+            return Checkpoint("Wheels up", Timeline(None, None, None), self.origin_tz)
+        if phase in (AIRBORNE, DIVERTED):
+            return Checkpoint("Lands", self.lands, self.dest_tz)
+        if phase == LANDED and snap.actual_in is None:
+            return Checkpoint("At the gate", self.arrives, self.dest_tz)
+        return None
 
     @property
     def calendar_link(self) -> str | None:
