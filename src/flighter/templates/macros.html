@@ -55,21 +55,15 @@
   <div class="font-mono text-xs">{% if side.line.moved %}{{ was(side.line, side.tz) }}{% endif %}</div>
   {% endfor %}
   {% endif %}
-  {% for side in sides %}
-  {{ building(side.terminal, side.gate, right=loop.index0 == 1) }}
-  {% endfor %}
-  <div></div>
-  {{ where("Bags", s.baggage_claim if s else none) }}
-</div>
-{% endmacro %}
-
-{# Terminal and gate, each a small word over its value so the two line up across the
-   card, and each keeping its place as a dash until it is known. The gate is the one a
-   person walks to, so it keeps its colour and weight. #}
-{% macro building(terminal, gate, right=false) %}
-<div class="mt-1.5 flex gap-4{{ ' justify-end' if right }}">
-  {{ place("Term", terminal) }}
-  {{ place("Gate", gate, "text-plan font-semibold") }}
+  <div class="mt-1.5 flex gap-4">
+    {{ place("Term", s.terminal_origin if s else none) }}
+    {{ place("Gate", s.gate_origin if s else none, "text-plan font-semibold") }}
+  </div>
+  <div class="mt-1.5 flex justify-end gap-4">
+    {{ place("Bags", s.baggage_claim if s else none) }}
+    {{ place("Term", s.terminal_destination if s else none) }}
+    {{ place("Gate", s.gate_destination if s else none, "text-plan font-semibold") }}
+  </div>
 </div>
 {% endmacro %}
 
@@ -77,17 +71,6 @@
 <div>
   <div class="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">{{ name }}</div>
   <div class="font-mono font-medium {{ tone if value else 'text-muted-foreground' }}">{{ dash(value) }}</div>
-</div>
-{% endmacro %}
-
-{# A place in the building, on one line. The label stays when the value is a dash. #}
-{% macro where(name, value, tone="") %}
-{% set shown = dash(value) %}
-<div>
-  <span class="text-muted-foreground">{{ name }}</span>
-  <span class="font-mono font-medium {{ tone if shown != missing else 'text-muted-foreground' }}">
-    {{- shown -}}
-  </span>
 </div>
 {% endmacro %}
 

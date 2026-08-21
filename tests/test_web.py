@@ -683,7 +683,8 @@ def test_terminal_and_gate_share_a_line_and_the_gate_keeps_its_colour(
     assert place("Term", "3") in card and place("Gate", "B27", "text-plan font-semibold") in card
     assert place("Term", "2") in card and place("Gate", "A14", "text-plan font-semibold") in card
     assert "Terminal" not in card
-    assert 'Bags</span>\n  <span class="font-mono font-medium ">7</span>' in card
+    # Bags is a box of the same kind, on the arrival side with the gate it comes after.
+    assert place("Bags", "7") in card and card.count(">Bags</div>") == 1
 
 
 def place(name: str, value: str, tone: str = "") -> str:
