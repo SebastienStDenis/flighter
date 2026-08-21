@@ -6,7 +6,7 @@ being processed twice. One bad email is never allowed to stop the loop.
 
 The flag is the queue, so the row is also the retry state. A message that failed keeps
 its flag and is swept again a couple of times, minutes apart; if it still fails it is set
-aside, and only a person asking for it on the board brings it back. An email that held no
+aside, and only a person asking for it on the Problems page brings it back. An email that held no
 flight is set aside at once, because reading it again reads it the same way. A message
 that reached the board is unflagged where it stands and never comes back. Either way
 the phone is told once, when there is nothing left to try, which is why the state already
@@ -68,7 +68,7 @@ ERROR = IngestOutcome.ERROR
 # there are delays here and the message is set aside: whatever is wrong with it is not
 # the kind of wrong that fixes itself, and a sweep that keeps re-running a model against
 # the same broken email costs money and says nothing new. The flag stays on so the email
-# is still where the person left it, and the board offers it back.
+# is still where the person left it, and the Problems page offers it back.
 RETRY_DELAYS = (timedelta(minutes=2), timedelta(minutes=10))
 
 # How often the watcher looks again while there is nothing to sign in with. Seconds
@@ -83,7 +83,7 @@ _UNREADABLE_REASON = (
 
 # Said only about a message that kept its flag: it is still in Mail, and it will sit
 # there until it is either unflagged or handed back to the service.
-_SET_ASIDE_REASON = "It has been set aside. Try it again from the flight board."
+_SET_ASIDE_REASON = "It has been set aside. Try it again from the Problems page."
 
 
 class Ingested(NamedTuple):
@@ -175,8 +175,8 @@ def _no_flight() -> Ingested:
     """An answer, but not one that takes the flag off.
 
     Reading the email again reads it the same way, so there is nothing to retry. The flag
-    stays on all the same: the email is still where the person left it, and the board asks
-    them whether it really held nothing rather than deciding that on its own.
+    stays on all the same: the email is still where the person left it, and the Problems
+    page asks them whether it really held nothing rather than deciding that on its own.
     """
     return Ingested(ERROR, error=_NO_FLIGHT_REASON, retryable=False)
 

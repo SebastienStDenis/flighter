@@ -304,15 +304,37 @@ def test_raising_the_limit_also_lets_polling_start_again(client: TestClient) -> 
     assert client.session.deleted == [latch]  # type: ignore[attr-defined]
 
 
-def test_the_board_says_which_email_was_set_aside_and_why(client: TestClient) -> None:
+def test_the_problems_page_says_which_email_was_set_aside_and_why(client: TestClient) -> None:
     client.session.rows["IngestLog"] = [set_aside_row()]  # type: ignore[attr-defined]
 
-    body = client.get("/").text
+    body = client.get("/problems").text
 
     assert "Nothing added from Your booking is confirmed" in body
     assert "the model timed out" in body
     assert "Try again" in body
     assert "Ignore" in body
+
+
+def test_a_set_aside_email_is_kept_off_the_board(client: TestClient) -> None:
+    """The board is read in a hurry for a gate; an email that would not parse is not
+    news about any flight on it."""
+    client.session.rows["IngestLog"] = [set_aside_row()]  # type: ignore[attr-defined]
+    assert "Nothing added from" not in client.get("/").text
+
+
+def test_the_problems_tab_is_marked_only_while_something_is_waiting(client: TestClient) -> None:
+    quiet = client.get("/").text
+    assert 'href="/problems"' in quiet
+    assert "waiting:" not in quiet
+
+    client.session.rows["IngestLog"] = [set_aside_row()]  # type: ignore[attr-defined]
+    # On every page, not only the board: the mark is how you learn there is anything.
+    for path in ("/", "/settings", "/problems"):
+        assert "1 waiting:" in client.get(path).text
+
+
+def test_the_problems_page_says_when_there_is_nothing(client: TestClient) -> None:
+    assert "Nothing needs attention" in client.get("/problems").text
 
 
 def test_trying_a_set_aside_message_again_puts_it_back_in_the_queue(
@@ -326,6 +348,7 @@ def test_trying_a_set_aside_message_again_puts_it_back_in_the_queue(
     )
 
     assert response.status_code == 303
+    assert response.headers["location"] == "/problems"
     # The email never lost its flag, so clearing the give-up is all it takes.
     assert row.attempts == 0
     assert row.retry_at is not None
@@ -342,6 +365,7 @@ def test_ignoring_a_set_aside_message_lets_the_next_sweep_unflag_it(
     )
 
     assert response.status_code == 303
+    assert response.headers["location"] == "/problems"
     assert row.outcome == "no_flight"
     assert row.retry_at is None
 

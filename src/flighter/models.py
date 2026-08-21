@@ -283,8 +283,8 @@ class IngestLog(Base):
     message_id: Mapped[str] = mapped_column(Text, primary_key=True)
     processed_at: Mapped[datetime] = _created_at()
     outcome: Mapped[str] = mapped_column(Text, nullable=False)
-    # Kept because a Message-ID names nothing a person recognises, and the set-aside list
-    # on the board has to say which email it is talking about.
+    # Kept because a Message-ID names nothing a person recognises, and the Problems page
+    # has to say which email it is talking about.
     subject: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     raw_extraction: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     error: Mapped[str | None] = mapped_column(Text)

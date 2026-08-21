@@ -62,6 +62,18 @@ LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
+async def note_problems(request: Request, session: SessionDep) -> None:
+    """How many emails are waiting on a decision, for the marker on the Problems tab.
+
+    Resolved once per request, ahead of the route, so every page carries the number
+    without every route having to ask for it. The widget's endpoint draws no nav and
+    is the one caller that skips the query.
+    """
+    if request.url.path.startswith("/api/"):
+        return
+    request.state.problems = len(await ingest.list_set_aside(session))
+
+
 def _first_validation_message(exc: ValidationError) -> str:
     """One field, one sentence. A wall of pydantic is not an error message."""
     error = exc.errors()[0]
@@ -125,7 +137,13 @@ async def recently_flown(session: AsyncSession, limit: int) -> list[Booking]:
 def create_app(settings: Settings) -> FastAPI:
     # Nothing here is an API anybody writes against, and a schema of every route is a
     # map of the house for whatever reaches the port.
-    app = FastAPI(title="flighter", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(
+        title="flighter",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+        dependencies=[Depends(note_problems)],
+    )
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     app.include_router(widget_router)
 
@@ -224,12 +242,21 @@ def create_app(settings: Settings) -> FastAPI:
                 "urgent_id": views.most_urgent(upcoming),
                 "budget": budget,
                 "raised_cap": budget.cap_usd + LIMIT_STEP,
-                "set_aside": await ingest.list_set_aside(session),
                 # An empty board on a fresh deployment is not the same thing as an empty
                 # board on a working one, and only one of them is worth a signpost.
                 "set_up": settings.icloud_configured or settings.aeroapi_configured,
             },
         )
+
+    @app.get("/problems")
+    async def problems(request: Request, session: SessionDep) -> Response:
+        """What is waiting on a decision: the emails the service gave up reading.
+
+        Its own page rather than a notice on the board, because the board is read in a
+        hurry for a gate number and an email that would not parse is not news about any
+        flight on it. The nav marks the tab while there is anything here.
+        """
+        return page(request, "problems.html", {"set_aside": await ingest.list_set_aside(session)})
 
     @app.post("/limit")
     async def raise_limit(session: SessionDep) -> Response:
@@ -252,14 +279,14 @@ def create_app(settings: Settings) -> FastAPI:
         """
         if await ingest.retry(session, message_id) is None:
             raise HTTPException(status_code=404, detail="That email is not set aside.")
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/problems", status_code=303)
 
     @app.post("/mail/ignore")
     async def ignore_message(session: SessionDep, message_id: Annotated[str, Form()]) -> Response:
         """Decide the email holds no flight, which is what takes its flag off in Mail."""
         if await ingest.dismiss(session, message_id) is None:
             raise HTTPException(status_code=404, detail="That email is not set aside.")
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/problems", status_code=303)
 
     # Declared before /f/{booking_id} so that "new" is never read as an id.
     @app.get("/f/new")
