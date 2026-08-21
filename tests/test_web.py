@@ -21,16 +21,17 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect
+from sqlalchemy.exc import IntegrityError
 
 from flighter import prefs, web
 from flighter.aeroapi import BREAKER_KEY, BudgetExceeded, BudgetStatus
-from flighter.airports import UnknownAirport
 from flighter.caldav import CalendarUnavailable, Collection
 from flighter.config import Settings
 from flighter.db import get_session
 from flighter.lookup import Candidate
 from flighter.models import KV, Airport, Booking, FlightEvent, FlightSnapshot, IngestLog
 from flighter.notify import Notifier
+from flighter.timezones import format_local
 from flighter.widget import LAST_SEEN_KEY
 
 NOW = datetime.now(UTC)
@@ -191,12 +192,6 @@ def build_client(
     async def fake_get_airport(_session: Any, iata: str) -> Airport | None:
         return AIRPORTS.get(iata)
 
-    async def fake_airport_tz(_session: Any, iata: str) -> str:
-        airport = AIRPORTS.get(iata)
-        if airport is None:
-            raise UnknownAirport(iata)
-        return airport.tz
-
     async def fake_budget(_session: Any, _settings: Any = None) -> BudgetStatus:
         return CLEAR_BUDGET
 
@@ -212,7 +207,6 @@ def build_client(
 
     monkeypatch.setattr(web, "session_scope", same_session)
     monkeypatch.setattr(web.views, "get_airport", fake_get_airport)
-    monkeypatch.setattr(web.views, "airport_tz", fake_airport_tz)
     monkeypatch.setattr(web, "budget_status", fake_budget)
     monkeypatch.setattr(web.booking_repo, "list_bookings", no_bookings)
     monkeypatch.setattr(web.CalendarClient, "calendars", fake_calendars)
@@ -281,18 +275,6 @@ def test_the_board_says_what_to_do_when_there_are_no_flights(client: TestClient)
     assert page.status_code == 200
     assert "Nothing on the board" in page.text
     assert "/f/new" in page.text
-
-
-def test_a_booking_nobody_has_checked_sits_on_the_board_with_a_badge(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """It is a flight like any other; the badge is the whole of the difference."""
-    show(monkeypatch, booking(status="pending_review"), None)
-
-    body = client.get("/").text
-    assert "AC871" in body
-    assert "Check this" in body
-    assert 'href="/f/1"' in body
 
 
 def test_a_codeshare_is_shown_under_the_number_booked_with_a_note_on_who_flies_it(
@@ -473,7 +455,7 @@ def test_a_flight_from_an_email_links_back_to_it(
     assert "Open in Mail" in body
 
 
-def test_a_flight_typed_in_by_hand_has_no_email_to_open(
+def test_a_flight_added_from_a_lookup_has_no_email_to_open(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     show(monkeypatch, booking(), None)
@@ -515,6 +497,9 @@ def test_a_flight_in_the_air_renders_what_is_worth_knowing(
     assert "B27" in body and "A14" in body
     assert "B789" in body
     assert "X7QW2P" in body and "14A" in body
+    # The aircraft's place on the route rule is the clock's to keep, not the last poll's.
+    assert f'data-off="{(DEPARTURE + timedelta(minutes=35)).isoformat()}"' in body
+    assert f'data-on="{(ARRIVAL + timedelta(minutes=10)).isoformat()}"' in body
     # What is on the ticket, not what is in the flight plan.
     for gone in ("Filed route", "Distance", "Registration", "Timezone", "Last checked"):
         assert gone not in body
@@ -545,7 +530,9 @@ def test_the_card_names_one_runway_moment_at_a_time(
     assert "At the gate" in body
     assert "Wheels up" not in body and "Lands" not in body
     # The estimate still reads as a change against what was booked.
-    assert "late 20m" in body
+    assert (
+        moved_time(ARRIVAL, ARRIVAL + timedelta(minutes=20), "Europe/London", "text-stop") in body
+    )
 
     at_the_gate = replace_snapshot(
         actual_out=DEPARTURE + timedelta(minutes=5),
@@ -559,17 +546,88 @@ def test_the_card_names_one_runway_moment_at_a_time(
         assert runway not in body
 
 
+def struck(was: datetime, tz: str, *, with_date: bool = False) -> str:
+    """The time a flight was booked for, as it is drawn once that time has moved."""
+    return (
+        '<s class="font-normal text-muted-foreground">'
+        f"{format_local(was, tz, with_date=with_date)}</s>"
+    )
+
+
+def moved_time(was: datetime, now: datetime, tz: str, tone: str) -> str:
+    """A time that moved, as one line draws it: the original struck, the new one coloured."""
+    return f'{struck(was, tz)} <span class="{tone}">{format_local(now, tz)}</span>'
+
+
 def test_a_delay_is_shown_against_what_was_booked(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    late = DEPARTURE + timedelta(minutes=40)
+    show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=late))
+    body = client.get("/f/1").text
+    assert f'text-stop">{format_local(late, "America/Toronto")}' in body
+    assert struck(DEPARTURE, "America/Toronto") in body
+    # The struck time and the colour say it; no words repeat it.
+    assert "late " not in body and "early " not in body
+
+
+def test_a_time_brought_forward_is_green(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    earlier = DEPARTURE - timedelta(minutes=20)
+    show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=earlier))
+    body = client.get("/f/1").text
+    assert f'text-ok">{format_local(earlier, "America/Toronto")}' in body
+    assert struck(DEPARTURE, "America/Toronto") in body
+
+
+def test_each_end_of_a_red_eye_names_its_own_day(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Leaves Saturday evening, lands Sunday morning: one heading cannot say both."""
+    overnight = booking(
+        scheduled_departure_utc=datetime(2026, 9, 12, 22, 40, tzinfo=UTC),
+        scheduled_arrival_utc=datetime(2026, 9, 13, 9, 25, tzinfo=UTC),
+    )
+    show(monkeypatch, overnight, None)
+
+    for path in ("/", "/f/1"):
+        body = client.get(path).text
+        assert "Sat 12 Sep" in body
+        assert "Sun 13 Sep" in body
+
+
+def test_a_delay_past_midnight_keeps_the_day_it_was_booked_for(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """23:50 struck next to 00:30 reads as earlier, unless the struck time says Saturday."""
+    booked = datetime(2026, 9, 13, 3, 50, tzinfo=UTC)
+    slipped = datetime(2026, 9, 13, 4, 30, tzinfo=UTC)
     show(
         monkeypatch,
-        booking(),
-        replace_snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=40)),
+        booking(scheduled_departure_utc=booked),
+        replace_snapshot(scheduled_out=booked, estimated_out=slipped),
     )
+
     body = client.get("/f/1").text
-    assert "<s>" in body
-    assert "late 40m" in body
+    assert struck(booked, "America/Toronto", with_date=True) in body
+    assert "Sat 12 Sep 23:50 EDT" in body
+    assert 'text-stop">00:30 EDT' in body
+    assert "Sun 13 Sep" in body
+
+
+def test_the_lead_card_strikes_a_time_that_slipped_and_leaves_one_that_held(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Late is red next to what was planned; ten minutes on arrival is not worth a mark."""
+    show(monkeypatch, booking(), full_snapshot())
+
+    body = client.get("/").text
+    late = DEPARTURE + timedelta(minutes=25)
+    assert moved_time(DEPARTURE, late, "America/Toronto", "text-stop") in body
+    arrival = format_local(ARRIVAL + timedelta(minutes=10), "Europe/London")
+    assert f'<span class="">{arrival}</span>' in body
+    assert format_local(ARRIVAL, "Europe/London") not in body
 
 
 def test_a_cancelled_flight_says_who_said_so(
@@ -647,10 +705,23 @@ def test_adding_a_flight_asks_for_a_number_and_a_day_and_nothing_else(
         assert asked not in page.text
 
 
-def test_a_flight_number_that_names_one_flight_comes_back_as_a_filled_in_form(
+def records_creation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Catch what would be booked, so the suite stays off the database."""
+    written: dict[str, Any] = {}
+
+    async def create_booking(_session: Any, **fields: Any) -> Booking:
+        written.update(fields)
+        return booking()
+
+    monkeypatch.setattr(web.booking_repo, "create_booking", create_booking)
+    return written
+
+
+def test_a_flight_number_that_names_one_flight_is_added_as_the_airline_states_it(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     asked = looks_up(monkeypatch, [CANDIDATE])
+    written = records_creation(monkeypatch)
 
     response = client.post(
         "/f/new",
@@ -659,14 +730,14 @@ def test_a_flight_number_that_names_one_flight_comes_back_as_a_filled_in_form(
     )
 
     assert response.status_code == 303
+    assert response.headers["location"] == "/f/1"
     assert asked == [("AC", "871", date(2026, 9, 12))]
-    body = client.get(response.headers["location"]).text
-    assert 'value="YUL"' in body and 'value="LHR"' in body
-    assert 'value="2026-09-12T18:40"' in body
-    assert 'value="2026-09-13T10:25"' in body
-    # Who actually flies it is carried through without being asked about.
-    assert 'name="operating_carrier"' in body
-    assert 'value="LH"' in body and 'value="479"' in body
+    # Every fact about the flight is the schedule's; nothing typed reached the booking.
+    assert written["origin_iata"] == "YUL" and written["dest_iata"] == "LHR"
+    assert written["departure_local"] == datetime(2026, 9, 12, 18, 40)
+    assert written["arrival_local"] == datetime(2026, 9, 13, 10, 25)
+    assert written["operating_carrier"] == "LH" and written["operating_number"] == "479"
+    assert written["source"] == "manual"
 
 
 def test_a_number_that_flies_twice_that_day_is_a_choice_rather_than_a_guess(
@@ -674,6 +745,7 @@ def test_a_number_that_flies_twice_that_day_is_a_choice_rather_than_a_guess(
 ) -> None:
     evening = replace(CANDIDATE, departure_local=datetime(2026, 9, 12, 21, 15))
     looks_up(monkeypatch, [CANDIDATE, evening])
+    written = records_creation(monkeypatch)
 
     body = client.post(
         "/f/new", data={"flight_number": "AC871", "departure_date": "2026-09-12"}
@@ -681,11 +753,53 @@ def test_a_number_that_flies_twice_that_day_is_a_choice_rather_than_a_guess(
 
     assert "flies more than once" in body
     assert "18:40" in body and "21:15" in body
-    assert body.count("/f/new/details?") == 2
+    # Each choice posts the same two boxes back with the leg named, and nothing else.
+    assert 'name="leg" value="YUL-LHR 18:40"' in body
+    assert 'name="leg" value="YUL-LHR 21:15"' in body
+    assert "origin_iata" not in body
     assert body.count("Operated as LH479") == 2
+    assert written == {}
 
 
-def test_a_flight_number_nobody_publishes_says_so_and_offers_the_long_way(
+def test_choosing_a_leg_looks_the_number_up_again_and_adds_that_one(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The choice names a leg rather than carrying a flight, so what is saved is still
+    what the schedule says at the moment of saving."""
+    evening = replace(CANDIDATE, departure_local=datetime(2026, 9, 12, 21, 15))
+    asked = looks_up(monkeypatch, [CANDIDATE, evening])
+    written = records_creation(monkeypatch)
+
+    response = client.post(
+        "/f/new",
+        data={"flight_number": "AC871", "departure_date": "2026-09-12", "leg": "YUL-LHR 21:15"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert asked == [("AC", "871", date(2026, 9, 12))]
+    assert written["departure_local"] == datetime(2026, 9, 12, 21, 15)
+
+
+def test_a_leg_the_schedule_no_longer_lists_is_offered_again_rather_than_guessed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evening = replace(CANDIDATE, departure_local=datetime(2026, 9, 12, 21, 15))
+    looks_up(monkeypatch, [CANDIDATE, evening])
+    written = records_creation(monkeypatch)
+
+    page = client.post(
+        "/f/new",
+        data={"flight_number": "AC871", "departure_date": "2026-09-12", "leg": "YUL-LHR 23:59"},
+    )
+
+    assert page.status_code == 400
+    assert "no longer on the schedule" in page.text
+    assert "flies more than once" in page.text
+    assert written == {}
+
+
+def test_a_flight_number_nobody_publishes_says_so(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     looks_up(monkeypatch, [])
@@ -694,7 +808,8 @@ def test_a_flight_number_nobody_publishes_says_so_and_offers_the_long_way(
 
     assert page.status_code == 400
     assert "No AC871 is scheduled to leave that day." in page.text
-    assert 'href="/f/new/details"' in page.text
+    # There is no long way round: a flight the airline has not published is not added.
+    assert "By hand" not in page.text
     # What was typed comes back with it, so the date does not have to be picked again.
     assert 'value="2026-09-12"' in page.text
 
@@ -718,10 +833,9 @@ def test_what_cannot_be_looked_up_is_refused_before_anything_is_spent(
     assert asked == []
 
 
-def test_a_lookup_that_cannot_be_made_still_leaves_a_way_to_add_the_flight(
+def test_a_lookup_that_cannot_be_made_says_why(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A convenience that is down must not take adding a flight down with it."""
     failures = [
         (BudgetExceeded(SPENT_BUDGET, just_tripped=False), "budget is spent"),
         (httpx.ConnectError("no route to host"), "did not answer"),
@@ -739,82 +853,35 @@ def test_a_lookup_that_cannot_be_made_still_leaves_a_way_to_add_the_flight(
 
         assert page.status_code == 400
         assert said in page.text
-        assert 'href="/f/new/details"' in page.text
+        assert 'name="flight_number"' in page.text
 
 
-def test_without_a_flightaware_key_the_page_says_why_and_offers_the_form(
+def test_a_flight_already_on_the_list_is_said_so(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    looks_up(monkeypatch, [CANDIDATE])
+
+    async def taken(*_args: Any, **_kwargs: Any) -> Booking:
+        raise IntegrityError("INSERT INTO bookings", {}, Exception("UNIQUE constraint failed"))
+
+    monkeypatch.setattr(web.booking_repo, "create_booking", taken)
+
+    page = client.post("/f/new", data={"flight_number": "AC871", "departure_date": "2026-09-12"})
+
+    assert page.status_code == 400
+    assert "already on the list for that day" in page.text
+
+
+def test_without_a_flightaware_key_the_page_says_why_and_points_at_settings(
     unconfigured: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with build_client(unconfigured, monkeypatch) as fresh:
         body = fresh.get("/f/new").text
 
     assert "No FlightAware key" in body
+    assert 'href="/settings"' in body
     assert 'name="flight_number"' not in body
-    assert 'href="/f/new/details"' in body
-
-
-def test_the_form_behind_the_lookup_still_asks_about_the_whole_flight(
-    client: TestClient,
-) -> None:
-    page = client.get("/f/new/details")
-    assert page.status_code == 200
-    assert 'name="marketing_carrier"' in page.text
-    # The times are wall clock at their own airport, never a UTC instant.
-    assert 'type="datetime-local"' in page.text
-    assert 'action="/f"' in page.text
-
-
-def test_a_flight_added_by_hand_is_not_credited_to_an_operator_nobody_named(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The hidden fields are empty on the by-hand path, and empty is not a carrier."""
-    written: dict[str, Any] = {}
-
-    async def create_booking(_session: Any, **fields: Any) -> Booking:
-        written.update(fields)
-        return booking()
-
-    monkeypatch.setattr(web.booking_repo, "create_booking", create_booking)
-
-    client.post(
-        "/f",
-        data={
-            "marketing_carrier": "AC",
-            "marketing_number": "871",
-            "origin_iata": "YUL",
-            "dest_iata": "LHR",
-            "departure_local": "2026-09-12T18:40",
-            "operating_carrier": "",
-            "operating_number": "",
-        },
-        follow_redirects=False,
-    )
-
-    assert written["operating_carrier"] is None
-    assert written["operating_number"] is None
-
-
-def test_an_airport_nobody_has_heard_of_comes_back_as_a_sentence(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def unknown(*_args: Any, **_kwargs: Any) -> Booking:
-        raise UnknownAirport("XYZ")
-
-    monkeypatch.setattr(web.booking_repo, "create_booking", unknown)
-
-    page = client.post(
-        "/f",
-        data={
-            "marketing_carrier": "AC",
-            "marketing_number": "871",
-            "origin_iata": "YUL",
-            "dest_iata": "XYZ",
-            "departure_local": "2026-09-12T18:40",
-        },
-    )
-
-    assert page.status_code == 400
-    assert "XYZ is not an airport we know." in page.text
+    assert "By hand" not in body
 
 
 def test_a_flight_on_the_calendar_offers_a_way_into_the_calendar_app(
@@ -832,69 +899,49 @@ def test_a_flight_that_is_not_on_the_calendar_offers_no_link(
     assert "calshow:" not in client.get("/f/1").text
 
 
-def test_the_edit_form_shows_local_wall_clock_not_utc(
+def test_the_ticket_is_the_only_thing_the_page_lets_you_change(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    row = booking(scheduled_departure_utc=datetime(2026, 9, 12, 22, 40, tzinfo=UTC))
+    show(monkeypatch, booking(confirmation_code="X7QW2P", seat="14A"), empty_snapshot())
+
+    body = client.get("/f/1").text
+
+    assert 'action="/f/1/ticket"' in body
+    for box in ("confirmation_code", "seat", "notes"):
+        assert f'name="{box}"' in body
+    assert 'value="X7QW2P"' in body and 'value="14A"' in body
+    # The flight itself is the airline's statement, so nothing on the page edits it.
+    for never in ("/f/1/edit", 'name="origin_iata"', 'type="datetime-local"', "Looks right"):
+        assert never not in body
+
+
+def test_saving_the_ticket_hands_the_booking_layer_what_was_written(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    row = booking()
     show(monkeypatch, row, empty_snapshot())
-
-    body = client.get("/f/1/edit").text
-    assert 'value="2026-09-12T18:40"' in body  # 22:40Z is 18:40 in Montreal.
-
-
-def test_an_edit_hands_the_booking_layer_what_the_user_typed(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Normalising a carrier is the booking layer's job, and it is the dedupe key."""
-    show(monkeypatch, booking(), empty_snapshot())
     written: dict[str, Any] = {}
 
-    async def update_booking(_session: Any, booking_id: int, **fields: Any) -> Booking:
-        written.update(fields)
-        return booking()
+    async def update_ticket(_session: Any, booking_id: int, **fields: Any) -> Booking:
+        written.update({"id": booking_id} | fields)
+        return row
 
-    monkeypatch.setattr(web.booking_repo, "update_booking", update_booking)
+    monkeypatch.setattr(web.booking_repo, "update_ticket", update_ticket)
 
     response = client.post(
-        "/f/1",
-        data={
-            "marketing_carrier": "ac",
-            "marketing_number": "871",
-            "origin_iata": "YUL",
-            "dest_iata": "LHR",
-            "departure_local": "2026-09-12T18:40",
-        },
+        "/f/1/ticket",
+        data={"confirmation_code": " X7QW2P ", "seat": "14A", "notes": ""},
         follow_redirects=False,
     )
 
     assert response.status_code == 303
-    assert written["marketing_carrier"] == "ac"
-    # 18:40 in Montreal is 22:40Z, read at the origin airport rather than at the server.
-    assert written["scheduled_departure_utc"] == datetime(2026, 9, 12, 22, 40, tzinfo=UTC)
-
-
-def test_confirming_a_booking_starts_it_being_tracked(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    row = booking(status="pending_review")
-    show(monkeypatch, row, None)
-    kept: dict[str, Any] = {}
-
-    async def update_booking(_session: Any, booking_id: int, **fields: Any) -> Booking:
-        kept.update({"id": booking_id} | fields)
-        return row
-
-    monkeypatch.setattr(web.booking_repo, "update_booking", update_booking)
-
-    response = client.post("/f/1/keep", follow_redirects=False)
-
-    assert response.status_code == 303
     assert response.headers["location"] == "/f/1"
-    assert kept == {"id": 1, "status": "active"}
+    # A blank box is nothing on the ticket, not an empty string in the database.
+    assert written == {"id": 1, "confirmation_code": "X7QW2P", "seat": "14A", "notes": None}
 
 
-def test_confirming_a_flight_that_is_not_there_is_a_404(client: TestClient) -> None:
-    assert client.post("/f/9/keep").status_code == 404
+def test_saving_a_ticket_for_a_flight_that_is_not_there_is_a_404(client: TestClient) -> None:
+    assert client.post("/f/9/ticket", data={"seat": "14A"}).status_code == 404
 
 
 def test_deleting_a_flight_redirects_home(

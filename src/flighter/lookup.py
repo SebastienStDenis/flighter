@@ -72,22 +72,17 @@ class Candidate:
         return f"{self.marketing_carrier}{self.marketing_number}"
 
     @property
+    def leg(self) -> str:
+        """`YUL-LHR 18:40`: which of a number's legs this is, when it flies more than once.
+
+        Enough to tell two legs apart, and nothing a person could turn into a flight: a
+        choice is made by looking the number up again and picking the leg that matches.
+        """
+        return f"{self.origin_iata}-{self.dest_iata} {self.departure_local:%H:%M}"
+
+    @property
     def operated(self) -> str | None:
         return operated_note(self.operating_carrier, self.operating_number)
-
-    def as_form(self) -> dict[str, str]:
-        """The add form's fields, so a choice here is a filled-in form there."""
-        posted = {
-            "marketing_carrier": self.marketing_carrier,
-            "marketing_number": self.marketing_number,
-            "origin_iata": self.origin_iata,
-            "dest_iata": self.dest_iata,
-            "departure_local": _field(self.departure_local),
-            "arrival_local": _field(self.arrival_local),
-            "operating_carrier": self.operating_carrier or "",
-            "operating_number": self.operating_number or "",
-        }
-        return {name: value for name, value in posted.items() if value}
 
 
 def parse_flight_number(typed: str) -> tuple[str, str] | None:
@@ -213,8 +208,3 @@ def _code(value: Any) -> str | None:
     """An airport's IATA code, or None - a booking has nowhere to put anything else."""
     code = str(value or "").strip().upper()
     return code if len(code) == 3 else None
-
-
-def _field(local: datetime | None) -> str:
-    """A wall-clock time as a `datetime-local` input reads it."""
-    return "" if local is None else local.strftime("%Y-%m-%dT%H:%M")

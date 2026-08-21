@@ -47,6 +47,7 @@ from .phase import (
     Phase,
     compute_phase,
     departure_estimate,
+    progress_estimate,
 )
 from .views import countdown, phase_rank
 
@@ -314,7 +315,7 @@ def _flight(
         delayed=_delayed(snapshot),
         # Only while airborne: the feed reports 0 on the ground and 100 after landing,
         # either of which draws a bar that says nothing.
-        progress_percent=snapshot.progress_percent if snapshot and phase == AIRBORNE else None,
+        progress_percent=progress_estimate(booking, snapshot, now) if phase == AIRBORNE else None,
     )
 
 

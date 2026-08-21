@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import bookings as booking_repo
 from . import notices
-from .airports import airport_tz, get_airport
+from .airports import get_airport
 from .caldav import calendar_link
 from .models import Airport, Booking, BookingStatus, FlightSnapshot, IngestLog
 from .phase import (
@@ -30,10 +30,12 @@ from .phase import (
     LANDED,
     TAXIING,
     Phase,
+    airborne_window,
     arrival_estimate,
     compute_phase,
     departure_estimate,
     landing_estimate,
+    progress_estimate,
 )
 from .timezones import format_local, parse_instant, to_local
 
@@ -93,13 +95,6 @@ class Timeline:
     @property
     def late(self) -> bool:
         return self.moved is not None and self.moved > timedelta(0)
-
-    @property
-    def drift(self) -> str | None:
-        """`late 25m` or `early 10m`, or nothing while it is inside the band."""
-        if self.moved is None:
-            return None
-        return f"{'late' if self.late else 'early'} {duration(self.moved)}"
 
 
 class Checkpoint(NamedTuple):
@@ -202,13 +197,13 @@ class FlightView:
         return bool(self.snapshot is not None and self.snapshot.cancelled)
 
     @property
-    def unchecked(self) -> bool:
-        """Extracted from an email we were not sure about, and nobody has looked yet."""
-        return self.booking.status == BookingStatus.PENDING_REVIEW
+    def progress_percent(self) -> int | None:
+        return progress_estimate(self.booking, self.snapshot, datetime.now(UTC))
 
     @property
-    def progress_percent(self) -> int | None:
-        return self.snapshot.progress_percent if self.snapshot else None
+    def airborne_window(self) -> tuple[datetime, datetime] | None:
+        """Wheels-up and wheels-down, for the page to move the aircraft between loads."""
+        return airborne_window(self.booking, self.snapshot, datetime.now(UTC))
 
     @property
     def phase(self) -> Phase:
@@ -282,8 +277,6 @@ class FlightView:
             return Status("Maybe cancelled", "stop")
         if snap is not None and snap.diverted:
             return Status("Diverted", "stop")
-        if self.unchecked:
-            return Status("Check this", "warn")
         if self.delay >= DEPARTURE_DELAY_THRESHOLD:
             return Status(f"Delayed {duration(self.delay)}", "warn")
         phase = self.phase
@@ -474,48 +467,3 @@ async def build_views(session: AsyncSession, rows: Iterable[Booking]) -> list[Fl
     ]
     views.sort(key=lambda view: view.scheduled_departure)
     return views
-
-
-async def utc_times(
-    session: AsyncSession,
-    origin_iata: str,
-    dest_iata: str,
-    departure_local: datetime,
-    arrival_local: datetime | None,
-) -> tuple[datetime, datetime | None]:
-    """A form's two wall-clock readings as UTC instants, each read at its own airport.
-
-    `create_booking` does this for itself; an edit writes columns, so it comes through
-    here instead of doing the conversion in a route.
-    """
-    return booking_repo.to_booking_times(
-        departure_local,
-        await airport_tz(session, origin_iata),
-        arrival_local,
-        await airport_tz(session, dest_iata),
-    )
-
-
-def local_input(instant: datetime | None, tz: str) -> str:
-    """A UTC instant as the wall clock its airport reads, for a datetime-local input.
-
-    The form never shows a UTC time. What the user typed is what the ticket says.
-    """
-    if instant is None:
-        return ""
-    return to_local(instant, tz).strftime("%Y-%m-%dT%H:%M")
-
-
-def parse_local(value: str) -> datetime | None:
-    """A datetime-local field as the naive wall clock it is. No zone is applied here.
-
-    Deliberately not `timezones.parse_instant`: that answers with a UTC instant, and a
-    wall-clock reading only becomes one once the airport it was read at is known.
-    """
-    value = value.strip()
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None

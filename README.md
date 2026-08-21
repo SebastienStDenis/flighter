@@ -6,9 +6,9 @@ on your phone's lock screen. One user, one machine, no App Store.
 
 ```
 you mark an email  →  iCloud IMAP  →  extraction  →  bookings  →  AeroAPI polling  →  change detection
-flag it the           IDLE + sweep    JSON-LD         board rows   cadence tightens    diff last two
-import colour         every mailbox   Claude fallback badged when  as departure        snapshots
-      │               done → unflag   a confidence    unsure       approaches          dead band
+flag it the           IDLE + sweep    JSON-LD         one row per  cadence tightens    diff last two
+import colour         every mailbox   Claude fallback leg, on the  as departure        snapshots
+      │               done → unflag   for the rest    board        approaches          dead band
       ▼               failed → stays                                                      │
 Pushover push                                                                 ┌───────────┴───────┐
 imported, or why not                                                          ▼                   ▼
@@ -23,9 +23,10 @@ arrives while you are still at the wrong end of the terminal.
 
 ## Why it is built this way
 
-**Bookings and observations are separate.** A booking is what you or an email asserts, and
-you can edit it. A snapshot is what FlightAware saw, is append-only, and is never
-corrected. Change detection is a diff of the newest two snapshots, so rewriting a snapshot
+**Bookings and observations are separate.** A booking is what you or an email asserts:
+the flight, and what is on the ticket. Only the ticket part - confirmation code, seat,
+notes - can be edited; a booking that names the wrong flight is deleted and the right one
+added. A snapshot is what FlightAware saw, is append-only, and is never corrected. Change detection is a diff of the newest two snapshots, so rewriting a snapshot
 would erase the very event it should have raised.
 
 **You say which emails are flights.** Nothing scans your inbox and nothing guesses. You
@@ -47,14 +48,14 @@ Bodies are read with `BODY.PEEK[]`, so no email is ever silently marked as read,
 ingest log is keyed on each email's `Message-ID` so re-filing a message does not make it
 new again.
 
-**Adding a flight by hand is two boxes.** The airline has already published where AC871
-goes on the 12th, when it leaves, and who actually flies it, so the form asks for the
-number and the day and reads the rest out of FlightAware's schedule. What comes back
-fills the form in rather than being saved behind your back, because a schedule is a
-statement about a flight and only you know it is *your* flight; a number that flies twice
-that day is offered as a choice rather than guessed at. Typing the whole thing in is
-still one tap away, which is what happens for a flight nobody publishes, for a key that
-has not been entered, and for the day FlightAware cannot be reached.
+**Adding a flight is two boxes.** The airline has already published where AC871 goes
+on the 12th, when it leaves, and who actually flies it, so the form asks for the number
+and the day, reads the rest out of FlightAware's schedule, and puts the flight on the
+board. Nothing about the flight itself is ever typed or edited: the airports and the
+times are the airline's statement, and a number or a day that was wrong is fixed by
+deleting the flight and adding the right one. A number that flies twice that day is
+offered as a choice rather than guessed at. There is no form to type a whole flight
+into: a flight the airline has not published is not one FlightAware could track either.
 
 **Timezones are resolved from the airport, never from the email.** Airlines state offsets
 wrong often enough that trusting them is a bug waiting for a date-line flight. Every
@@ -151,10 +152,9 @@ to its page here, and the flag comes off - the email itself does not move. If no
 be read out of it you get a push saying so, with a link that opens the email in Mail, and
 the flag stays on so the next pass tries again.
 
-An email the extraction was not confident about - a time or an airport inferred rather
-than printed - still lands on the board, wearing a **Check this** badge. Its flight page
-offers **Looks right**, **Fix details** and **Not a flight**, so the decision is one tap
-from the thing you are looking at rather than a queue to work through somewhere else.
+Whatever was read out of the email is what lands on the board; there is no review step.
+If the flight it names is not yours, its page has **Stop tracking**, and the right one is
+two boxes away under **Add a flight**.
 
 Something that fails for a passing reason - the model, iCloud, the network - is tried
 again after two minutes and again after ten. If it still fails, your phone is told once

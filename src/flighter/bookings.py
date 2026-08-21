@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,17 +22,6 @@ from .models import Booking, BookingStatus, EventKind, FlightEvent, FlightSnapsh
 from .timezones import same_local_date, to_local, to_utc
 
 log = logging.getLogger(__name__)
-
-# id, the timestamps and the dedupe date are the database's to set, not a caller's.
-_EDITABLE_FIELDS = frozenset(Booking.__table__.columns.keys()) - {
-    "id",
-    "created_at",
-    "updated_at",
-    "departure_local_date",
-}
-
-# Poller bookkeeping, not a fact about the trip; moving it is not an edit worth a sync.
-_UNTRACKED_EDITS = frozenset({"next_poll_at"})
 
 # Wide enough to catch every booking that could share a local calendar day with the
 # departure being checked, on any pair of zones; the local date decides from there.
@@ -150,42 +139,29 @@ async def get_booking(session: AsyncSession, booking_id: int) -> Booking | None:
     return await session.get(Booking, booking_id)
 
 
-async def update_booking(
-    session: AsyncSession, booking_id: int, **fields: object
+async def update_ticket(
+    session: AsyncSession,
+    booking_id: int,
+    *,
+    confirmation_code: str | None,
+    seat: str | None,
+    notes: str | None,
 ) -> Booking | None:
+    """Change what is written on the ticket, which is all a person is allowed to change.
+
+    The flight itself - number, airports, times - is the airline's statement and is never
+    edited: a booking that names the wrong flight is deleted and the right one added.
+    """
     booking = await session.get(Booking, booking_id)
     if booking is None:
         return None
-
-    unknown = set(fields) - _EDITABLE_FIELDS
-    if unknown:
-        raise ValueError(f"not booking columns: {', '.join(sorted(unknown))}")
-
-    before = {name: getattr(booking, name) for name in fields}
-    for name, value in fields.items():
-        setattr(booking, name, _normalised(name, value))
-    changed = {name for name in fields if getattr(booking, name) != before[name]}
-
-    if "scheduled_departure_utc" in fields or "origin_iata" in fields:
-        booking.departure_local_date = await _local_date(
-            session, booking.scheduled_departure_utc, booking.origin_iata
-        )
-
-    # Reactivating a booking has to hand it back to the poller, or it sits untouched
-    # until something else happens to write a next_poll_at.
-    if (
-        booking.status == BookingStatus.ACTIVE
-        and "next_poll_at" not in fields
-        and booking.next_poll_at is None
-    ):
-        booking.next_poll_at = first_poll_at(datetime.now(UTC), booking.scheduled_departure_utc)
-
-    # A booking kept after review is reaching the calendar for the first time, so it is
-    # added rather than edited; one that was already active and moved is restated.
-    if booking.status == BookingStatus.ACTIVE and changed - _UNTRACKED_EDITS:
-        kind = EventKind.BOOKING_ADDED if "status" in changed else EventKind.BOOKING_EDITED
-        _record(session, booking, kind)
-
+    shown = (booking.confirmation_code, booking.seat)
+    booking.confirmation_code = confirmation_code
+    booking.seat = seat
+    booking.notes = notes
+    # The calendar entry carries the code and the seat; notes never leave the app.
+    if booking.status == BookingStatus.ACTIVE and (confirmation_code, seat) != shown:
+        _record(session, booking, EventKind.BOOKING_EDITED)
     await session.flush()
     return booking
 
@@ -306,10 +282,6 @@ async def latest_snapshots(
     return {snapshot.booking_id: snapshot for snapshot in (await session.scalars(stmt)).all()}
 
 
-async def _local_date(session: AsyncSession, departure_utc: datetime, origin_iata: str) -> date:
-    return to_local(departure_utc, await airport_tz(session, origin_iata)).date()
-
-
 # Normalised on the way in, because all three are part of the dedupe key: "aa" and "AA"
 # have to be the same airline for the unique index to do its job.
 def _code(iata: str) -> str:
@@ -325,25 +297,3 @@ def _number(number: str) -> str:
     cannot tell AA0100 from AA100 unless both are stored the same way."""
     stripped = number.strip()
     return stripped.lstrip("0") or stripped
-
-
-_NORMALISERS = {
-    "marketing_carrier": _carrier,
-    "operating_carrier": _carrier,
-    "marketing_number": _number,
-    "operating_number": _number,
-    "origin_iata": _code,
-    "dest_iata": _code,
-}
-
-
-def _normalised(name: str, value: object) -> object:
-    """Apply the same cleanup an insert would.
-
-    An edit that wrote `ac871` verbatim would read as a different airline to the dedupe
-    index than the `AC871` an insert stores, so the two paths have to agree.
-    """
-    normalise = _NORMALISERS.get(name)
-    if normalise is None or not isinstance(value, str):
-        return value
-    return normalise(value)

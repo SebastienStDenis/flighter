@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from flighter.airports import UnknownAirport
 from flighter.bookings import (
-    _normalised,
     create_booking,
     delete_booking,
     find_duplicate,
@@ -20,7 +19,7 @@ from flighter.bookings import (
     latest_snapshots,
     operated_note,
     to_booking_times,
-    update_booking,
+    update_ticket,
 )
 from flighter.cadence import FEED_HORIZON
 from flighter.db import session_scope
@@ -79,16 +78,6 @@ def test_dst_boundary_departure() -> None:
     assert departure == datetime(2026, 3, 8, 14, 0, tzinfo=UTC)
 
 
-def test_edits_are_normalised_the_same_way_inserts_are() -> None:
-    # An edit writing a lower-case carrier or a zero-padded number would look like a
-    # different flight to the dedupe index than the same flight inserted fresh.
-    assert _normalised("marketing_carrier", " ac ") == "AC"
-    assert _normalised("marketing_number", "0871") == "871"
-    assert _normalised("origin_iata", "yul") == "YUL"
-    assert _normalised("seat", "14c") == "14c"
-    assert _normalised("marketing_number", None) is None
-
-
 def test_the_label_is_the_ticket_not_the_operator() -> None:
     booking = Booking(
         marketing_carrier="AA",
@@ -144,6 +133,25 @@ async def test_a_booking_carries_its_local_date_and_a_first_poll(seeded: None) -
         assert booking.next_poll_at == booking.scheduled_departure_utc - FEED_HORIZON
 
 
+async def test_an_unknown_airport_is_refused_not_guessed(seeded: None) -> None:
+    async with session_scope() as session:
+        with pytest.raises(UnknownAirport) as raised:
+            await book(session, datetime(2026, 9, 12, 9, 0), origin_iata="ZZZ")
+    assert raised.value.iata == "ZZZ"
+
+
+async def test_the_ticket_is_the_only_thing_an_edit_touches(seeded: None) -> None:
+    async with session_scope() as session:
+        booking = await book(session, datetime(2026, 9, 12, 9, 0))
+        changed = await update_ticket(
+            session, booking.id, confirmation_code="X7QW2P", seat="14A", notes=None
+        )
+        assert changed is not None
+        assert (changed.confirmation_code, changed.seat, changed.notes) == ("X7QW2P", "14A", None)
+        assert changed.scheduled_departure_utc == booking.scheduled_departure_utc
+        assert changed.departure_local_date == date(2026, 9, 12)
+
+
 async def events_for(session: AsyncSession, booking_id: int) -> list[str]:
     stmt = (
         select(FlightEvent.kind)
@@ -159,57 +167,30 @@ async def test_adding_a_flight_queues_it_for_the_calendar(seeded: None) -> None:
         assert await events_for(session, booking.id) == [EventKind.BOOKING_ADDED]
 
 
-async def test_a_review_booking_is_added_only_once_it_is_kept(seeded: None) -> None:
+async def test_a_finished_flight_is_not_queued(seeded: None) -> None:
     async with session_scope() as session:
-        booking = await book(session, datetime(2026, 9, 12, 9, 0), status="pending_review")
+        booking = await book(session, datetime(2026, 9, 12, 9, 0), status="completed")
         assert await events_for(session, booking.id) == []
-        await update_booking(session, booking.id, status="active")
-        assert await events_for(session, booking.id) == [EventKind.BOOKING_ADDED]
 
 
-async def test_an_edit_restates_the_flight_and_a_no_op_does_not(seeded: None) -> None:
+async def test_a_ticket_edit_restates_the_flight_only_when_the_calendar_shows_it(
+    seeded: None,
+) -> None:
     async with session_scope() as session:
         booking = await book(session, datetime(2026, 9, 12, 9, 0))
-        await update_booking(session, booking.id, seat="12A")
-        await update_booking(session, booking.id, seat="12A")
-        await update_booking(session, booking.id, next_poll_at=datetime.now(UTC))
+        await update_ticket(session, booking.id, confirmation_code=None, seat="12A", notes=None)
+        await update_ticket(session, booking.id, confirmation_code=None, seat="12A", notes=None)
+        await update_ticket(session, booking.id, confirmation_code=None, seat="12A", notes="aisle")
         assert await events_for(session, booking.id) == [
             EventKind.BOOKING_ADDED,
             EventKind.BOOKING_EDITED,
         ]
 
 
-async def test_a_review_booking_is_not_queued(seeded: None) -> None:
+async def test_a_ticket_for_a_flight_that_is_not_there_is_none(seeded: None) -> None:
     async with session_scope() as session:
-        booking = await book(session, datetime(2026, 9, 12, 9, 0), status="pending_review")
-        assert booking.next_poll_at is None
-
-
-async def test_an_unknown_airport_is_refused_not_guessed(seeded: None) -> None:
-    async with session_scope() as session:
-        with pytest.raises(UnknownAirport) as raised:
-            await book(session, datetime(2026, 9, 12, 9, 0), origin_iata="ZZZ")
-    assert raised.value.iata == "ZZZ"
-
-
-async def test_editing_the_departure_moves_the_dedupe_day(seeded: None) -> None:
-    async with session_scope() as session:
-        booking = await book(session, datetime(2026, 9, 12, 9, 0))
-        moved = await update_booking(
-            session,
-            booking.id,
-            scheduled_departure_utc=datetime(2026, 9, 14, 3, 30, tzinfo=UTC),
-        )
-        assert moved is not None
-        assert moved.departure_local_date == date(2026, 9, 13)
-
-
-async def test_reactivating_hands_the_booking_back_to_the_poller(seeded: None) -> None:
-    async with session_scope() as session:
-        booking = await book(session, datetime(2026, 9, 12, 9, 0), status="pending_review")
-        activated = await update_booking(session, booking.id, status="active")
-        assert activated is not None
-        assert activated.next_poll_at is not None
+        missing = await update_ticket(session, 99, confirmation_code=None, seat=None, notes=None)
+        assert missing is None
 
 
 async def test_the_same_flight_resent_with_a_corrected_time_is_a_duplicate(seeded: None) -> None:
