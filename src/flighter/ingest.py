@@ -76,14 +76,12 @@ RETRY_DELAYS = (timedelta(minutes=2), timedelta(minutes=10))
 # somebody who has just typed an Apple ID into the settings page is watching for it.
 UNCONFIGURED_PAUSE_SECONDS = 5.0
 
-_NO_FLIGHT_REASON = "There was no flight in it, so nothing was added."
-_UNREADABLE_REASON = (
-    "It looks like a flight email, but no flight could be read from it, so nothing was added."
-)
+_NO_FLIGHT_REASON = "There is no flight in it."
+_UNREADABLE_REASON = "It looks like a flight email, but nothing could be read from it."
 
 # Said only about a message that kept its flag: it is still in Mail, and it will sit
 # there until it is either unflagged or handed back to the service.
-_SET_ASIDE_REASON = "It has been set aside. Try it again from the Problems page."
+_SET_ASIDE_REASON = "It was set aside under Problems."
 
 
 class Ingested(NamedTuple):
@@ -168,7 +166,12 @@ async def _extract(message: Message, settings: Settings) -> Extraction | None:
 
 
 def _failed(exc: Exception) -> Ingested:
-    return Ingested(ERROR, error=f"{type(exc).__name__}: {exc}")
+    """The exception's own words, which a person reads on a push and on the Problems page.
+
+    The class name is in the traceback the caller has already logged; on a phone it is
+    noise in front of the sentence that matters.
+    """
+    return Ingested(ERROR, error=str(exc) or type(exc).__name__)
 
 
 def _no_flight() -> Ingested:

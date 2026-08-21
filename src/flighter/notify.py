@@ -48,36 +48,16 @@ PRIORITY_QUIET = -1
 
 _HIGH_PRIORITY_KINDS = frozenset({EventKind.CANCELLED, EventKind.DIVERTED, EventKind.GATE_CHANGED})
 
-# The lock screen shows the title above the message, so each kind leads with one glyph
-# that says what happened before a word of it is read.
-_EMOJI: dict[str, str] = {
-    EventKind.GATE_ASSIGNED: "🚪",
-    EventKind.GATE_CHANGED: "⚠️",
-    EventKind.TERMINAL_CHANGED: "⚠️",
-    EventKind.DEPARTURE_DELAYED: "⏳",
-    EventKind.DEPARTURE_MOVED_EARLIER: "⏩",
-    EventKind.ARRIVAL_TIME_CHANGED: "🕒",
-    EventKind.DEPARTED: "🛫",
-    EventKind.LANDED: "🛬",
-    EventKind.BAGGAGE_CLAIM_ASSIGNED: "🧳",
-    EventKind.CANCELLED: "❌",
-    EventKind.DIVERTED: "⚠️",
-}
-DEFAULT_EMOJI = "✈️"
-BUDGET_EMOJI = "💸"
-IMPORT_FAILED_EMOJI = "📭"
+# The lock screen shows the title above the message, so the title names the flight and
+# the message says what happened, in as few words as still make a sentence.
+OPEN_FLIGHT = "Open flight"
+OPEN_APP = "Open flighter"
 
-# What each import outcome is called on the lock screen, and the sentence under it.
+# What each import outcome is called on the lock screen, and the line under it.
 _IMPORTED = {
     IngestOutcome.CREATED: ("Flight added", "{flights}"),
-    IngestOutcome.REVIEW: (
-        "Flight needs a look",
-        "{flights} - the extraction was not confident enough.",
-    ),
-    IngestOutcome.DUPLICATE: (
-        "Already tracked",
-        "{flights} was already on the list; nothing was added.",
-    ),
+    IngestOutcome.REVIEW: ("Flight needs review", "{flights}. Check the details."),
+    IngestOutcome.DUPLICATE: ("Already tracked", "{flights}. Nothing added."),
 }
 
 
@@ -102,7 +82,7 @@ def _minutes_between(old: str | None, new: str | None) -> int | None:
 
 
 def _moved(event: FlightEvent, tz: str, *, verb: str, fallback: str, now: str) -> str:
-    """`Delayed 35 min, now departing 19:15 EDT`.
+    """`Delayed 35 min. Departs 19:15 EDT`.
 
     Degrades to whichever half survives when a value is missing, because format_local
     renders a missing time as a dash and that is not a sentence.
@@ -110,16 +90,16 @@ def _moved(event: FlightEvent, tz: str, *, verb: str, fallback: str, now: str) -
     when = parse_instant(event.new_value)
     minutes = _minutes_between(event.old_value, event.new_value)
     head = fallback if minutes is None else f"{verb} {minutes} min"
-    return head if when is None else f"{head}, {now} {format_local(when, tz)}"
+    return head if when is None else f"{head}. {now} {format_local(when, tz)}"
 
 
 def _at(verb: str, value: str | None, tz: str) -> str:
     instant = parse_instant(value)
-    return f"{verb} at {format_local(instant, tz)}" if instant else verb
+    return f"{verb} {format_local(instant, tz)}" if instant else verb
 
 
 def event_message(event: FlightEvent, *, origin_tz: str, dest_tz: str) -> str:
-    """One plain sentence a person can act on without opening anything."""
+    """One plain line a person can act on without opening anything."""
     kind, old, new = event.kind, event.old_value, event.new_value
 
     if kind == EventKind.GATE_ASSIGNED:
@@ -129,31 +109,23 @@ def event_message(event: FlightEvent, *, origin_tz: str, dest_tz: str) -> str:
     if kind == EventKind.TERMINAL_CHANGED:
         return f"Terminal changed from {old} to {new}" if old else f"Terminal {new}"
     if kind == EventKind.DEPARTURE_DELAYED:
-        return _moved(
-            event, origin_tz, verb="Delayed", fallback="Departure delayed", now="now departing"
-        )
+        return _moved(event, origin_tz, verb="Delayed", fallback="Delayed", now="Departs")
     if kind == EventKind.DEPARTURE_MOVED_EARLIER:
-        return _moved(
-            event, origin_tz, verb="Moved up", fallback="Departure moved up", now="now departing"
-        )
+        return _moved(event, origin_tz, verb="Moved up", fallback="Moved up", now="Departs")
     if kind == EventKind.ARRIVAL_TIME_CHANGED:
         return _moved(
-            event,
-            dest_tz,
-            verb="Arrival moved",
-            fallback="Arrival time changed",
-            now="now arriving",
+            event, dest_tz, verb="Arrival moved", fallback="Arrival time changed", now="Arrives"
         )
     if kind == EventKind.DEPARTED:
-        return _at("Left the gate", new, origin_tz)
+        return _at("Departed", new, origin_tz)
     if kind == EventKind.LANDED:
         return _at("Landed", new, dest_tz)
     if kind == EventKind.BAGGAGE_CLAIM_ASSIGNED:
-        return f"Bag claim: {new}"
+        return f"Baggage claim {new}"
     if kind == EventKind.CANCELLED:
         return CANCELLED_NOTICE
     if kind == EventKind.DIVERTED:
-        return "Flight diverted"
+        return "Diverted"
     return kind
 
 
@@ -203,13 +175,12 @@ class Notifier:
         dest_tz: str = FALLBACK_TZ,
     ) -> None:
         priority = PRIORITY_HIGH if event.kind in _HIGH_PRIORITY_KINDS else PRIORITY_NORMAL
-        emoji = _EMOJI.get(event.kind, DEFAULT_EMOJI)
         await self._send(
-            title=f"{emoji} {flight_label(booking)}",
+            title=flight_label(booking),
             message=event_message(event, origin_tz=origin_tz, dest_tz=dest_tz),
             priority=priority,
             url=f"{prefs.current().public_base_url}/f/{booking.id}",
-            url_title="Open the flight",
+            url_title=OPEN_FLIGHT,
         )
 
     async def mail_imported(self, bookings: Sequence[Booking], *, outcome: str) -> None:
@@ -227,11 +198,11 @@ class Notifier:
         flights = ", ".join(flight_label(booking) for booking in bookings)
         try:
             await self._send(
-                title=f"{DEFAULT_EMOJI} {title}",
+                title=title,
                 message=body.format(flights=flights or "The flight"),
                 priority=PRIORITY_NORMAL,
                 url=self._flight_url(bookings),
-                url_title="Open the flight",
+                url_title=OPEN_FLIGHT,
             )
         except PushFailed:
             log.warning("push about an imported email failed", exc_info=True)
@@ -240,38 +211,36 @@ class Notifier:
         """Nothing came of an email that was marked.
 
         Priority 0 as well: an import that did not happen costs nobody a flight. The link
-        opens the email itself in Mail, on the phone or on the Mac, which is where the
-        next move is made either way. Best effort, for the same reason as above.
+        opens the Problems page, which is where the email can be tried again, written off,
+        or opened in Mail. Best effort, for the same reason as above.
         """
         try:
             await self._send(
-                title=f"{IMPORT_FAILED_EMOJI} Nothing imported",
+                title="Import failed",
                 message=f"{subject}\n{reason}" if subject else reason,
                 priority=PRIORITY_NORMAL,
-                url=message_url(message_id),
-                url_title="Open the email",
+                url=f"{prefs.current().public_base_url}/problems",
+                url_title=OPEN_APP,
             )
         except PushFailed:
-            log.warning("push about a failed import failed", exc_info=True)
+            log.warning("push about a failed import of %s failed", message_id, exc_info=True)
 
     async def budget_tripped(self, spend: Decimal, cap: Decimal) -> None:
         """The AeroAPI breaker has latched: tracking is stale until someone raises the cap."""
         await self._send(
-            title=f"{BUDGET_EMOJI} AeroAPI budget reached",
+            title="AeroAPI budget reached",
             message=(
-                f"Spent ${spend:.2f} of the ${cap:.2f} monthly cap. "
-                "Flight polling is paused until the cap is raised or the month rolls over."
+                f"${spend:.2f} of the ${cap:.2f} monthly cap spent. "
+                "Updates are paused until the cap is raised or the month ends."
             ),
             priority=PRIORITY_HIGH,
             url=prefs.current().public_base_url,
-            url_title="Open flighter",
+            url_title=OPEN_APP,
         )
 
     async def check(self) -> None:
         """A real push, quietly, because a token that is never spent proves nothing."""
-        await self._send(
-            title="Flight tracker", message="Checks ran and this arrived.", priority=PRIORITY_QUIET
-        )
+        await self._send(title="flighter", message="Test notification", priority=PRIORITY_QUIET)
 
     @staticmethod
     def _flight_url(bookings: Sequence[Booking]) -> str:
