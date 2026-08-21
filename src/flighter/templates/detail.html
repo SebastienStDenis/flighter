@@ -64,7 +64,7 @@
   <footer class="border-t">
     {% if v.checkpoint %}
     <span class="text-sm text-muted-foreground">{{ v.checkpoint.name }}</span>
-    <span class="ml-2 font-mono text-sm">{{ m.moment(v.checkpoint.line, v.checkpoint.tz) }}</span>
+    <span class="ml-2 font-mono text-sm font-medium">{{ m.moment(v.checkpoint.line, v.checkpoint.tz) }}</span>
     {% else %}
     <span class="text-sm text-muted-foreground">{{ v.countdown.label }}</span>
     {% endif %}
