@@ -278,7 +278,7 @@ class FlightView:
         if snap is not None and snap.diverted:
             return Status("Diverted", "stop")
         if self.delay >= DEPARTURE_DELAY_THRESHOLD:
-            return Status(f"Delayed {duration(self.delay)}", "warn")
+            return Status("Departure delayed", "warn")
         phase = self.phase
         if phase == LANDED:
             return Status("Landed", "ok")
