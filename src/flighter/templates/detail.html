@@ -90,7 +90,7 @@
 </div>
 
 <div class="card mt-3" data-size="sm">
-  <header><h3>What has changed</h3></header>
+  <header><h3>Activity</h3></header>
   <section>
     {% if events %}
     {{ m.change(events[0], v.origin_tz) }}
@@ -109,7 +109,7 @@
     </div>
     {% endif %}
     {% else %}
-    <p class="text-sm text-muted-foreground">Nothing has changed yet.</p>
+    <p class="text-sm text-muted-foreground">Nothing yet.</p>
     {% endif %}
   </section>
 </div>
