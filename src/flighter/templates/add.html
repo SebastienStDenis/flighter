@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Add a flight{% endblock %}
+{% block content %}
+
+<h1 class="mb-4 text-xl font-semibold tracking-tight">Add a flight</h1>
+
+{% if error %}
+<div class="alert mb-3" data-variant="destructive" role="alert">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="10"/>
+  </svg>
+  <strong>{{ error }}</strong>
+</div>
+{% endif %}
+
+{% if configured %}
+<form id="find-form" method="post" action="/f/new">
+  <div class="card" data-size="sm">
+    <header><h3>The flight</h3></header>
+    <section>
+      <fieldset class="fieldset gap-4">
+        <div role="group" class="field">
+          <label for="flight_number">Flight number</label>
+          <input class="font-mono uppercase" type="text" id="flight_number" name="flight_number"
+                 maxlength="8" placeholder="AC871" required autocapitalize="characters"
+                 autocomplete="off" aria-describedby="number-help"
+                 value="{{ form['flight_number'] if 'flight_number' in form else '' }}">
+          <p id="number-help">The airline and the number, as the ticket writes them.</p>
+        </div>
+        <div role="group" class="field">
+          <label for="departure_date">Date</label>
+          <input type="date" id="departure_date" name="departure_date" required
+                 aria-describedby="date-help"
+                 value="{{ form['departure_date'] if 'departure_date' in form else '' }}">
+          <p id="date-help">The day it leaves, read at the airport it leaves from.</p>
+        </div>
+      </fieldset>
+    </section>
+  </div>
+</form>
+{% else %}
+<div class="alert mb-3" role="status">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="10"/>
+  </svg>
+  <strong>No FlightAware key</strong>
+  <section>
+    <p>A flight number cannot be looked up until one is entered on the
+      <a class="btn" data-variant="link" href="/settings">settings page</a>.
+      Until then, a flight has to be typed in.</p>
+  </section>
+</div>
+{% endif %}
+
+{% if candidates %}
+<h2 class="mt-5 mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+  That number flies more than once</h2>
+<div class="item-group">
+  {% for candidate, url in candidates %}
+  <a class="item" data-variant="outline" data-size="sm" href="{{ url }}">
+    <section>
+      <h3>
+        <span class="font-mono">{{ candidate.flight_number }}</span>
+        <span class="font-mono font-normal text-muted-foreground">
+          {{ candidate.origin_iata }} &rarr; {{ candidate.dest_iata }}</span>
+      </h3>
+      <p class="font-mono">{{ candidate.departure_local.strftime('%H:%M') }}
+        at {{ candidate.origin_iata }}</p>
+    </section>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="action-bar flex gap-2">
+  {% if configured %}
+  <button class="btn flex-1" data-size="lg" type="submit" form="find-form">Find it</button>
+  {% endif %}
+  <a class="btn {{ 'flex-1' if not configured }}" data-variant="ghost" data-size="lg"
+     href="/f/new/details">By hand</a>
+</div>
+
+{% endblock %}

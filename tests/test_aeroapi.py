@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flighter.aeroapi import (
     DEFAULT_PRICE_USD,
     FLIGHT_INFO_ENDPOINT,
+    SCHEDULES_ENDPOINT,
     AeroAPIClient,
     BudgetExceeded,
     TokenBucket,
@@ -470,6 +471,52 @@ async def test_flight_info_authenticates_and_always_asks_for_one_page() -> None:
     assert [(row.endpoint, row.est_cost_usd) for row in session.usage] == [
         (FLIGHT_INFO_ENDPOINT, 0.005)
     ]
+
+
+async def test_schedules_asks_the_airline_about_one_number_and_is_billed_its_own_price() -> None:
+    """A published schedule is four times the price of a poll, so it is metered as one."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return json_response({"links": None, "num_pages": 1, "scheduled": []})
+
+    session = FakeSession()
+    client = make_client(session, handler)
+    try:
+        await client.schedules(
+            date(2026, 9, 11), date(2026, 9, 14), airline="AC", flight_number="871"
+        )
+    finally:
+        await client.aclose()
+
+    request = seen[0]
+    assert request.headers["x-apikey"] == "test-key"
+    assert request.url.path == "/aeroapi/schedules/2026-09-11/2026-09-14"
+    assert request.url.params["airline"] == "AC"
+    assert request.url.params["flight_number"] == "871"
+    assert request.url.params["max_pages"] == "1"
+    assert [(row.endpoint, row.est_cost_usd) for row in session.usage] == [
+        (SCHEDULES_ENDPOINT, 0.02)
+    ]
+
+
+async def test_a_lookup_is_refused_when_it_would_take_the_month_past_the_cap() -> None:
+    """At $0.02 a lookup, the last three polls' worth of budget will not buy one."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:  # pragma: no cover
+        raise AssertionError("spent money the cap does not cover")
+
+    session = FakeSession(spend=Decimal("3.99"))
+    client = make_client(session, handler)
+    try:
+        with pytest.raises(BudgetExceeded):
+            await client.schedules(
+                date(2026, 9, 11), date(2026, 9, 14), airline="AC", flight_number="871"
+            )
+    finally:
+        await client.aclose()
+    assert session.usage == []
 
 
 async def test_usage_is_billed_per_page_returned() -> None:

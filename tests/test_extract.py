@@ -329,3 +329,42 @@ def test_an_html_only_email_is_rendered_as_its_visible_text() -> None:
     rendered = render(html_only)
     assert "Flight" in rendered and "DL1234" in rendered and "JFK to LAX" in rendered
     assert "<p>" not in rendered
+
+
+def test_the_html_part_is_read_over_a_plain_part_that_buries_the_flight() -> None:
+    """A mail platform's plain rendering inlines a tracking link behind every word.
+
+    Enough of them and the flight table sits past the cut the prompt is made at, while
+    the HTML part the person actually read has it in the first screenful.
+    """
+    tracked = "( http://link.example.com/ls/click?upn=" + "u001." * 220 + " )"
+    plain = "\n".join(f"Manage Your Trip {tracked}" for _ in range(12))
+    plain += "\nDelta 4963\nThu, Dec 24\nLaGuardia 09:25 AM\nMontreal 11:02 AM"
+    assert plain.index("Delta 4963") > extract.MAX_BODY_CHARS
+
+    both = Message(
+        id="both",
+        subject="Important Update: Flight Schedule Change",
+        from_addr="a@example.com",
+        date=None,
+        text_plain=plain,
+        text_html=(
+            "<html><body><a href='http://link.example.com/ls/click'>Manage Your Trip</a>"
+            "<table><tr><td>Delta 4963</td><td>Thu, Dec 24</td></tr></table></body></html>"
+        ),
+    )
+    rendered = render(both)
+    assert "Delta 4963" in rendered
+    assert "link.example.com" not in rendered
+
+
+def test_an_html_part_with_nothing_to_read_falls_back_to_the_plain_part() -> None:
+    image_only = Message(
+        id="image",
+        subject="Your itinerary",
+        from_addr="a@example.com",
+        date=None,
+        text_plain="Flight DL1234, JFK to LAX",
+        text_html="<html><body><img src='itinerary.png'></body></html>",
+    )
+    assert "DL1234" in render(image_only)

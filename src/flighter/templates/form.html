@@ -6,6 +6,11 @@
 
 <h1 class="mb-4 text-xl font-semibold tracking-tight">{{ 'Edit flight' if editing else 'Add a flight' }}</h1>
 
+{% if found %}
+<p class="mb-3 text-sm text-muted-foreground">Filled in from the airline's published
+  schedule. Check it, add whatever is on the ticket, and save.</p>
+{% endif %}
+
 {% if error %}
 <div class="alert mb-3" data-variant="destructive" role="alert">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -17,6 +22,14 @@
 {% endif %}
 
 <form id="flight-form" method="post" action="{{ '/f/' ~ b.id if editing else '/f' }}">
+  {# Who flies the leg is what FlightAware is asked about, and it is never typed: it
+     comes off a lookup or off the email, and an edit must not lose it. #}
+  <input type="hidden" name="operating_carrier"
+         value="{{ form['operating_carrier'] if 'operating_carrier' in form
+                   else (b.operating_carrier or '' if b else '') }}">
+  <input type="hidden" name="operating_number"
+         value="{{ form['operating_number'] if 'operating_number' in form
+                   else (b.operating_number or '' if b else '') }}">
   <div class="card" data-size="sm">
     <header><h3>The flight</h3></header>
     <section>
@@ -109,7 +122,7 @@
 <div class="action-bar flex gap-2">
   <button class="btn flex-1" data-size="lg" type="submit" form="flight-form">Save</button>
   <a class="btn" data-variant="ghost" data-size="lg"
-     href="{{ '/f/' ~ b.id if editing else '/' }}">Cancel</a>
+     href="{{ '/f/' ~ b.id if editing else '/f/new' }}">Cancel</a>
 </div>
 
 {% endblock %}

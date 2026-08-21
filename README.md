@@ -47,6 +47,15 @@ Bodies are read with `BODY.PEEK[]`, so no email is ever silently marked as read,
 ingest log is keyed on each email's `Message-ID` so re-filing a message does not make it
 new again.
 
+**Adding a flight by hand is two boxes.** The airline has already published where AC871
+goes on the 12th, when it leaves, and who actually flies it, so the form asks for the
+number and the day and reads the rest out of FlightAware's schedule. What comes back
+fills the form in rather than being saved behind your back, because a schedule is a
+statement about a flight and only you know it is *your* flight; a number that flies twice
+that day is offered as a choice rather than guessed at. Typing the whole thing in is
+still one tap away, which is what happens for a flight nobody publishes, for a key that
+has not been entered, and for the day FlightAware cannot be reached.
+
 **Timezones are resolved from the airport, never from the email.** Airlines state offsets
 wrong often enough that trusting them is a bug waiting for a date-line flight. Every
 airport carries an IANA zone, every instant in the database is UTC, and every time on
@@ -61,6 +70,9 @@ estimate, pushes an alert, and shows a banner until the next month starts.
 
 Billing is per *page of up to 15 flight records*, not per call, so every request is sent
 with `max_pages=1`. At $0.005 per page the free allowance is exactly 1,000 polls a month.
+Looking a flight number up in the published schedule is a dearer page at $0.02, which is
+why it happens when you ask for it and never on a page load, and why the same cap that
+stops the polling stops it too.
 
 Polling starts two days before departure, which is as far ahead as AeroAPI answers for a
 flight: anything asked earlier is a result set spent on an empty list. From there the
@@ -283,7 +295,7 @@ Then finish on **Preferences**:
 **Advanced**, on the same tab, holds the two knobs almost nobody needs to move: the
 monthly FlightAware limit and the log level.
 
-Then either add a flight by hand or flag a booking email.
+Then either add a flight by its number or flag a booking email.
 
 If you would rather a deployment come up already knowing a credential - a rebuild you do
 not want to reconfigure by hand - put it in the container's environment, either through
