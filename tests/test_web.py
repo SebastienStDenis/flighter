@@ -285,7 +285,8 @@ def test_a_codeshare_is_shown_under_the_number_booked_with_a_note_on_who_flies_i
     for path in ("/", "/f/1"):
         assert '<h2 class="font-mono tracking-tight">AC871</h2>' in client.get(path).text
     # Who flies it is a detail for the flight page; the board stays one line a flight.
-    assert "Operated as LH479" in client.get("/f/1").text
+    body = client.get("/f/1").text
+    assert "Operated as" in body and "LH479" in body
     assert "Operated" not in client.get("/").text
 
 

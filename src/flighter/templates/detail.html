@@ -11,10 +11,7 @@
 <div class="card">
   <header>
     <h2 class="font-mono tracking-tight">{{ v.flight_number }}</h2>
-    <p>{{ day(v.scheduled_departure, v.origin_tz) }}
-      {%- if s and s.aircraft_type %} &middot; {{ s.aircraft_type }}{% endif -%}
-      {%- if v.operated %} &middot; {{ v.operated }}{% endif -%}
-    </p>
+    <p>{{ day(v.scheduled_departure, v.origin_tz) }}</p>
     <div class="card-action">{{ m.badge(v.status) }}</div>
   </header>
   <section>
@@ -48,11 +45,11 @@
   {% endif %}
 </div>
 
-{# The one card a person can write on. Each row opens the same dialog on its own box:
-   what the ticket says is theirs to correct, and nothing else on the page is. #}
+{# The one card a person can write on. Each ticket row opens the same dialog on its own
+   box: what the ticket says is theirs to correct, and nothing else on the page is. #}
 <div class="card mt-3" data-size="sm">
   <header>
-    <h3>Ticket</h3>
+    <h3>Details</h3>
     <div class="card-action">
       <button class="btn" data-variant="ghost" data-size="sm" type="button"
               onclick="editTicket('confirmation_code')">Edit</button>
@@ -63,6 +60,13 @@
       {{ m.editable("Confirmation", dash(v.booking.confirmation_code), "confirmation_code", mono=true) }}
       {{ m.editable("Seat", dash(v.booking.seat), "seat", mono=true) }}
       {{ m.editable("Notes", dash(v.booking.notes), "notes") }}
+      {% if s and s.aircraft_type %}
+      {{ m.detail("Aircraft", s.aircraft_type, mono=true) }}
+      {% endif %}
+      {% if v.booking.operating_carrier %}
+      {{ m.detail("Operated " ~ ("as" if v.booking.operating_number else "by"),
+                  v.booking.operating_carrier ~ (v.booking.operating_number or ""), mono=true) }}
+      {% endif %}
       {% if v.calendar_link %}
       <div class="item" data-size="xs">
         <section><p>Calendar</p></section>
