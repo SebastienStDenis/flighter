@@ -33,7 +33,7 @@ from .airports import UnknownAirport
 from .caldav import CalendarClient, CalendarUnavailable, Collection
 from .checks import run_checks
 from .config import CREDENTIALS, SERVICES, Settings, mint_widget_token, write_secrets
-from .db import get_session
+from .db import get_session, session_scope
 from .mail import FLAG_COLOURS, message_url
 from .models import Booking, BookingSource, BookingStatus, FlightEvent
 from .phase import CANCELLED_NOTICE
@@ -67,16 +67,23 @@ WIDGET_QUIET_AFTER = timedelta(days=1)
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
-async def note_problems(request: Request, session: SessionDep) -> None:
+async def note_problems(request: Request) -> None:
     """How many emails are waiting on a decision, for the marker on the Problems tab.
 
     Resolved once per request, ahead of the route, so every page carries the number
     without every route having to ask for it. The widget's endpoint draws no nav and
     is the one caller that skips the query.
+
+    Counted in a transaction of its own rather than on the route's session. Every
+    transaction takes the database's one write lock the moment it begins, so a count
+    taken on the route's session would hold that lock across whatever the route goes on
+    to do - a lookup on FlightAware, a probe of the database - and the session either of
+    those opens for itself would wait on it until it timed out.
     """
     if request.url.path.startswith("/api/"):
         return
-    request.state.problems = len(await ingest.list_set_aside(session))
+    async with session_scope() as session:
+        request.state.problems = len(await ingest.list_set_aside(session))
 
 
 def ago(then: datetime, now: datetime) -> str:
@@ -290,10 +297,14 @@ def create_app(settings: Settings) -> FastAPI:
         """Hand one set-aside email back to the mail watcher.
 
         Nothing is reprocessed here: the message is still flagged in Mail, so all this
-        does is clear the record of having given up and let the next sweep find it.
+        does is clear the record of having given up and wake the watcher, whose next
+        sweep finds it. Committed before the wake, so that sweep reads the row as it
+        stands now.
         """
         if await ingest.retry(session, message_id) is None:
             raise HTTPException(status_code=404, detail="That email is not set aside.")
+        await session.commit()
+        ingest.wake()
         return RedirectResponse("/problems", status_code=303)
 
     @app.post("/mail/ignore")
@@ -312,7 +323,6 @@ def create_app(settings: Settings) -> FastAPI:
     @app.post("/f/new")
     async def find_flight(
         request: Request,
-        session: SessionDep,
         flight_number: Annotated[str, Form()],
         departure_date: Annotated[str, Form()],
     ) -> Response:
@@ -332,7 +342,7 @@ def create_app(settings: Settings) -> FastAPI:
 
         carrier, number = flight
         try:
-            found = await lookup.find_flights(session, carrier, number, day)
+            found = await lookup.find_flights(carrier, number, day)
         except lookup.OutOfRange:
             return search_page(request, "No airline has published a schedule that far off.", posted)
         except BudgetExceeded:
