@@ -34,6 +34,7 @@ from .db import get_session, session_scope
 from .mail import FLAG_COLOURS, message_url
 from .models import Booking, BookingSource, BookingStatus, FlightEvent
 from .phase import CANCELLED_NOTICE
+from .timezones import same_local_date
 from .views import FlightView, build_views
 from .widget import connect_url, last_seen, script_source
 from .widget import router as widget_router
@@ -134,6 +135,7 @@ def create_app(settings: Settings) -> FastAPI:
         missing=views.MISSING,
         problem_notice=views.problem_notice,
         same_day=views.same_day,
+        same_local_date=same_local_date,
         until=views.until,
     )
 

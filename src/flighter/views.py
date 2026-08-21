@@ -96,13 +96,6 @@ class Timeline:
     def late(self) -> bool:
         return self.moved is not None and self.moved > timedelta(0)
 
-    @property
-    def drift(self) -> str | None:
-        """`late 25m` or `early 10m`, or nothing while it is inside the band."""
-        if self.moved is None:
-            return None
-        return f"{'late' if self.late else 'early'} {duration(self.moved)}"
-
 
 class Checkpoint(NamedTuple):
     """The next thing to happen to a flight that has left its gate, read at its airport.

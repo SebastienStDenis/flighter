@@ -31,6 +31,7 @@ from flighter.db import get_session
 from flighter.lookup import Candidate
 from flighter.models import KV, Airport, Booking, FlightEvent, FlightSnapshot, IngestLog
 from flighter.notify import Notifier
+from flighter.timezones import format_local
 from flighter.widget import LAST_SEEN_KEY
 
 NOW = datetime.now(UTC)
@@ -529,7 +530,9 @@ def test_the_card_names_one_runway_moment_at_a_time(
     assert "At the gate" in body
     assert "Wheels up" not in body and "Lands" not in body
     # The estimate still reads as a change against what was booked.
-    assert "late 20m" in body
+    assert (
+        moved_time(ARRIVAL, ARRIVAL + timedelta(minutes=20), "Europe/London", "text-stop") in body
+    )
 
     at_the_gate = replace_snapshot(
         actual_out=DEPARTURE + timedelta(minutes=5),
@@ -543,17 +546,88 @@ def test_the_card_names_one_runway_moment_at_a_time(
         assert runway not in body
 
 
+def struck(was: datetime, tz: str, *, with_date: bool = False) -> str:
+    """The time a flight was booked for, as it is drawn once that time has moved."""
+    return (
+        '<s class="font-normal text-muted-foreground">'
+        f"{format_local(was, tz, with_date=with_date)}</s>"
+    )
+
+
+def moved_time(was: datetime, now: datetime, tz: str, tone: str) -> str:
+    """A time that moved, as one line draws it: the original struck, the new one coloured."""
+    return f'{struck(was, tz)} <span class="{tone}">{format_local(now, tz)}</span>'
+
+
 def test_a_delay_is_shown_against_what_was_booked(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    late = DEPARTURE + timedelta(minutes=40)
+    show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=late))
+    body = client.get("/f/1").text
+    assert f'text-stop">{format_local(late, "America/Toronto")}' in body
+    assert struck(DEPARTURE, "America/Toronto") in body
+    # The struck time and the colour say it; no words repeat it.
+    assert "late " not in body and "early " not in body
+
+
+def test_a_time_brought_forward_is_green(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    earlier = DEPARTURE - timedelta(minutes=20)
+    show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=earlier))
+    body = client.get("/f/1").text
+    assert f'text-ok">{format_local(earlier, "America/Toronto")}' in body
+    assert struck(DEPARTURE, "America/Toronto") in body
+
+
+def test_each_end_of_a_red_eye_names_its_own_day(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Leaves Saturday evening, lands Sunday morning: one heading cannot say both."""
+    overnight = booking(
+        scheduled_departure_utc=datetime(2026, 9, 12, 22, 40, tzinfo=UTC),
+        scheduled_arrival_utc=datetime(2026, 9, 13, 9, 25, tzinfo=UTC),
+    )
+    show(monkeypatch, overnight, None)
+
+    for path in ("/", "/f/1"):
+        body = client.get(path).text
+        assert "Sat 12 Sep" in body
+        assert "Sun 13 Sep" in body
+
+
+def test_a_delay_past_midnight_keeps_the_day_it_was_booked_for(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """23:50 struck next to 00:30 reads as earlier, unless the struck time says Saturday."""
+    booked = datetime(2026, 9, 13, 3, 50, tzinfo=UTC)
+    slipped = datetime(2026, 9, 13, 4, 30, tzinfo=UTC)
     show(
         monkeypatch,
-        booking(),
-        replace_snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=40)),
+        booking(scheduled_departure_utc=booked),
+        replace_snapshot(scheduled_out=booked, estimated_out=slipped),
     )
+
     body = client.get("/f/1").text
-    assert "<s>" in body
-    assert "late 40m" in body
+    assert struck(booked, "America/Toronto", with_date=True) in body
+    assert "Sat 12 Sep 23:50 EDT" in body
+    assert 'text-stop">00:30 EDT' in body
+    assert "Sun 13 Sep" in body
+
+
+def test_the_lead_card_strikes_a_time_that_slipped_and_leaves_one_that_held(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Late is red next to what was planned; ten minutes on arrival is not worth a mark."""
+    show(monkeypatch, booking(), full_snapshot())
+
+    body = client.get("/").text
+    late = DEPARTURE + timedelta(minutes=25)
+    assert moved_time(DEPARTURE, late, "America/Toronto", "text-stop") in body
+    arrival = format_local(ARRIVAL + timedelta(minutes=10), "Europe/London")
+    assert f'<span class="">{arrival}</span>' in body
+    assert format_local(ARRIVAL, "Europe/London") not in body
 
 
 def test_a_cancelled_flight_says_who_said_so(

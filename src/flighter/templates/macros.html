@@ -19,17 +19,22 @@
 </div>
 {% endmacro %}
 
-{# The route at list size: origin, destination, when each happens, and the rule. #}
+{# The route at list size: origin, destination, when each happens, and the rule. Each
+   end carries its own day: a red-eye lands on a different one from the one it left. #}
 {% macro route(v) %}
 <div class="route">
   <div>
     <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.origin_iata }}</div>
-    <div class="font-mono text-xs text-muted-foreground">{{ at(v.departure, v.origin_tz) }}</div>
+    <div class="font-mono text-xs text-muted-foreground">{{ moment(v.departs, v.origin_tz) }}</div>
+    <div class="font-mono text-xs text-muted-foreground">{{ day(v.departs.best, v.origin_tz) }}</div>
   </div>
   {{ route_line(v) }}
   <div class="text-right">
     <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.dest_iata }}</div>
-    <div class="font-mono text-xs text-muted-foreground">{{ at(v.arrival, v.dest_tz) }}</div>
+    <div class="font-mono text-xs text-muted-foreground">{{ moment(v.arrives, v.dest_tz) }}</div>
+    {% if v.arrives.best is not none %}
+    <div class="font-mono text-xs text-muted-foreground">{{ day(v.arrives.best, v.dest_tz) }}</div>
+    {% endif %}
   </div>
 </div>
 {% endmacro %}
@@ -42,13 +47,14 @@
   {% if airport.city %}<div class="text-sm font-medium">{{ airport.city }}</div>{% endif %}
   <div class="text-xs leading-tight text-muted-foreground">{{ airport.name }}</div>
   {% endif %}
-  <div class="mt-2 font-mono text-xl leading-tight font-bold {{ 'text-warn' if line.late else ('text-muted-foreground' if line.best is none) }}">
+  <div class="mt-2 font-mono text-xl leading-tight font-bold {{ tone(line) or ('text-muted-foreground' if line.best is none) }}">
     {{- at(line.best, tz) -}}
   </div>
+  {% if line.best is not none %}
+  <div class="font-mono text-xs text-muted-foreground">{{ day(line.best, tz) }}</div>
+  {% endif %}
   {% if line.moved %}
-  <div class="font-mono text-xs text-muted-foreground">
-    <s>{{ at(line.scheduled, tz) }}</s> <span class="font-sans">{{ line.drift }}</span>
-  </div>
+  <div class="font-mono text-xs">{{ was(line, tz) }}</div>
   {% endif %}
   <div class="mt-2 space-y-0.5 text-sm">
     {{ where("Terminal", terminal) }}
@@ -134,6 +140,20 @@
 </button>
 {% endmacro %}
 
+{# The colour a moved time is drawn in: red once it has slipped later, green when it
+   came forward, and none at all while it is still what was booked. #}
+{% macro tone(line) -%}
+{{- ('text-stop' if line.late else 'text-ok') if line.moved -}}
+{%- endmacro %}
+
+{# What a time was before it moved. It names its day only when the move crossed
+   midnight, because then the bare time would read as the wrong side of it. #}
+{% macro was(line, tz) -%}
+<s class="font-normal text-muted-foreground">
+  {{- at(line.scheduled, tz, with_date=not same_local_date(line.scheduled, line.best, tz)) -}}
+</s>
+{%- endmacro %}
+
 {# A time that has resolved through scheduled -> estimated -> actual, on one line. The
    original is struck through only when it moved, so an on-time flight reads as one
    clean time. #}
@@ -141,9 +161,8 @@
 {%- if line.best is none -%}
 <span class="text-muted-foreground">{{ missing }}</span>
 {%- else -%}
-{%- if line.moved %}<s class="font-normal text-muted-foreground">{{ at(line.scheduled, tz) }}</s> {% endif -%}
-<span class="font-medium {{ 'text-warn' if line.late }}">{{ at(line.best, tz) }}</span>
-{%- if line.moved %} <span class="font-sans text-xs text-muted-foreground">{{ line.drift }}</span>{% endif -%}
+{%- if line.moved %}{{ was(line, tz) }} {% endif -%}
+<span class="{{ tone(line) }}">{{ at(line.best, tz) }}</span>
 {%- endif -%}
 {% endmacro %}
 
