@@ -27,16 +27,7 @@
       {{ m.route_line(v) }}
       <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.dest_iata }}</div>
     </div>
-    <div class="mt-1 grid grid-cols-2 gap-4">
-      {{ m.end(v.origin, v.departs, v.origin_tz,
-               s.terminal_origin if s else none,
-               s.gate_origin if s else none) }}
-      {{ m.end(v.dest, v.arrives, v.dest_tz,
-               s.terminal_destination if s else none,
-               s.gate_destination if s else none,
-               baggage=s.baggage_claim if s else none,
-               arrival=true) }}
-    </div>
+    <div class="mt-1">{{ m.ends(v, s) }}</div>
     {% if v.cancelled %}
     <p class="mt-3 text-sm text-stop">{{ cancelled_notice }}</p>
     {% endif %}
@@ -61,7 +52,7 @@
    what the ticket says is theirs to correct, and nothing else on the page is. #}
 <div class="card mt-3" data-size="sm">
   <header>
-    <h3>On the ticket</h3>
+    <h3>Ticket</h3>
     <div class="card-action">
       <button class="btn" data-variant="ghost" data-size="sm" type="button"
               onclick="editTicket('confirmation_code')">Edit</button>
@@ -126,7 +117,7 @@
 {% endset %}
 {% call bc.dialog(
      id='ticket',
-     title='On the ticket',
+     title='Ticket',
      description='The flight itself is the airline\'s to state. If it is the wrong one, stop tracking it and add the right number.',
      footer=ticket_footer,
      close_button=false) %}

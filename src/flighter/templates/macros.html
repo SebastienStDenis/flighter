@@ -39,35 +39,52 @@
 </div>
 {% endmacro %}
 
-{# One end of the flight: the place, the time it is now expected, and where in the
-   building. The arrival is right-aligned so the two ends mirror across the card. #}
-{% macro end(airport, line, tz, terminal, gate, baggage=none, arrival=false) %}
-<div{% if arrival %} class="text-right"{% endif %}>
-  {% if airport %}
-  {% if airport.city %}<div class="text-sm font-medium">{{ airport.city }}</div>{% endif %}
-  <div class="text-xs leading-tight text-muted-foreground">{{ airport.name }}</div>
-  {% endif %}
-  <div class="mt-2 font-mono text-xl leading-tight font-bold {{ tone(line) or ('text-muted-foreground' if line.best is none) }}">
-    {{- at(line.best, tz) -}}
+{# The two ends of the flight, one row per fact: the city, the time each is now
+   expected, and where in the building. The pairs share rows, so the arrival's time sits
+   level with the departure's whatever else either side has to say. #}
+{% macro ends(v, s) %}
+{% set sides = [
+  {"airport": v.origin, "line": v.departs, "tz": v.origin_tz,
+   "terminal": s.terminal_origin if s else none, "gate": s.gate_origin if s else none},
+  {"airport": v.dest, "line": v.arrives, "tz": v.dest_tz,
+   "terminal": s.terminal_destination if s else none, "gate": s.gate_destination if s else none},
+] %}
+<div class="ends">
+  {% for side in sides %}
+  <div class="text-sm font-medium">
+    {%- if side.airport and side.airport.city %}{{ side.airport.city }}{% endif -%}
   </div>
-  {% if line.best is not none %}
-  <div class="font-mono text-xs text-muted-foreground">{{ day(line.best, tz) }}</div>
-  {% endif %}
-  {% if line.moved %}
-  <div class="font-mono text-xs">{{ was(line, tz) }}</div>
-  {% endif %}
-  <div class="mt-2 space-y-0.5 text-sm">
-    {{ where("Terminal", terminal) }}
-    {{ where("Gate", gate, "text-plan") }}
-    {% if arrival %}{{ where("Baggage", baggage) }}{% endif %}
+  {% endfor %}
+  {% for side in sides %}
+  <div class="mt-1.5 font-mono text-xl leading-tight font-bold {{ tone(side.line) or ('text-muted-foreground' if side.line.best is none) }}">
+    {{- at(side.line.best, side.tz) -}}
   </div>
+  {% endfor %}
+  {% for side in sides %}
+  <div class="font-mono text-xs text-muted-foreground">
+    {%- if side.line.best is not none %}{{ day(side.line.best, side.tz) }}{% endif -%}
+  </div>
+  {% endfor %}
+  {% if v.departs.moved or v.arrives.moved %}
+  {% for side in sides %}
+  <div class="font-mono text-xs">{% if side.line.moved %}{{ was(side.line, side.tz) }}{% endif %}</div>
+  {% endfor %}
+  {% endif %}
+  {% for side in sides %}
+  {{ where("Terminal", side.terminal, spaced=true) }}
+  {% endfor %}
+  {% for side in sides %}
+  {{ where("Gate", side.gate, "text-plan") }}
+  {% endfor %}
+  <div></div>
+  {{ where("Baggage", s.baggage_claim if s else none) }}
 </div>
 {% endmacro %}
 
 {# A place in the building, on one line. The label stays when the value is a dash. #}
-{% macro where(name, value, tone="") %}
+{% macro where(name, value, tone="", spaced=false) %}
 {% set shown = dash(value) %}
-<div>
+<div{% if spaced %} class="mt-1.5"{% endif %}>
   <span class="text-muted-foreground">{{ name }}</span>
   <span class="font-mono font-medium {{ tone if shown != missing else 'text-muted-foreground' }}">
     {{- shown -}}

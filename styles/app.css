@@ -177,6 +177,17 @@
     left: var(--progress, 0%);
   }
 
+  /* The two ends of the flight, one row per fact. A grid rather than two columns, so
+     a fact on one side sits level with its twin on the other. The arrival reads from
+     the right edge, mirroring the departure. */
+  .ends {
+    @apply grid grid-cols-2 gap-x-4 gap-y-0.5;
+  }
+
+  .ends > :nth-child(even) {
+    @apply text-right;
+  }
+
   /* The Apple Mail flag colours, drawn as Mail draws them. This is the one place in the
      app where the colour is the information rather than the emphasis. */
   .swatch {
