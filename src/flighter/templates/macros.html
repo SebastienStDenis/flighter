@@ -57,8 +57,9 @@
 {% endmacro %}
 
 {# Where in the building at each end: the terminal and gate it leaves from, and the
-   belt, terminal and gate it arrives at. On the same grid as the times, so each side's
-   boxes start under its own clock. #}
+   belt, gate and terminal it arrives at. The arrival side mirrors the departure side,
+   so the terminal sits on the outside and the gate beside it at both ends. On the same
+   grid as the times, so each side's boxes start under its own clock. #}
 {% macro places(v, s) %}
 {% set sides = [
   {"right": false, "places": [
@@ -67,8 +68,8 @@
   ]},
   {"right": true, "places": [
     ("Bags", s.baggage_claim if s else none, ""),
-    ("Term", s.terminal_destination if s else none, ""),
     ("Gate", s.gate_destination if s else none, "text-plan font-semibold"),
+    ("Term", s.terminal_destination if s else none, ""),
   ]},
 ] %}
 <div class="ends">
@@ -87,11 +88,11 @@
 </div>
 {% endmacro %}
 
-{# The airline's mark, on a white tile so it reads the same on a dark card as on a light
-   one. The number beside it already names the carrier, so the image says nothing of
-   its own, and a carrier nobody has drawn falls back to a plain tail. #}
+{# The airline's mark, on a tile the colour of the card so it sits in the card rather
+   than on it. The number beside it already names the carrier, so the image says nothing
+   of its own, and a carrier nobody has drawn falls back to a plain tail. #}
 {% macro logo(carrier, size="size-6") %}
-<img class="{{ size }} shrink-0 rounded-md bg-white p-0.5 ring-1 ring-border" alt=""
+<img class="{{ size }} shrink-0 rounded-md bg-card p-0.5 ring-1 ring-border" alt=""
      src="https://www.gstatic.com/flights/airline_logos/70px/{{ carrier }}.png"
      width="24" height="24" loading="lazy" decoding="async">
 {% endmacro %}
