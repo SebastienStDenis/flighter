@@ -313,6 +313,8 @@ def test_the_problems_page_says_which_email_was_set_aside_and_why(client: TestCl
     assert "the model timed out" in body
     assert "Try again" in body
     assert "Ignore" in body
+    # The email itself, in Mail, is where the other half of the decision is made.
+    assert 'href="message://%3Cabc@icloud.invalid%3E"' in body
 
 
 def test_a_set_aside_email_is_kept_off_the_board(client: TestClient) -> None:

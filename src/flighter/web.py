@@ -36,6 +36,7 @@ from .config import CREDENTIALS, SERVICES, Settings, write_secrets
 from .db import get_session
 from .mail import FLAG_COLOURS
 from .models import Booking, BookingSource, BookingStatus, FlightEvent
+from .notify import message_url
 from .phase import CANCELLED_NOTICE
 from .views import FlightView, build_views
 from .widget import router as widget_router
@@ -155,6 +156,7 @@ def create_app(settings: Settings) -> FastAPI:
         dash=views.dash,
         day=views.day,
         duration=views.duration,
+        email_url=message_url,
         local_input=views.local_input,
         missing=views.MISSING,
         same_day=views.same_day,
