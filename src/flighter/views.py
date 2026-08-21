@@ -302,6 +302,16 @@ class FlightView:
         return status(self.phase, self.booking, self.snapshot)
 
     @property
+    def watched(self) -> bool:
+        """Whether there is anything on the flight to watch yet.
+
+        Inside its day a flight has a gate to walk to and a time to count to. Days out
+        it has neither, and called off it has nothing left, so the card keeps to what is
+        settled: the number, the route and the times at each end.
+        """
+        return self.phase not in (UPCOMING, CANCELLED)
+
+    @property
     def ended(self) -> datetime:
         """When this flight stopped being something to wait for.
 
@@ -473,14 +483,6 @@ def day(instant: datetime, tz: str) -> str:
     return to_local(instant, tz).strftime("%a %-d %b")
 
 
-def same_day(a: FlightView, b: FlightView) -> bool:
-    """Whether two flights leave on the same day, each read at its own airport."""
-    return (
-        to_local(a.scheduled_departure, a.origin_tz).date()
-        == to_local(b.scheduled_departure, b.origin_tz).date()
-    )
-
-
 def at(instant: datetime | None, tz: str, *, with_date: bool = False) -> str:
     """A time at an airport, or the missing marker. Every time on every page uses it."""
     if instant is None:
@@ -540,34 +542,6 @@ def change_value(value: str | None, tz: str) -> str:
     return at(instant, tz) if instant is not None else dash(value)
 
 
-def most_urgent(views: Sequence[FlightView]) -> int | None:
-    """The booking id the board leads with, ranked exactly as the lock screen ranks it."""
-    ranked = sorted(
-        views,
-        key=lambda view: (
-            phase_rank(view.phase),
-            departure_estimate(view.booking, view.snapshot),
-        ),
-    )
-    return ranked[0].booking.id if ranked else None
-
-
-def featured(views: Sequence[FlightView]) -> set[int]:
-    """The booking ids the board draws as full cards rather than one-line rows.
-
-    A flight inside its day is what the board is opened for: leaving within the next
-    day, or gone and not yet at the gate. Each gets the same card the flight page opens
-    with, gate and all. A cancelled flight keeps to a row, because there is nothing on
-    it left to watch. The lead flight is always among them, so that a board of flights
-    weeks away still opens with one card to read.
-    """
-    ids = {view.booking.id for view in views if view.phase not in (UPCOMING, CANCELLED)}
-    lead = most_urgent(views)
-    if lead is not None:
-        ids.add(lead)
-    return ids
-
-
 def group_into_trips(views: Sequence[FlightView]) -> list[list[FlightView]]:
     """Split departure-ordered flights into the runs that belong to one journey."""
     trips: list[list[FlightView]] = []
@@ -600,5 +574,7 @@ async def build_views(session: AsyncSession, rows: Iterable[Booking]) -> list[Fl
         )
         for booking in bookings
     ]
-    views.sort(key=lambda view: view.scheduled_departure)
+    # By the time each is now leaving, not the time it was booked to: a flight held
+    # three hours belongs after the one that left in the meantime.
+    views.sort(key=lambda view: view.departure)
     return views

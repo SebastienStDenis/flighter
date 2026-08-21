@@ -69,6 +69,16 @@ def view(booked: Booking, snap: FlightSnapshot | None) -> FlightView:
     return FlightView(booking=booked, snapshot=snap, origin=JFK, dest=LAX)
 
 
+# --- what there is to watch ------------------------------------------------------------
+
+
+def test_a_flight_days_out_or_called_off_has_nothing_to_watch_yet() -> None:
+    """Gate boxes and a countdown are for a flight inside its day."""
+    assert not view(booking(), None).watched
+    assert not view(booking(), snapshot(cancelled=True)).watched
+    assert view(booking(), snapshot(actual_out=DEPARTURE, actual_off=DEPARTURE)).watched
+
+
 # --- the milestone ---------------------------------------------------------------------
 
 

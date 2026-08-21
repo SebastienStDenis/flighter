@@ -64,10 +64,17 @@ const isAccessory = family.startsWith("accessory");
 const supportsRowLinks = family === "medium" || family === "large";
 
 const server = connect();
-const widget = server ? await buildWidget(server) : setupWidget();
+const result = server ? await load(server) : null;
+const widget = result ? buildWidget(result) : setupWidget();
 
 if (config.runsInWidget) {
   Script.setWidget(widget);
+  // A reload that reached the server is also the moment to take its newer script, so
+  // the widget follows the server without anyone opening the app. Quietly: a widget
+  // has nobody to tell, and the next reload simply runs the new copy.
+  if (result && !result.stale && !result.rejected) {
+    await updateScript(server.api);
+  }
 } else {
   await present(widget);
   if (server && (await updateScript(server.api))) {
@@ -138,8 +145,7 @@ async function request({ api, token }) {
 
 async function updateScript(api) {
   // Scripts are plain files in Scriptable's documents folder, so this one can replace
-  // itself with the server's copy and the widget ships with the server. Only from a run
-  // in the app: a widget has no way of saying it happened.
+  // itself with the server's copy and the widget ships with the server.
   try {
     const req = new Request(`${api}${SCRIPT_PATH}`);
     req.timeoutInterval = REQUEST_TIMEOUT_SECONDS;
@@ -213,8 +219,7 @@ function readCache() {
 
 // --- widget ----------------------------------------------------------------------------
 
-async function buildWidget(server) {
-  const result = await load(server);
+function buildWidget(result) {
   const widget = newWidget();
 
   if (result.rejected) {
