@@ -14,7 +14,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from contextlib import AbstractAsyncContextManager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from urllib.parse import quote
@@ -38,12 +38,14 @@ log = logging.getLogger(__name__)
 BASE_URL = "https://aeroapi.flightaware.com/aeroapi"
 
 FLIGHT_INFO_ENDPOINT = "/flights/{ident}"
+SCHEDULES_ENDPOINT = "/schedules/{date_start}/{date_end}"
 
 # Billing is per page returned, one page being up to 15 records, so a `max_pages=1` call
 # is one result set at the price below. Source: the per-query fee table at
 # https://www.flightaware.com/commercial/aeroapi/ (checked 2026-08).
 ENDPOINT_PRICE_USD: dict[str, Decimal] = {
     FLIGHT_INFO_ENDPOINT: Decimal("0.0050"),
+    SCHEDULES_ENDPOINT: Decimal("0.0200"),
 }
 # An endpoint we have not priced is assumed to cost as much as the one we call most, so a
 # new call site over-reports rather than spending invisibly.
@@ -301,9 +303,28 @@ class AeroAPIClient:
         params: dict[str, str | int] = {"max_pages": 1}
         if ident_type is not None:
             params["ident_type"] = ident_type
+        return await self._get(FLIGHT_INFO_ENDPOINT, f"/flights/{quote(ident, safe='')}", params)
 
+    async def schedules(
+        self, start: date, end: date, *, airline: str, flight_number: str
+    ) -> dict[str, Any]:
+        """`GET /schedules/{start}/{end}`, one page, metered.
+
+        The airline's published schedule rather than the live feed, because
+        `/flights/{ident}` only answers about the next two days and a flight is normally
+        added to the board long before that. `start` is inclusive and `end` exclusive,
+        and the two may be no more than three weeks apart.
+        """
+        return await self._get(
+            SCHEDULES_ENDPOINT,
+            f"/schedules/{start.isoformat()}/{end.isoformat()}",
+            {"max_pages": 1, "airline": airline, "flight_number": flight_number},
+        )
+
+    async def _get(self, endpoint: str, path: str, params: dict[str, str | int]) -> dict[str, Any]:
+        """One metered call: refused when the budget is spent, then paced, then billed."""
         async with self._sessions() as session:
-            refusal = await budget_refusal(session, FLIGHT_INFO_ENDPOINT)
+            refusal = await budget_refusal(session, endpoint)
         if refusal is not None:
             if refusal.just_tripped:
                 await self._announce(refusal.status)
@@ -313,14 +334,12 @@ class AeroAPIClient:
         # The key rides on the request rather than on the client, because the shared
         # client outlives a key replaced on the settings page.
         response = await self._http.get(
-            f"/flights/{quote(ident, safe='')}",
-            params=params,
-            headers={"x-apikey": self._settings.aeroapi_key},
+            path, params=params, headers={"x-apikey": self._settings.aeroapi_key}
         )
         response.raise_for_status()
         payload: dict[str, Any] = response.json()
         async with self._sessions() as session:
-            session.add(_usage(FLIGHT_INFO_ENDPOINT, payload))
+            session.add(_usage(endpoint, payload))
         return payload
 
     async def _announce(self, status: BudgetStatus) -> None:
@@ -371,12 +390,19 @@ def flight_ident(booking: Booking) -> str:
     return f"{carrier}{number.lstrip('0') or number}"
 
 
+def split_ident(value: Any) -> tuple[str, str] | None:
+    """`BA0112` as `("BA", "112")`, or nothing for anything that is not an ident."""
+    if not isinstance(value, str):
+        return None
+    match = _IDENT.match(value.strip().upper())
+    return None if match is None else (match.group(1), match.group(2))
+
+
 def _normalised_ident(value: Any) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
-    ident = value.strip().upper()
-    match = _IDENT.match(ident)
-    return ident if match is None else f"{match.group(1)}{match.group(2)}"
+    parts = split_ident(value)
+    return value.strip().upper() if parts is None else f"{parts[0]}{parts[1]}"
 
 
 def _booking_idents(booking: Booking) -> set[str]:
