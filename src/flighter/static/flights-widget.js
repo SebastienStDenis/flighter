@@ -430,7 +430,7 @@ function progressBar(container, percent, width) {
   const fill = track.addStack();
   fill.size = new Size((width * clamped) / 100, 4);
   fill.cornerRadius = 2;
-  fill.backgroundColor = toneColor("live");
+  fill.backgroundColor = toneColor("plan");
 }
 
 function footer(widget, data, result) {

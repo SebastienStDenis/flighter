@@ -681,22 +681,25 @@ def test_terminal_and_gate_share_a_line_and_the_gate_keeps_its_colour(
     middot = '<span class="text-muted-foreground"> &middot; </span>'
     assert f'T3{middot}<span class="font-semibold text-plan">B27</span>' in card
     assert f'T2{middot}<span class="font-semibold text-plan">A14</span>' in card
-    assert "Terminal" not in card and "Gate" not in card
+    # The words are in the small heading over the line, once per side, and nowhere else.
+    assert card.count("Term &middot; Gate") == 2
+    assert "Terminal" not in card
     assert 'Bags</span>\n  <span class="font-mono font-medium ">7</span>' in card
 
 
-def test_half_a_place_is_shown_without_a_dot_and_none_of_it_is_a_dash(
+def test_a_place_not_yet_known_keeps_its_slot_as_a_dash(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     show(monkeypatch, booking(), replace_snapshot(terminal_origin="3", gate_destination="A14"))
     card = top_card(client.get("/f/1").text)
-    assert ">T3</div>" in card
-    assert '><span class="font-semibold text-plan">A14</span></div>' in card
-    assert "&middot;" not in card
+    middot = '<span class="text-muted-foreground"> &middot; </span>'
+    blank = '<span class="text-muted-foreground">-</span>'
+    assert f"T3{middot}{blank}</div>" in card
+    assert f'{blank}{middot}<span class="font-semibold text-plan">A14</span></div>' in card
 
     show(monkeypatch, booking(), empty_snapshot())
     card = top_card(client.get("/f/1").text)
-    assert card.count('<span class="text-muted-foreground">-</span></div>') == 2
+    assert card.count(f"{blank}{middot}{blank}</div>") == 2
 
 
 def test_the_rule_says_how_long_the_hop_is_until_there_is_something_to_measure(

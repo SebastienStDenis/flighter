@@ -33,7 +33,7 @@
                   v.booking.operating_carrier ~ (v.booking.operating_number or ""), mono=true) }}
       {% endif %}
       {% if v.calendar_link %}
-      <div class="item" data-size="xs">
+      <div class="item py-1" data-size="xs">
         <section><p>Calendar</p></section>
         <aside>
           <a class="btn" data-variant="link" data-size="xs" href="{{ v.calendar_link }}">
@@ -42,7 +42,7 @@
       </div>
       {% endif %}
       {% if v.booking.source_message_id %}
-      <div class="item" data-size="xs">
+      <div class="item py-1" data-size="xs">
         <section><p>Email</p></section>
         <aside>
           <a class="btn" data-variant="link" data-size="xs"
