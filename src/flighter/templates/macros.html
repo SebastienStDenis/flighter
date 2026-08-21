@@ -49,7 +49,7 @@
     {# The airport a diversion was booked for, struck under the one it is going to. It
        lives in this column rather than up with the codes so that only this side grows. #}
     {% if side.right and v.diverted_to %}
-    <s class="-mt-1 mb-1 block font-mono text-sm text-muted-foreground">{{ v.booking.dest_iata }}</s>
+    <s class="-mt-2 mb-2.5 block font-mono text-sm text-muted-foreground">{{ v.booking.dest_iata }}</s>
     {% endif %}
     <div class="font-mono text-xs text-muted-foreground">
       {%- if side.line.best is not none %}{{ day(side.line.best, side.tz) }}{% endif -%}
