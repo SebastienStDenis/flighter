@@ -4,15 +4,17 @@
 
 // Flight tracker widget.
 //
-// The server decides everything: which flights, in what order, what each line says and
-// which instant to count down to. This file draws that and nothing else, with one
-// exception that matters more than all the drawing put together: the countdown is an
-// iOS timer element, not a string. A string is wrong within a minute of being drawn,
-// and iOS reloads widgets when it feels like it rather than when we ask.
+// The server decides everything: which flights, in what order, what the pill says and
+// in which tone, what the next milestone is and the instant it is expected. This file
+// draws that and nothing else. The one thing it works out for itself is the figure
+// beside the milestone, because that depends on the phone's clock. It is built from the
+// same units the web page uses: whole days once a day or more away, hours and minutes
+// inside that, never seconds, and "ago" once the instant has gone by.
 //
-// The matching trap: a timer whose date has passed counts *up*, with no sign and no
-// marker, so "2:32" reads identically as "departs in 2m32s" and "departed 2m32s ago".
-// Every timer here is gated on its date still being in the future.
+// The figure is a string, so it is only as fresh as the last reload, and iOS reloads
+// widgets when it feels like it rather than when we ask. Nothing drawn here is finer
+// than a minute, and the ask for a reload is made on the minute only while a milestone
+// is close enough for a stale figure to be the first thing anyone notices.
 //
 // There is nothing to edit here. The server's address and the token arrive through the
 // Connect button on the settings page, which runs this script with both in the URL, and
@@ -25,41 +27,28 @@ const CACHE_FILE = "flighter-widget.json";
 const REQUEST_TIMEOUT_SECONDS = 15;
 // iOS budgets reloads and ignores an eager request anyway, so do not ask for one.
 const MIN_REFRESH_SECONDS = 60;
+// Inside this the figure is minutes, and a minute stale is a minute wrong.
+const IMMINENT_MS = 60 * 60 * 1000;
 
-const BG_TOP = new Color("#101725");
-const BG_BOTTOM = new Color("#070a12");
-const TEXT = new Color("#ffffff");
-const MUTED = new Color("#8a94a6");
-const TRACK = new Color("#ffffff", 0.18);
+// The web UI's palette, each value as styles/app.css defines it for the light and the
+// dark scheme, rendered from oklch to sRGB. The phone's appearance picks the side, the
+// same way the page does, so the widget is the card it would be on the board.
+const BACKGROUND = Color.dynamic(new Color("#ffffff"), new Color("#14171e"));
+const TEXT = Color.dynamic(new Color("#111720"), new Color("#e9edf2"));
+const MUTED = Color.dynamic(new Color("#5f656e"), new Color("#989fa9"));
+const TRACK = Color.dynamic(new Color("#dce0e5"), new Color("#2c3039"));
 
-const PHASE_COLOR = {
-  upcoming: new Color("#7aa2f7"),
-  day_of: new Color("#7aa2f7"),
-  taxiing: new Color("#ffb454"),
-  airborne: new Color("#4ec9b0"),
-  landed: new Color("#8a94a6"),
-  cancelled: new Color("#ff6b6b"),
-  diverted: new Color("#ff9e64"),
+// The six tones a status can be drawn in, light then dark. The pill's background is the
+// same colour let through at the strength the page mixes it into its card.
+const TONES = {
+  quiet: ["#565b63", "#9fa5ae"],
+  plan: ["#0c60a3", "#67b0f9"],
+  live: ["#7146ad", "#bd96ff"],
+  ok: ["#00683f", "#58c38b"],
+  warn: ["#815200", "#eea743"],
+  stop: ["#ae282b", "#ff7871"],
 };
-
-// The neutral name of a phase, for subtitles and status lines.
-const PHASE_TEXT = {
-  upcoming: "Upcoming",
-  day_of: "Today",
-  taxiing: "Taxiing",
-  airborne: "In the air",
-  landed: "Landed",
-  cancelled: "Cancelled",
-  diverted: "Diverted",
-};
-
-// What stands in for the countdown once its instant has gone by, in the present tense
-// it has moved into. Never a number, because a number here would be counting upwards.
-const OVERDUE_TEXT = {
-  upcoming: "Departing",
-  day_of: "Departing",
-  airborne: "Landing",
-};
+const TINT_ALPHA = 0.14;
 
 // The one repair for a missing or rejected token, and the same sentence for both.
 const RECONNECT_TEXT = "Open the settings page on this phone and tap Connect.";
@@ -116,7 +105,8 @@ async function load(server) {
       return { data: null, stale: false, cachedAt: null, rejected: true, error: null };
     }
     // A stale widget beats a blank one. The flight has almost certainly not changed,
-    // and the live timer keeps ticking whether or not the network came back.
+    // and the figure is measured against the phone's clock whether or not the network
+    // came back.
     const cached = readCache();
     if (cached) {
       return { data: cached.data, stale: true, cachedAt: cached.cachedAt, rejected: false, error: null };
@@ -262,42 +252,45 @@ function newWidget() {
     widget.addAccessoryWidgetBackground = true;
     widget.setPadding(2, 2, 2, 2);
   } else {
-    const gradient = new LinearGradient();
-    gradient.colors = [BG_TOP, BG_BOTTOM];
-    gradient.locations = [0, 1];
-    widget.backgroundGradient = gradient;
+    widget.backgroundColor = BACKGROUND;
     widget.setPadding(14, 14, 14, 14);
   }
   return widget;
 }
 
 function renderAccessory(widget, flight, result) {
-  // Roughly three lines above the clock, and one tap target for the lot.
+  // Roughly three lines above the clock, and one tap target for the lot. The Lock
+  // Screen draws everything in its own tint, so nothing here is given a colour.
   widget.url = flight.detail_url;
 
   const title = widget.addText(result.stale ? `${flight.title} ·` : flight.title);
-  title.font = Font.semiboldSystemFont(13);
+  title.font = Font.semiboldMonospacedSystemFont(13);
   title.lineLimit = 1;
   title.minimumScaleFactor = 0.7;
 
   const row = widget.addStack();
   row.centerAlignContent();
   row.spacing = 5;
-  if (isLive(flight)) {
-    const label = row.addText(flight.countdown_label);
+  if (hasMilestone(flight)) {
+    const label = row.addText(flight.milestone_label);
     label.font = Font.systemFont(11);
     label.textOpacity = 0.7;
-    countdown(row, flight, Font.boldRoundedSystemFont(17), null);
+    figureText(row, flight, Font.boldMonospacedSystemFont(17), null);
   } else {
-    const state = row.addText(overdueText(flight));
+    const state = row.addText(flight.status_label);
     state.font = Font.semiboldSystemFont(15);
     state.lineLimit = 1;
   }
 
-  const detail = widget.addText(flight.subtitle || phaseText(flight));
-  detail.font = Font.systemFont(11);
-  detail.textOpacity = 0.7;
-  detail.lineLimit = 1;
+  // The third line is where the aircraft is, else the pill's word, which the second
+  // line has already used when there was nothing to count to.
+  const detail = flight.subtitle || (hasMilestone(flight) ? flight.status_label : null);
+  if (detail) {
+    const text = widget.addText(detail);
+    text.font = Font.systemFont(11);
+    text.textOpacity = 0.7;
+    text.lineLimit = 1;
+  }
 }
 
 function renderSmall(widget, flight, data, result) {
@@ -305,26 +298,26 @@ function renderSmall(widget, flight, data, result) {
   widget.url = flight.detail_url;
 
   const title = widget.addText(flight.title);
-  title.font = Font.semiboldSystemFont(13);
+  title.font = Font.semiboldMonospacedSystemFont(13);
   title.textColor = TEXT;
   title.lineLimit = 1;
   title.minimumScaleFactor = 0.7;
 
-  widget.addSpacer(2);
-  if (isLive(flight)) {
-    const label = widget.addText(flight.countdown_label);
+  widget.addSpacer(4);
+  const line = widget.addStack();
+  pill(line, flight);
+  line.addSpacer();
+
+  if (hasMilestone(flight)) {
+    widget.addSpacer(4);
+    const label = widget.addText(flight.milestone_label);
     label.font = Font.systemFont(11);
-    label.textColor = PHASE_COLOR[flight.phase] || MUTED;
-    countdown(widget, flight, Font.boldRoundedSystemFont(30), TEXT);
-  } else {
-    const state = widget.addText(overdueText(flight));
-    state.font = Font.boldRoundedSystemFont(24);
-    state.textColor = PHASE_COLOR[flight.phase] || TEXT;
-    state.lineLimit = 1;
-    state.minimumScaleFactor = 0.6;
+    label.textColor = MUTED;
+    figureText(widget, flight, Font.boldMonospacedSystemFont(28), TEXT);
   }
 
   if (flight.subtitle) {
+    widget.addSpacer(2);
     const subtitle = widget.addText(flight.subtitle);
     subtitle.font = Font.systemFont(11);
     subtitle.textColor = MUTED;
@@ -354,51 +347,45 @@ function renderList(widget, flights, data, result) {
     row.centerAlignContent();
     row.spacing = 8;
 
-    const marker = row.addStack();
-    marker.size = new Size(3, family === "large" ? 34 : 28);
-    marker.cornerRadius = 1.5;
-    marker.backgroundColor = PHASE_COLOR[flight.phase] || MUTED;
-
     const left = row.addStack();
     left.layoutVertically();
-    left.spacing = 2;
+    left.spacing = 3;
 
     const title = left.addText(flight.title);
-    title.font = Font.semiboldSystemFont(14);
+    title.font = Font.semiboldMonospacedSystemFont(14);
     title.textColor = TEXT;
     title.lineLimit = 1;
     title.minimumScaleFactor = 0.7;
 
-    const subtitle = left.addText(subtitleFor(flight));
-    subtitle.font = Font.systemFont(11);
-    subtitle.textColor = MUTED;
-    subtitle.lineLimit = 1;
+    const line = left.addStack();
+    line.centerAlignContent();
+    line.spacing = 6;
+    pill(line, flight);
+    if (flight.subtitle) {
+      const subtitle = line.addText(flight.subtitle);
+      subtitle.font = Font.systemFont(11);
+      subtitle.textColor = MUTED;
+      subtitle.lineLimit = 1;
+      subtitle.minimumScaleFactor = 0.7;
+    }
 
     if (hasProgress(flight)) {
-      left.addSpacer(4);
+      left.addSpacer(2);
       progressBar(left, flight.progress_percent, barWidth);
     }
 
     row.addSpacer();
 
-    const right = row.addStack();
-    right.layoutVertically();
-    right.spacing = 1;
-
-    if (isLive(flight)) {
-      const label = right.addText(flight.countdown_label);
+    if (hasMilestone(flight)) {
+      const right = row.addStack();
+      right.layoutVertically();
+      right.spacing = 1;
+      const label = right.addText(flight.milestone_label);
       label.font = Font.systemFont(10);
       label.textColor = MUTED;
       label.rightAlignText();
       label.lineLimit = 1;
-      countdown(right, flight, Font.boldRoundedSystemFont(21), TEXT, { align: "right" });
-    } else {
-      const state = right.addText(overdueText(flight));
-      state.font = Font.boldRoundedSystemFont(15);
-      state.textColor = PHASE_COLOR[flight.phase] || MUTED;
-      state.rightAlignText();
-      state.lineLimit = 1;
-      state.minimumScaleFactor = 0.7;
+      figureText(right, flight, Font.boldMonospacedSystemFont(21), TEXT, { align: "right" });
     }
   });
 
@@ -406,14 +393,25 @@ function renderList(widget, flights, data, result) {
   footer(widget, data, result);
 }
 
-// The whole point of the file: a system timer element, which ticks with no reload and
-// no network. Only ever called for an instant that is still ahead of us.
-function countdown(container, flight, font, color, options = {}) {
-  const element = container.addDate(new Date(flight.countdown_to));
-  element.applyTimerStyle();
+// The board's badge: the word in its tone, on the same tone let through the card.
+function pill(container, flight) {
+  const badge = container.addStack();
+  badge.centerAlignContent();
+  badge.setPadding(2, 6, 2, 6);
+  badge.cornerRadius = 7;
+  badge.backgroundColor = toneColor(flight.status_tone, TINT_ALPHA);
+  const text = badge.addText(flight.status_label);
+  text.font = Font.semiboldSystemFont(10);
+  text.textColor = toneColor(flight.status_tone);
+  text.lineLimit = 1;
+  return badge;
+}
+
+function figureText(container, flight, font, color, options = {}) {
+  const element = container.addText(until(flight.milestone_to));
   element.font = font;
   if (color) {
-    element.textColor = flight.delayed ? PHASE_COLOR.diverted : color;
+    element.textColor = color;
   }
   element.lineLimit = 1;
   element.minimumScaleFactor = 0.6;
@@ -432,7 +430,7 @@ function progressBar(container, percent, width) {
   const fill = track.addStack();
   fill.size = new Size((width * clamped) / 100, 4);
   fill.cornerRadius = 2;
-  fill.backgroundColor = PHASE_COLOR.airborne;
+  fill.backgroundColor = toneColor("live");
 }
 
 function footer(widget, data, result) {
@@ -477,49 +475,50 @@ function setupWidget() {
 
 function scheduleRefresh(widget, data) {
   const now = Date.now();
-  let when = now + Math.max(data.refresh_seconds || 900, MIN_REFRESH_SECONDS) * 1000;
-  for (const flight of data.flights || []) {
-    if (!flight.countdown_to) {
-      continue;
-    }
-    // Ask for a reload at the moment each countdown expires, which is when the drawing
-    // has to change from a timer to a word. WidgetKit treats this as a hint, which is
-    // exactly why the gate in isLive() has to exist as well.
-    const target = new Date(flight.countdown_to).getTime();
-    if (target > now + MIN_REFRESH_SECONDS * 1000 && target < when) {
-      when = target;
-    }
-  }
+  const cadence = Math.max(data.refresh_seconds || 900, MIN_REFRESH_SECONDS) * 1000;
+  // The feed's times are whole minutes, so a figure only ever changes on the minute.
+  // Close to a milestone the figure is minutes and every one of them counts, so the
+  // ask is the next minute; iOS grants it or not. Further out, the server's cadence
+  // is the one to keep, since the data does not move faster than that.
+  const imminent = (data.flights || []).some(
+    (flight) => hasMilestone(flight) && Math.abs(new Date(flight.milestone_to).getTime() - now) < IMMINENT_MS,
+  );
+  const when = imminent ? now - (now % 60000) + 60000 : now + cadence;
   widget.refreshAfterDate = new Date(when);
 }
 
 // --- text ------------------------------------------------------------------------------
 
-function isLive(flight) {
-  return Boolean(flight.countdown_to) && new Date(flight.countdown_to).getTime() > Date.now();
+function toneColor(name, alpha = 1) {
+  const [light, dark] = TONES[name] || TONES.quiet;
+  return Color.dynamic(new Color(light, alpha), new Color(dark, alpha));
+}
+
+function hasMilestone(flight) {
+  return Boolean(flight.milestone_to);
 }
 
 function hasProgress(flight) {
   return flight.progress_percent !== null && flight.progress_percent !== undefined;
 }
 
-function phaseText(flight) {
-  return PHASE_TEXT[flight.phase] || flight.phase;
+// The same string the page builds from the same milliseconds: whole days past a day,
+// then hours and minutes, then minutes, and never a second.
+function figure(ms) {
+  const total = Math.floor(Math.abs(ms) / 60000);
+  const days = Math.floor(total / 1440);
+  const hours = Math.floor(total / 60) % 24;
+  const minutes = total % 60;
+  if (days) return `${days}d`;
+  if (hours) return `${hours}h ${minutes < 10 ? "0" : ""}${minutes}m`;
+  if (minutes) return `${minutes}m`;
+  return "<1m";
 }
 
-function overdueText(flight) {
-  return OVERDUE_TEXT[flight.phase] || phaseText(flight);
-}
-
-function subtitleFor(flight) {
-  const parts = [];
-  if (flight.subtitle) {
-    parts.push(flight.subtitle);
-  }
-  if (flight.delayed) {
-    parts.push("Delayed");
-  }
-  return parts.join(" · ") || phaseText(flight);
+function until(instant) {
+  const ms = new Date(instant).getTime() - Date.now();
+  // A target in the past counts up: "20m ago" is a fact, "-20m" is arithmetic.
+  return figure(ms) + (ms < 0 ? " ago" : "");
 }
 
 function staleNote(result) {
