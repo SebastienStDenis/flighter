@@ -15,8 +15,8 @@
     <p>It was read out of an email we were not certain about, so nothing is being
       tracked until you say.</p>
   </header>
-  <footer class="grid grid-cols-3 gap-2 border-t">
-    <form method="post" action="/f/{{ id }}/keep">
+  <footer class="grid grid-cols-2 gap-2 border-t">
+    <form class="col-span-2" method="post" action="/f/{{ id }}/keep">
       <button class="btn w-full" type="submit">Looks right</button>
     </form>
     <a class="btn" data-variant="outline" href="/f/{{ id }}/edit">Fix details</a>

@@ -268,7 +268,7 @@
     <section>
       <fieldset class="fieldset">
         <legend class="sr-only">Import flag colour</legend>
-        <div class="grid grid-cols-3 gap-2">
+        <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {% for colour in flag_colours %}
           <label class="flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-sm has-checked:border-primary has-checked:bg-accent">
             <input type="radio" name="imap_flag_colour" value="{{ colour }}"
@@ -339,17 +339,17 @@
 {# A step with a button on it. The buttons only work on the phone: two of them open
    Scriptable, and a desktop has nowhere to send them. #}
 {% macro action_step(number, name, what, href=None, action=None, attrs='') %}
-<div class="item" data-size="xs">
-  <aside class="w-6 shrink-0 text-center font-mono font-bold text-muted-foreground">
+<div class="item items-start" data-size="xs">
+  <aside class="w-6 shrink-0 text-center font-mono font-bold leading-snug text-muted-foreground">
     {{- number -}}
   </aside>
-  <section>
+  <section class="min-w-0">
     <h4>{{ name }}</h4>
     <p>{{ what }}</p>
     {{ caller() if caller }}
   </section>
   {% if href %}
-  <aside>
+  <aside class="-mt-1.5">
     <a class="btn" data-variant="outline" data-size="sm" href="{{ href }}" {{ attrs|safe }}>
       {{- action -}}</a>
   </aside>
