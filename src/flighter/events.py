@@ -130,7 +130,7 @@ def diff_snapshots(
         if current.cancelled:
             changes.append(DetectedChange(EventKind.CANCELLED, None, "true"))
         if current.diverted:
-            changes.append(DetectedChange(EventKind.DIVERTED, None, "true"))
+            changes.append(_diversion(current))
         return changes
 
     changes = []
@@ -196,7 +196,7 @@ def diff_snapshots(
         changes.append(DetectedChange(EventKind.CANCELLED, "false", "true"))
 
     if current.diverted and not previous.diverted:
-        changes.append(DetectedChange(EventKind.DIVERTED, "false", "true"))
+        changes.append(_diversion(current))
 
     return changes
 
@@ -342,3 +342,8 @@ async def _zones(session: AsyncSession, booking: Booking) -> tuple[str, str]:
         found.get(booking.origin_iata, FALLBACK_TZ),
         found.get(booking.dest_iata, FALLBACK_TZ),
     )
+
+
+def _diversion(current: FlightSnapshot) -> DetectedChange:
+    """Where the flight is now bound for, when the feed says, since that is the news."""
+    return DetectedChange(EventKind.DIVERTED, None, current.destination_iata or "true")

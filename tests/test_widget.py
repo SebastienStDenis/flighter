@@ -183,7 +183,7 @@ def test_landed_shows_the_carousel_and_counts_to_the_gate(settings: Settings) ->
 def test_at_the_gate_there_is_nothing_left_to_count(settings: Settings) -> None:
     done = snapshot(actual_off=DEPARTURE, actual_on=ARRIVAL, actual_in=ARRIVAL, baggage_claim="7")
     flight = payload([(booking(), done)], settings)["flights"][0]
-    assert flight["status_label"] == "Landed"
+    assert flight["status_label"] == "Arrived"
     assert flight["milestone_label"] is None
     assert flight["milestone_to"] is None
 
@@ -639,3 +639,37 @@ async def test_the_widget_reads_the_newest_snapshot_of_each_flight(
     assert [(row.id, latest.gate_origin if latest else None) for row, latest in rows] == [
         (42, "B22")
     ]
+
+
+def test_a_diversion_renames_the_destination(settings: Settings) -> None:
+    diverted = snapshot(
+        diverted=True, destination_iata="YOW", actual_off=DEPARTURE, estimated_in=ARRIVAL
+    )
+    flight = payload([(booking(), diverted)], settings)["flights"][0]
+    assert flight["title"].endswith("→ YOW")
+    assert flight["subtitle"] == "Diverted to YOW"
+    assert flight["status_label"] == "Diverted"
+
+
+def test_at_the_gate_the_pill_says_arrived(settings: Settings) -> None:
+    parked = snapshot(
+        actual_off=DEPARTURE, actual_on=ARRIVAL - timedelta(minutes=10), actual_in=ARRIVAL
+    )
+    flight = payload([(booking(), parked)], settings)["flights"][0]
+    assert flight["status_label"] == "Arrived"
+    assert flight["milestone_label"] is None
+
+
+def test_a_milestone_whose_time_has_passed_is_due_not_ago(settings: Settings) -> None:
+    overdue = snapshot(
+        actual_off=DEPARTURE, actual_on=ARRIVAL - timedelta(minutes=10), estimated_in=ARRIVAL
+    )
+    later = build_payload(
+        [(booking(), overdue)],
+        settings=settings,
+        now=ARRIVAL + timedelta(minutes=18),
+        base_url="https://flights.example.com",
+    )
+    flight = later.model_dump(mode="json")["flights"][0]
+    assert flight["milestone_label"] == "Due at the gate"
+    assert flight["milestone_to"] == "2026-09-12T22:15:00Z"

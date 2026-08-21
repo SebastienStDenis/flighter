@@ -115,6 +115,7 @@ async def test_title_and_url_name_the_flight(settings: Settings) -> None:
         ),
         (event(EventKind.CANCELLED, old="false", new="true"), "1", CANCELLED_NOTICE),
         (event(EventKind.DIVERTED, old="false", new="true"), "1", "Diverted"),
+        (event(EventKind.DIVERTED, new="YOW"), "1", "Diverted to YOW"),
     ],
 )
 async def test_message_and_priority_per_kind(

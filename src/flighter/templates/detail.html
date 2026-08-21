@@ -3,10 +3,10 @@
 {% import "basecoat/dialog.html.jinja" as bc %}
 {% set s = v.snapshot %}
 {% set id = v.booking.id %}
-{% block title %}{{ v.flight_number }} {{ v.booking.origin_iata }} to {{ v.booking.dest_iata }}{% endblock %}
+{% block title %}{{ v.flight_number }} {{ v.booking.origin_iata }} to {{ v.destination_iata }}{% endblock %}
 {% block content %}
 
-<h1 class="sr-only">{{ v.flight_number }}, {{ v.booking.origin_iata }} to {{ v.booking.dest_iata }}</h1>
+<h1 class="sr-only">{{ v.flight_number }}, {{ v.booking.origin_iata }} to {{ v.destination_iata }}</h1>
 
 {{ m.flight_card(v) }}
 
