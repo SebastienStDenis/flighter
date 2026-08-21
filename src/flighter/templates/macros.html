@@ -128,11 +128,11 @@
     {{ stat("Terminal", dash(v.terminal)) }}
     {{ stat("Seat", dash(v.booking.seat)) }}
   </section>
-  {% if v.countdown %}
+  {% if v.milestone %}
   <footer class="border-t">
-    <span class="text-sm text-muted-foreground">{{ v.countdown.label }}</span>
+    <span class="text-sm text-muted-foreground">{{ v.milestone.label }}</span>
     <time class="countdown ml-auto font-mono text-lg font-bold"
-          data-to="{{ v.countdown.target.isoformat() }}">{{ until(v.countdown.target) }}</time>
+          data-to="{{ v.milestone.target.isoformat() }}">{{ until(v.milestone.target) }}</time>
   </footer>
   {% endif %}
 </a>

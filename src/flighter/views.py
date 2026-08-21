@@ -23,6 +23,7 @@ from .caldav import calendar_link
 from .models import Airport, Booking, BookingStatus, FlightSnapshot, IngestLog
 from .phase import (
     AIRBORNE,
+    ARRIVAL_DELAY_THRESHOLD,
     CANCELLED,
     DAY_OF,
     DEPARTURE_DELAY_THRESHOLD,
@@ -61,8 +62,12 @@ class Status(NamedTuple):
     tone: str
 
 
-class Countdown(NamedTuple):
-    """A moment to count towards, and the words that go in front of it."""
+class Milestone(NamedTuple):
+    """The next thing to happen to a flight that somebody has put a time on.
+
+    `label` is the words in front of the countdown: "Departs in", "Lands in". A flight
+    still days away is "Scheduled" instead, because nobody counts hours to it yet.
+    """
 
     label: str
     target: datetime
@@ -96,18 +101,6 @@ class Timeline:
     @property
     def late(self) -> bool:
         return self.moved is not None and self.moved > timedelta(0)
-
-
-class Checkpoint(NamedTuple):
-    """The next thing to happen to a flight that has left its gate, read at its airport.
-
-    Wheels up, then wheels down, then the gate: each is shown only while it is the next
-    one, so the page never lists three runway times against the two a ticket names.
-    """
-
-    name: str
-    line: Timeline
-    tz: str
 
 
 @dataclass(frozen=True)
@@ -162,6 +155,13 @@ class FlightView:
     @property
     def delay(self) -> timedelta:
         return self.departure - self.scheduled_departure
+
+    @property
+    def arrival_delay(self) -> timedelta | None:
+        scheduled, expected = self.scheduled_arrival, self.arrival
+        if scheduled is None or expected is None:
+            return None
+        return expected - scheduled
 
     @property
     def departs(self) -> Timeline:
@@ -226,32 +226,9 @@ class FlightView:
         return arrival - self.departure
 
     @property
-    def countdown(self) -> Countdown | None:
-        """The one number worth looking at, decided the same way the widget decides it."""
-        label, target = countdown(self.phase, self.booking, self.snapshot)
-        if label is None or target is None:
-            return None
-        return Countdown(label, target)
-
-    @property
-    def checkpoint(self) -> Checkpoint | None:
-        """What the flight is working towards now, once departure is behind it.
-
-        Nothing until pushback, because until then the departure time on the card is
-        the answer; nothing after the doors open, because then the arrival time is.
-        """
-        snap = self.snapshot
-        if snap is None:
-            return None
-        phase = self.phase
-        if phase == TAXIING:
-            # Nobody upstream estimates wheels up, so the name stands without a time.
-            return Checkpoint("Wheels up", Timeline(None, None, None), self.origin_tz)
-        if phase in (AIRBORNE, DIVERTED):
-            return Checkpoint("Lands", self.lands, self.dest_tz)
-        if phase == LANDED and snap.actual_in is None:
-            return Checkpoint("At the gate", self.arrives, self.dest_tz)
-        return None
+    def milestone(self) -> Milestone | None:
+        """The one number worth looking at, and what to call it."""
+        return milestone(self.phase, self.booking, self.snapshot)
 
     @property
     def calendar_link(self) -> str | None:
@@ -293,17 +270,22 @@ class FlightView:
             return Status("Maybe cancelled", "stop")
         if snap is not None and snap.diverted:
             return Status("Diverted", "stop")
-        if self.delay >= DEPARTURE_DELAY_THRESHOLD:
-            return Status("Departure delayed", "warn")
         phase = self.phase
         if phase == LANDED:
             return Status("Landed", "ok")
         if phase == AIRBORNE:
+            # A late pushback is history once the aircraft is off the ground; the only
+            # question left is whether it still gets in late.
+            late = self.arrival_delay
+            if late is not None and late >= ARRIVAL_DELAY_THRESHOLD:
+                return Status("Arriving late", "warn")
             return Status("In the air", "live")
         if self.booking.status == BookingStatus.COMPLETED:
             return Status("Flown", "quiet")
         if phase == TAXIING:
             return Status("Taxiing", "live")
+        if self.delay >= DEPARTURE_DELAY_THRESHOLD:
+            return Status("Departure delayed", "warn")
         # Only a feed that has actually restated the departure can say it is on time;
         # a booking on its own is just a plan.
         if snap is not None and (snap.estimated_out or snap.scheduled_out):
@@ -327,14 +309,35 @@ class FlightView:
         return self.departure + timedelta(hours=3)
 
 
+def milestone(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> Milestone | None:
+    """The first thing still ahead of the flight that has a time against it.
+
+    The ladder is departure, wheels up, landing, the gate. A rung is skipped once it has
+    happened, and also when nobody has said when it will: nothing upstream estimates
+    wheels up, so a flight taxiing out counts to its landing, and a flight with no
+    arrival time at all has no milestone rather than a made-up one.
+    """
+    if phase == CANCELLED:
+        return None
+    if phase == UPCOMING:
+        return Milestone("Scheduled", departure_estimate(booking, snapshot))
+    if phase == DAY_OF:
+        return Milestone("Departs in", departure_estimate(booking, snapshot))
+    ahead: list[tuple[str, datetime | None]] = []
+    if phase in (TAXIING, AIRBORNE, DIVERTED):
+        ahead.append(("Lands in", landing_estimate(booking, snapshot)))
+    if snapshot is None or snapshot.actual_in is None:
+        ahead.append(("At the gate in", arrival_estimate(booking, snapshot)))
+    for label, target in ahead:
+        if target is not None:
+            return Milestone(label, target)
+    return None
+
+
 def countdown(
     phase: Phase, booking: Booking, snapshot: FlightSnapshot | None
 ) -> tuple[str | None, datetime | None]:
-    """The one instant to count to, and what to call it.
-
-    The lock screen and the flight page count to the same moment, so this lives here
-    once rather than being decided twice.
-    """
+    """The one instant the lock screen counts to, and what to call it."""
     if phase in (AIRBORNE, DIVERTED):
         # Wheels down, not the gate: this is the number someone stares at from a seat,
         # and taxiing is not part of what they are counting.
@@ -370,20 +373,22 @@ def duration(delta: timedelta) -> str:
 def until(instant: datetime) -> str:
     """A countdown as the server can render it, before the page's own clock takes over.
 
-    Every unit the page's script uses, in the same order, so the string does not jump
-    the moment the script replaces it.
+    Whole days once it is a day or more away, hours and minutes inside that, and never
+    seconds: a number that changes while it is being read is noise. The page's script
+    builds the same string from the same units, so nothing jumps when it takes over.
     """
     remaining = instant - datetime.now(UTC)
-    total = int(abs(remaining).total_seconds())
-    days, rest = divmod(total, 86400)
-    hours, rest = divmod(rest, 3600)
-    minutes, seconds = divmod(rest, 60)
+    minutes = int(abs(remaining).total_seconds() // 60)
+    days, rest = divmod(minutes, 1440)
+    hours, minutes = divmod(rest, 60)
     if days:
-        figure = f"{days}d {hours}h"
+        figure = f"{days}d"
     elif hours:
         figure = f"{hours}h {minutes:02d}m"
+    elif minutes:
+        figure = f"{minutes}m"
     else:
-        figure = f"{minutes}m {seconds:02d}s"
+        figure = "<1m"
     # A target in the past counts up: "20m ago" is a fact, "-20m" is arithmetic.
     return f"{figure} ago" if remaining.total_seconds() < 0 else figure
 

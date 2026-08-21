@@ -33,18 +33,11 @@
     <p class="mt-3 text-sm text-stop">{{ cancelled_notice }}</p>
     {% endif %}
   </section>
-  {% if v.checkpoint or v.countdown %}
+  {% if v.milestone %}
   <footer class="border-t">
-    {% if v.checkpoint %}
-    <span class="text-sm text-muted-foreground">{{ v.checkpoint.name }}</span>
-    <span class="ml-2 font-mono text-sm font-medium">{{ m.moment(v.checkpoint.line, v.checkpoint.tz) }}</span>
-    {% else %}
-    <span class="text-sm text-muted-foreground">{{ v.countdown.label }}</span>
-    {% endif %}
-    {% if v.countdown %}
+    <span class="text-sm text-muted-foreground">{{ v.milestone.label }}</span>
     <time class="countdown ml-auto font-mono text-lg font-bold"
-          data-to="{{ v.countdown.target.isoformat() }}">{{ until(v.countdown.target) }}</time>
-    {% endif %}
+          data-to="{{ v.milestone.target.isoformat() }}">{{ until(v.milestone.target) }}</time>
   </footer>
   {% endif %}
 </div>

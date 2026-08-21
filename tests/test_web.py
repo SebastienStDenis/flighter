@@ -479,10 +479,10 @@ def test_a_flight_with_nothing_known_yet_still_renders(
     # Every fact keeps its row and reads as a plain dash rather than disappearing.
     assert "Bags" in body
     assert body.count(">-<") >= 6
-    # Departure is the next thing to happen, and it is already on the card.
-    assert "Departs in" in body
-    for runway in ("Wheels up", "Lands", "At the gate"):
-        assert runway not in body
+    # Days out, the card counts days and nothing finer.
+    assert ">1d</time>" in body
+    for milestone in ("Departs in", "Lands in", "At the gate in"):
+        assert milestone not in body
     assert "None" not in body
     # A missing value is a dash in its row, never the page-level empty state.
     assert 'class="empty"' not in body
@@ -505,20 +505,21 @@ def test_a_flight_in_the_air_renders_what_is_worth_knowing(
     for gone in ("Filed route", "Distance", "Registration", "Timezone", "Last checked"):
         assert gone not in body
     # The runway time that matters from a seat, and only that one.
-    assert "Lands" in body
-    assert "Wheels up" not in body and "At the gate" not in body
+    assert "Lands in" in body
+    assert "Departs in" not in body and "At the gate in" not in body
 
 
-def test_the_card_names_one_runway_moment_at_a_time(
+def test_the_card_counts_to_one_milestone_at_a_time(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Departure and arrival are always on the card. Wheels up, wheels down and the gate
-    take turns at the bottom, each only while it is the next thing to happen."""
+    """Departure and arrival are always on the card. The bottom counts to whatever is
+    next and has a time: nobody estimates wheels up, so pushback counts to the landing."""
     pushed_back = replace_snapshot(actual_out=DEPARTURE + timedelta(minutes=5))
     show(monkeypatch, booking(), pushed_back)
     body = client.get("/f/1").text
-    assert "Wheels up" in body
-    assert "Lands" not in body and "At the gate" not in body
+    assert "Lands in" in body
+    assert "Departs in" not in body and "At the gate in" not in body
+    assert "Wheels up" not in body
 
     landed = replace_snapshot(
         actual_out=DEPARTURE + timedelta(minutes=5),
@@ -528,12 +529,9 @@ def test_the_card_names_one_runway_moment_at_a_time(
     )
     show(monkeypatch, booking(), landed)
     body = client.get("/f/1").text
-    assert "At the gate" in body
-    assert "Wheels up" not in body and "Lands" not in body
-    # The estimate still reads as a change against what was booked.
-    assert (
-        moved_time(ARRIVAL, ARRIVAL + timedelta(minutes=20), "Europe/London", "text-stop") in body
-    )
+    assert "At the gate in" in body
+    assert f'data-to="{(ARRIVAL + timedelta(minutes=20)).isoformat()}"' in body
+    assert "Lands in" not in body
 
     at_the_gate = replace_snapshot(
         actual_out=DEPARTURE + timedelta(minutes=5),
@@ -543,8 +541,7 @@ def test_the_card_names_one_runway_moment_at_a_time(
     )
     show(monkeypatch, booking(), at_the_gate)
     body = client.get("/f/1").text
-    for runway in ("Wheels up", "Lands", "At the gate"):
-        assert runway not in body
+    assert '<time class="countdown' not in body
 
 
 def struck(was: datetime, tz: str, *, with_date: bool = False) -> str:
