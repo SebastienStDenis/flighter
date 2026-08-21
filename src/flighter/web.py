@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, fields
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
@@ -32,12 +32,13 @@ from .aeroapi import BudgetExceeded, budget_status, clear_breaker
 from .airports import UnknownAirport
 from .caldav import CalendarClient, CalendarUnavailable, Collection
 from .checks import run_checks
-from .config import CREDENTIALS, SERVICES, Settings, write_secrets
+from .config import CREDENTIALS, SERVICES, Settings, mint_widget_token, write_secrets
 from .db import get_session
 from .mail import FLAG_COLOURS, message_url
 from .models import Booking, BookingSource, BookingStatus, FlightEvent
 from .phase import CANCELLED_NOTICE
 from .views import FlightView, build_views
+from .widget import connect_url, last_seen, script_source
 from .widget import router as widget_router
 
 log = logging.getLogger(__name__)
@@ -59,6 +60,10 @@ LIMIT_STEP = Decimal("2.00")
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
+# iOS reloads a widget on its own schedule, and a phone left face down for an afternoon
+# is not a broken one. A day without a fetch is.
+WIDGET_QUIET_AFTER = timedelta(days=1)
+
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
@@ -72,6 +77,14 @@ async def note_problems(request: Request, session: SessionDep) -> None:
     if request.url.path.startswith("/api/"):
         return
     request.state.problems = len(await ingest.list_set_aside(session))
+
+
+def ago(then: datetime, now: datetime) -> str:
+    """`4m ago`, `3d ago`: how long since a phone was last heard from."""
+    elapsed = now - then
+    if elapsed >= timedelta(days=1):
+        return f"{elapsed.days}d ago"
+    return f"{views.duration(elapsed)} ago"
 
 
 def _first_validation_message(exc: ValidationError) -> str:
@@ -469,6 +482,8 @@ def create_app(settings: Settings) -> FastAPI:
         if current.public_base_url == prefs.Prefs.model_fields["public_base_url"].default:
             posted["public_base_url"] = this_origin
         calendars, calendar_error = await offered_calendars(settings.icloud_configured)
+        now = datetime.now(UTC)
+        seen = await last_seen(session)
         return {
             "prefs": current,
             "posted": posted,
@@ -477,13 +492,20 @@ def create_app(settings: Settings) -> FastAPI:
             # than proving anything about it.
             "connected": {name: bool(getattr(settings, name)) for name in CREDENTIALS},
             "icloud_email": settings.icloud_email,
+            # The widget token is the other exception: it is handed to your own phone,
+            # through the Connect link, and this page is where the phone gets it from.
             "widget_token": settings.widget_token,
+            "widget_connect_url": connect_url(settings),
+            "widget_script": script_source(),
+            "widget_last_seen": ago(seen, now) if seen else None,
+            "widget_connected": seen is not None and now - seen < WIDGET_QUIET_AFTER,
             "log_levels": LOG_LEVELS,
             "flag_colours": tuple(FLAG_COLOURS),
             "calendars": calendars,
             "calendar_error": calendar_error,
             "budget": await budget_status(session),
             "saved": "saved" in request.query_params,
+            "tab": request.query_params.get("tab"),
             "error": None,
         }
 
@@ -576,6 +598,11 @@ def create_app(settings: Settings) -> FastAPI:
         if changed:
             write_secrets(changed)
         return RedirectResponse("/settings?saved=1", status_code=303)
+
+    @app.post("/settings/widget/token")
+    async def rotate_widget_token() -> Response:
+        mint_widget_token()
+        return RedirectResponse("/settings?saved=1&tab=widget", status_code=303)
 
     @app.post("/settings/checks")
     async def run_checks_now(request: Request) -> Response:

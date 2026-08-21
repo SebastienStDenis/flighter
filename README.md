@@ -356,9 +356,12 @@ the container volume; `flighter serve --host 0.0.0.0` if you want it off the loo
 
 ## The widget
 
-See [`widget/README.md`](widget/README.md). Short version: install Scriptable, copy in
-`widget/flights-widget.js`, run it once in the app to store the widget token from the
-**Widget** tab on `/settings` in the Keychain, then add it to your home and lock screens.
+See [`docs/widget.md`](docs/widget.md). Short version: open the **Widget** tab on
+`/settings` on your phone and press its buttons in order. They install Scriptable, import
+the script the server serves, and hand it the server's address and the widget token,
+which the script keeps in the Keychain. The tab then says when a phone last fetched
+flights, and **Regenerate** under *Advanced* is how a token is changed; every phone
+reconnects with one tap.
 
 ## Development
 
