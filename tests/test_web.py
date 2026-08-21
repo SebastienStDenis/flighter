@@ -29,7 +29,15 @@ from flighter.caldav import CalendarUnavailable, Collection
 from flighter.config import Settings
 from flighter.db import get_session
 from flighter.lookup import Candidate
-from flighter.models import KV, Airport, Booking, FlightEvent, FlightSnapshot, IngestLog
+from flighter.models import (
+    KV,
+    Airport,
+    Booking,
+    BookingStatus,
+    FlightEvent,
+    FlightSnapshot,
+    IngestLog,
+)
 from flighter.notify import Notifier
 from flighter.timezones import to_local
 from flighter.widget import LAST_SEEN_KEY
@@ -1584,6 +1592,33 @@ def test_the_footer_carries_the_words_for_when_its_time_has_passed(
     body = client.get("/f/1").text
     assert ">At the gate in</span>" in body
     assert 'data-due="Due at the gate"' in body
+
+
+def test_a_flight_the_feed_lost_has_no_footer_to_grow(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Closed by the poller with the last snapshot still saying airborne."""
+    left = NOW - timedelta(days=3)
+    lost = replace_snapshot(
+        actual_out=left,
+        actual_off=left + timedelta(minutes=12),
+        estimated_on=left + timedelta(hours=6),
+        progress_percent=40,
+    )
+    show(
+        monkeypatch,
+        booking(
+            scheduled_departure_utc=left,
+            scheduled_arrival_utc=left + timedelta(hours=6),
+            status=BookingStatus.COMPLETED,
+        ),
+        lost,
+    )
+    body = client.get("/f/1").text
+    card = body[body.index('<div class="card gap-5">') : body.index('<div class="card mt-3"')]
+    assert "Flown" in card and "In the air" not in card
+    assert "<footer" not in card and "Due to land" not in card
+    assert "--progress: 100%" in card and "data-off" not in card
 
 
 def test_a_flight_just_at_the_gate_stays_on_the_board_a_while(

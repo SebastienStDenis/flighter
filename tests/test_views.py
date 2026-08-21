@@ -410,6 +410,49 @@ def test_the_view_swaps_the_words_once_the_time_has_gone() -> None:
     assert v.milestone_due == "Due at the gate"
 
 
+def test_a_flight_the_feed_lost_is_flown_with_nothing_left_to_count_to() -> None:
+    """The poller closes a booking it never saw land, and the last snapshot stands.
+
+    Left to itself the card would read "Due to land 3d ago", and keep growing.
+    """
+    leaves = now_ish(days=-3)
+    flown = booking(scheduled_departure_utc=leaves, status=BookingStatus.COMPLETED)
+    lost_airborne = snapshot(
+        actual_out=leaves,
+        actual_off=leaves + timedelta(minutes=12),
+        estimated_on=leaves + timedelta(hours=5),
+        progress_percent=40,
+    )
+    v = view(flown, lost_airborne)
+    assert v.flown
+    assert v.status == ("Flown", "quiet")
+    assert v.milestone is None and v.milestone_label is None
+    assert v.airborne_window is None
+    assert v.progress_percent == 100
+
+    lost_taxiing = snapshot(actual_out=leaves, estimated_in=leaves + timedelta(hours=5))
+    assert view(flown, lost_taxiing).status == ("Flown", "quiet")
+    assert view(flown, lost_taxiing).milestone is None
+
+    never_seen = view(flown, None)
+    assert never_seen.status == ("Flown", "quiet")
+    assert never_seen.milestone is None
+    assert never_seen.block_time is None
+
+
+def test_a_flown_flight_that_was_seen_to_land_keeps_saying_so() -> None:
+    leaves = now_ish(days=-3)
+    flown = booking(scheduled_departure_utc=leaves, status=BookingStatus.COMPLETED)
+    down = snapshot(
+        actual_out=leaves,
+        actual_off=leaves,
+        actual_on=leaves + timedelta(hours=5),
+        estimated_in=leaves + timedelta(hours=5, minutes=10),
+    )
+    assert view(flown, down).status == ("Landed", "ok")
+    assert view(flown, down).milestone is None
+
+
 # --- where a diverted flight is going --------------------------------------------------------
 
 YOW = Airport(iata="YOW", name="Ottawa", city="Ottawa", country="CA", tz="America/Toronto")
