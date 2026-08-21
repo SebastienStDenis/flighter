@@ -70,7 +70,7 @@
   {% endfor %}
   {% endif %}
   {% for side in sides %}
-  <div class="mt-1.5 flex gap-4{{ ' justify-end' if side.right }}">
+  <div class="mt-2.5 flex gap-4{{ ' justify-end' if side.right }}">
     {% for name, value, tone_class in side.places %}{{ place(name, value, tone_class) }}{% endfor %}
   </div>
   {% endfor %}
