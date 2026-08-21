@@ -27,9 +27,9 @@
 </div>
 {% endmacro %}
 
-{# The two ends of the flight: the day and time each is now expected, and where in the
-   building. Each side stacks on its own, so a time that moved pushes down only the facts
-   beneath it and the other side stays where it was. #}
+{# The two ends of the flight, one row per fact: the day and time each is now expected,
+   and where in the building. The pairs share rows, so the arrival's time sits level
+   with the departure's whatever else either side has to say. #}
 {% macro ends(v, s) %}
 {% set sides = [
   {"line": v.departs, "tz": v.origin_tz, "right": false, "places": [
@@ -43,30 +43,35 @@
   ]},
 ] %}
 <div class="ends">
+  {# The airport a diversion was booked for, struck under the one it is going to. A row
+     of its own, so the days below stay level. #}
+  {% if v.diverted_to %}
+  <div></div>
+  <s class="-mt-2 mb-2.5 block font-mono text-sm text-muted-foreground">{{ v.booking.dest_iata }}</s>
+  {% endif %}
+  {% for side in sides %}
+  <div class="font-mono text-xs text-muted-foreground">
+    {%- if side.line.best is not none %}{{ day(side.line.best, side.tz) }}{% endif -%}
+  </div>
+  {% endfor %}
+  {# The zone sits on the outside of each time, so the two clocks read from the edges
+     of the card the way the codes above them do. #}
   {% for side in sides %}
   {% set abbr = zone(side.line.best, side.tz) %}
-  <div>
-    {# The airport a diversion was booked for, struck under the one it is going to. It
-       lives in this column rather than up with the codes so that only this side grows. #}
-    {% if side.right and v.diverted_to %}
-    <s class="-mt-2 mb-2.5 block font-mono text-sm text-muted-foreground">{{ v.booking.dest_iata }}</s>
-    {% endif %}
-    <div class="font-mono text-xs text-muted-foreground">
-      {%- if side.line.best is not none %}{{ day(side.line.best, side.tz) }}{% endif -%}
-    </div>
-    {# The zone sits on the outside of each time, so the two clocks read from the edges
-       of the card the way the codes above them do. #}
-    <div class="mt-0.5 font-mono text-xl leading-tight font-bold {{ tone(side.line) or ('text-muted-foreground' if side.line.best is none) }}">
-      {%- if abbr and side.right %}<span class="mr-1 text-[0.6875rem] font-medium text-muted-foreground">{{ abbr }}</span>{% endif -%}
-      {{- clock(side.line.best, side.tz) -}}
-      {%- if abbr and not side.right %}<span class="ml-1 text-[0.6875rem] font-medium text-muted-foreground">{{ abbr }}</span>{% endif -%}
-    </div>
-    {% if side.line.moved %}
-    <div class="mt-0.5 font-mono text-xs">{{ was(side.line, side.tz) }}</div>
-    {% endif %}
-    <div class="mt-1.5 flex gap-4{{ ' justify-end' if side.right }}">
-      {% for name, value, tone_class in side.places %}{{ place(name, value, tone_class) }}{% endfor %}
-    </div>
+  <div class="mt-0.5 font-mono text-xl leading-tight font-bold {{ tone(side.line) or ('text-muted-foreground' if side.line.best is none) }}">
+    {%- if abbr and side.right %}<span class="mr-1 text-[0.6875rem] font-medium text-muted-foreground">{{ abbr }}</span>{% endif -%}
+    {{- clock(side.line.best, side.tz) -}}
+    {%- if abbr and not side.right %}<span class="ml-1 text-[0.6875rem] font-medium text-muted-foreground">{{ abbr }}</span>{% endif -%}
+  </div>
+  {% endfor %}
+  {% if v.departs.moved or v.arrives.moved %}
+  {% for side in sides %}
+  <div class="mt-0.5 font-mono text-xs">{% if side.line.moved %}{{ was(side.line, side.tz) }}{% endif %}</div>
+  {% endfor %}
+  {% endif %}
+  {% for side in sides %}
+  <div class="mt-1.5 flex gap-4{{ ' justify-end' if side.right }}">
+    {% for name, value, tone_class in side.places %}{{ place(name, value, tone_class) }}{% endfor %}
   </div>
   {% endfor %}
 </div>

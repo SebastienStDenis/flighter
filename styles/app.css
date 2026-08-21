@@ -177,7 +177,8 @@
     left: var(--progress, 0%);
   }
 
-  /* The two ends of the flight, each a column of its own facts. The arrival reads from
+  /* The two ends of the flight, one row per fact. A grid rather than two columns, so
+     a fact on one side sits level with its twin on the other. The arrival reads from
      the right edge, mirroring the departure. */
   .ends {
     @apply grid grid-cols-2 gap-x-4;
