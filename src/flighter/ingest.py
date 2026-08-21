@@ -77,6 +77,9 @@ RETRY_DELAYS = (timedelta(minutes=2), timedelta(minutes=10))
 UNCONFIGURED_PAUSE_SECONDS = 5.0
 
 _NO_FLIGHT_REASON = "There was no flight in it, so nothing was added."
+_UNREADABLE_REASON = (
+    "It looks like a flight email, but no flight could be read from it, so nothing was added."
+)
 
 # Said only about a message that kept its flag: it is still in Mail, and it will sit
 # there until it is either unflagged or handed back to the service.
@@ -137,12 +140,10 @@ async def process_message(message: Message, *, settings: Settings | None = None)
 
     async with session_scope() as session:
         try:
-            if (
-                extraction is None
-                or not extraction.is_flight_confirmation
-                or not extraction.segments
-            ):
+            if extraction is None or not extraction.is_flight_confirmation:
                 return await _record(session, message, _no_flight(), extraction)
+            if not extraction.segments:
+                return await _record(session, message, _unreadable(), extraction)
             return await _record(
                 session, message, await _book(session, message, extraction), extraction
             )
@@ -178,6 +179,16 @@ def _no_flight() -> Ingested:
     them whether it really held nothing rather than deciding that on its own.
     """
     return Ingested(ERROR, error=_NO_FLIGHT_REASON, retryable=False)
+
+
+def _unreadable() -> Ingested:
+    """The model agreed it was a flight email and still came back with no segments.
+
+    Set aside at once like `_no_flight`, since the body it was shown is the body it would
+    be shown again, but said differently: the person was right to flag this one, and what
+    wants looking at is how the email was read, not whether it held a flight.
+    """
+    return Ingested(ERROR, error=_UNREADABLE_REASON, retryable=False)
 
 
 def _unknown_airport(exc: UnknownAirport) -> Ingested:

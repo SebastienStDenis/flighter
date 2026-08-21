@@ -366,12 +366,18 @@ than printed.
 
 
 def body_text(message: Message) -> str:
-    """The readable body: the plain part, or the HTML part's visible text without one."""
-    if message.text_plain:
-        return message.text_plain
+    """The readable body: the HTML part's visible text, or the plain part without one.
+
+    The HTML part is the email the person read. The plain part beside it is whatever the
+    sender's mail platform generated from it, which can mean a thousand-character tracking
+    link inlined behind every word and every layout variant rendered in turn, so that the
+    first screenful is links and the flights sit far below the cut.
+    """
     if message.text_html:
-        return BeautifulSoup(message.text_html, "html.parser").get_text("\n", strip=True)
-    return ""
+        visible = BeautifulSoup(message.text_html, "html.parser").get_text("\n", strip=True)
+        if visible:
+            return visible
+    return message.text_plain
 
 
 def render(message: Message) -> str:
