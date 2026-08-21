@@ -354,6 +354,28 @@ async def test_an_extraction_that_is_not_a_confirmation_is_set_aside(
     assert recorder.created == []
 
 
+async def test_a_confirmation_the_model_could_not_read_is_not_called_no_flight(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    """The person was right to flag it, and the push must not tell them otherwise."""
+    use_model(
+        monkeypatch,
+        Extraction(is_flight_confirmation=True, confidence=0.3, segments=[]),
+    )
+
+    result = await ingest.process_message(message("flight_plain.eml"), settings=settings)
+
+    assert result.outcome == "error"
+    logged = one_session.log["flight_plain.eml"]
+    assert ingest.set_aside(logged)
+    assert logged.error is not None and "could be read" in logged.error
+    assert "no flight in it" not in logged.error
+    assert recorder.created == []
+
+
 # -- the sweep -----------------------------------------------------------------------
 
 
