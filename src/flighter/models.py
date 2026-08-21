@@ -279,8 +279,9 @@ class IngestLog(Base):
     decided or been set aside, and nothing will pick it up again without being asked.
     An `ignored` row was decided by the person on the Problems page and is waiting for
     the sweep to take its flag off, after which it stands as `no_flight`: a message on
-    file as holding no flight is read again only if it is flagged again. Having an
-    outcome already on file is what stops a second push going out about the same email.
+    file as holding no flight is read again only if it is flagged again, as is one that
+    reached the board once nothing it booked is left there. Having an outcome already
+    on file is what stops a second push going out about the same email.
     """
 
     __tablename__ = "ingest_log"
