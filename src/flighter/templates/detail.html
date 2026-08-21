@@ -13,15 +13,15 @@
 {# The one card a person can write on. Each ticket row opens the same dialog on its own
    box: what the ticket says is theirs to correct, and nothing else on the page is. #}
 <div class="card mt-3" data-size="sm">
-  <header>
+  <header class="items-center">
     <h3>Details</h3>
-    <div class="card-action">
-      <button class="btn" data-variant="ghost" data-size="sm" type="button"
+    <div class="card-action row-span-1">
+      <button class="btn -mr-2.5" data-variant="ghost" data-size="sm" type="button"
               onclick="editTicket('confirmation_code')">Edit</button>
     </div>
   </header>
   <section>
-    <div class="item-group -mx-2.5">
+    <div class="item-group -mx-2.5 w-auto">
       {{ m.editable("Confirmation", dash(v.booking.confirmation_code), "confirmation_code", mono=true) }}
       {{ m.editable("Seat", dash(v.booking.seat), "seat", mono=true) }}
       {{ m.editable("Notes", dash(v.booking.notes), "notes") }}
@@ -37,7 +37,7 @@
       <div class="item py-1" data-size="xs">
         <section><p>Calendar</p></section>
         <aside>
-          <a class="btn" data-variant="link" data-size="xs" href="{{ v.calendar_link }}">
+          <a class="btn px-0" data-variant="link" data-size="xs" href="{{ v.calendar_link }}">
             Open in Calendar</a>
         </aside>
       </div>
@@ -46,7 +46,7 @@
       <div class="item py-1" data-size="xs">
         <section><p>Email</p></section>
         <aside>
-          <a class="btn" data-variant="link" data-size="xs"
+          <a class="btn px-0" data-variant="link" data-size="xs"
              href="{{ email_url(v.booking.source_message_id) }}">Open in Mail</a>
         </aside>
       </div>
