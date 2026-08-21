@@ -52,7 +52,11 @@
 </h2>
 <div class="item-group">
   {% for v in trip %}
-  {%- if v.booking.id == urgent_id|default(none) -%}{{ m.hero(v) }}{%- else -%}{{ m.row(v) }}{%- endif -%}
+  {%- if v.booking.id in featured -%}
+  {{ m.flight_card(v, link="/f/" ~ v.booking.id) }}
+  {%- else -%}
+  {{ m.row(v) }}
+  {%- endif -%}
   {% endfor %}
 </div>
 {% endfor %}
