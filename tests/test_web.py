@@ -905,7 +905,10 @@ def test_a_deployment_nobody_has_told_its_address_is_offered_this_one(
     with build_client(unconfigured, monkeypatch) as fresh:
         body = fresh.get("/settings").text
     assert 'value="http://testserver"' in body
+    # The Connect link too: a phone handed the default would be told to ask itself.
+    assert "api=http%3A%2F%2Ftestserver" in body
     assert "localhost:8000" not in body
+    assert "localhost%3A8000" not in body
 
 
 def test_an_address_that_was_set_is_left_alone(client: TestClient) -> None:

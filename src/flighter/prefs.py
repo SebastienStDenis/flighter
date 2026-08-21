@@ -79,6 +79,20 @@ def current() -> Prefs:
     return _current
 
 
+def public_base_url(origin: str) -> str:
+    """The saved address, or the one a request arrived on until there is one.
+
+    The default only ever resolves on the machine serving the page, and nothing that
+    carries this address is read there. A request that reached this server came in on
+    an address that demonstrably works from the outside, which is the better guess until
+    somebody saves one.
+    """
+    saved = _current.public_base_url
+    if saved == Prefs.model_fields["public_base_url"].default:
+        return origin
+    return saved
+
+
 async def load(session: AsyncSession) -> Prefs:
     """Read the row, creating it with the defaults the first time."""
     global _current

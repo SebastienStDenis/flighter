@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Annotated, Final
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from pydantic import BaseModel, PlainSerializer
 from sqlalchemy import and_, or_, select
@@ -116,6 +116,7 @@ FlightRow = tuple[Booking, FlightSnapshot | None]
 
 @router.get("/api/widget")
 async def read_widget(
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     session: Annotated[AsyncSession, Depends(get_session)],
     authorization: Annotated[str | None, Header()] = None,
@@ -126,7 +127,13 @@ async def read_widget(
     await mark_seen(session, now)
     rows = await load_flight_rows(session, now)
     return build_payload(
-        rows, settings=settings, now=now, degraded_reason=await read_degraded(session)
+        rows,
+        settings=settings,
+        now=now,
+        # The phone reached this address to ask, so the links it is handed back work
+        # from wherever it is, saved address or not.
+        base_url=prefs.public_base_url(str(request.base_url).rstrip("/")),
+        degraded_reason=await read_degraded(session),
     )
 
 
@@ -166,13 +173,13 @@ def script_body() -> str:
     return body if header.startswith("// Variables used by Scriptable") else header
 
 
-def connect_url(settings: Settings) -> str:
+def connect_url(settings: Settings, base_url: str) -> str:
     """What the Connect button on the settings page opens.
 
     Scriptable runs the named script and hands it the query as `args.queryParameters`,
     so the phone learns the address and the token without anybody copying either.
     """
-    query = urlencode({"api": prefs.current().public_base_url, "token": settings.widget_token})
+    query = urlencode({"api": base_url, "token": settings.widget_token})
     return f"scriptable:///run/{SCRIPT_NAME}?{query}"
 
 
@@ -262,12 +269,13 @@ def build_payload(
     *,
     settings: Settings,
     now: datetime,
+    base_url: str,
     degraded_reason: str | None = None,
 ) -> WidgetPayload:
     ranked: list[tuple[int, datetime, WidgetFlight]] = []
     observed: list[datetime] = []
     for booking, snapshot in rows:
-        flight = _flight(booking, snapshot, settings=settings, now=now)
+        flight = _flight(booking, snapshot, settings=settings, now=now, base_url=base_url)
         ranked.append((phase_rank(flight.phase), departure_estimate(booking, snapshot), flight))
         if flight.phase in PHASES_IMMINENT and snapshot is not None and snapshot.observed_at:
             observed.append(snapshot.observed_at)
@@ -284,12 +292,17 @@ def build_payload(
 
 
 def _flight(
-    booking: Booking, snapshot: FlightSnapshot | None, *, settings: Settings, now: datetime
+    booking: Booking,
+    snapshot: FlightSnapshot | None,
+    *,
+    settings: Settings,
+    now: datetime,
+    base_url: str,
 ) -> WidgetFlight:
     phase = compute_phase(booking, snapshot, now)
     label, countdown_to = countdown(phase, booking, snapshot)
     return WidgetFlight(
-        detail_url=f"{prefs.current().public_base_url}/f/{booking.id}",
+        detail_url=f"{base_url}/f/{booking.id}",
         phase=phase,
         title=(
             f"{booking.marketing_carrier}{booking.marketing_number}"

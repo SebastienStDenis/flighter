@@ -475,12 +475,11 @@ def create_app(settings: Settings) -> FastAPI:
 
     async def settings_context(request: Request, session: AsyncSession) -> dict[str, Any]:
         current = prefs.current()
-        this_origin = str(request.base_url).rstrip("/")
-        posted = current.model_dump(mode="json")
         # Whatever the page was opened on is almost always the right answer, so a
-        # deployment nobody has told yet is shown that rather than the default.
-        if current.public_base_url == prefs.Prefs.model_fields["public_base_url"].default:
-            posted["public_base_url"] = this_origin
+        # deployment nobody has told yet is shown that rather than the default, and the
+        # Connect link hands the phone the same address the form is showing.
+        address = prefs.public_base_url(str(request.base_url).rstrip("/"))
+        posted = current.model_dump(mode="json") | {"public_base_url": address}
         calendars, calendar_error = await offered_calendars(settings.icloud_configured)
         now = datetime.now(UTC)
         seen = await last_seen(session)
@@ -495,7 +494,7 @@ def create_app(settings: Settings) -> FastAPI:
             # The widget token is the other exception: it is handed to your own phone,
             # through the Connect link, and this page is where the phone gets it from.
             "widget_token": settings.widget_token,
-            "widget_connect_url": connect_url(settings),
+            "widget_connect_url": connect_url(settings, address),
             "widget_script": script_source(),
             "widget_last_seen": ago(seen, now) if seen else None,
             "widget_connected": seen is not None and now - seen < WIDGET_QUIET_AFTER,
