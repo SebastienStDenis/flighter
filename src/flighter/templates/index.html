@@ -50,7 +50,7 @@
     to {{ day(trip[-1].scheduled_departure, trip[-1].origin_tz) }}
   {%- endif %}
 </h2>
-<div class="item-group">
+<div class="item-group last:mb-6">
   {% for v in trip %}
   {%- if v.booking.id in featured -%}
   {{ m.flight_card(v, link="/f/" ~ v.booking.id) }}
@@ -62,7 +62,7 @@
 {% endfor %}
 
 {% if past %}
-<div class="accordion mt-6 rounded-lg border px-3">
+<div class="accordion mt-6 mb-6 rounded-lg border px-3">
   <details>
     <summary>
       <span class="flex items-center gap-2">Flown
@@ -80,8 +80,4 @@
 {% endif %}
 
 {% endif %}
-
-<div class="action-bar">
-  <a class="btn w-full" data-size="lg" href="/f/new">Add a flight</a>
-</div>
 {% endblock %}

@@ -55,7 +55,7 @@
 </div>
 
 <div class="card mt-3" data-size="sm">
-  <header><h3>What has changed</h3></header>
+  <header><h3>Activity</h3></header>
   <section>
     {% if events %}
     {{ m.change(events[0], v.origin_tz) }}
@@ -74,7 +74,7 @@
     </div>
     {% endif %}
     {% else %}
-    <p class="text-sm text-muted-foreground">Nothing has changed yet.</p>
+    <p class="text-sm text-muted-foreground">Nothing yet.</p>
     {% endif %}
   </section>
 </div>
@@ -135,8 +135,8 @@
      footer=stop_footer,
      close_button=false) }}
 
-<div class="action-bar">
-  <button class="btn w-full" data-variant="outline" data-size="lg" type="button"
+<div class="mt-6 mb-6">
+  <button class="btn w-full" data-variant="outline" type="button"
           onclick="document.getElementById('stop-tracking').showModal()">Stop tracking</button>
 </div>
 
