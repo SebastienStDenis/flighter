@@ -125,6 +125,12 @@
 }
 
 @layer components {
+  /* Basecoat cuts a row's text off at two lines because its rows are list entries. Here
+     a row is as often a step of instructions, and a step cut off cannot be followed. */
+  .item p {
+    @apply line-clamp-none;
+  }
+
   /* Basecoat ships one destructive badge. A flight has six things it can be, and each
      one is a word first and a colour second. */
   .badge[data-variant='quiet'],

@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from flighter import widget
+from flighter import prefs, widget
 from flighter.aeroapi import BREAKER_KEY, month_key
 from flighter.config import Settings, get_settings
 from flighter.db import get_session
@@ -59,7 +59,9 @@ def snapshot(**kwargs: Any) -> FlightSnapshot:
 
 
 def payload(rows: Sequence[FlightRow], settings: Settings, **kwargs: Any) -> dict[str, Any]:
-    built = build_payload(rows, settings=settings, now=NOW, **kwargs)
+    built = build_payload(
+        rows, settings=settings, now=NOW, base_url="https://flights.example.com", **kwargs
+    )
     return built.model_dump(mode="json")
 
 
@@ -445,9 +447,18 @@ def test_an_unset_token_refuses_everyone(settings: Settings) -> None:
 def test_the_connect_link_runs_the_script_with_the_address_and_the_token(
     settings: Settings,
 ) -> None:
-    assert connect_url(settings) == (
+    assert connect_url(settings, "https://flights.example.com") == (
         "scriptable:///run/Flights?api=https%3A%2F%2Fflights.example.com&token=test-token"
     )
+
+
+def test_links_point_where_the_phone_reached_until_an_address_is_saved(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default is the server's own name for itself, which no phone can follow."""
+    monkeypatch.setattr(prefs, "_current", prefs.Prefs())
+    response = client.get("/api/widget", headers={"Authorization": "Bearer test-token"})
+    assert response.json()["flights"][0]["detail_url"] == "http://testserver/f/42"
 
 
 def test_the_script_is_the_same_for_everyone(settings: Settings) -> None:

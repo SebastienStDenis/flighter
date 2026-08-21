@@ -314,7 +314,7 @@ def test_the_problems_page_says_which_email_was_set_aside_and_why(client: TestCl
 
     body = client.get("/problems").text
 
-    assert "Email could not be imported" in body
+    assert "<strong>Email could not be imported</strong>" in body
     assert "Subject: Your booking is confirmed" in body
     assert "RuntimeError: the model timed out. It is still flagged in Mail." in body
     assert "Try again" in body
@@ -355,7 +355,9 @@ def test_a_set_aside_email_is_kept_off_the_board(client: TestClient) -> None:
     """The board is read in a hurry for a gate; an email that would not parse is not
     news about any flight on it."""
     client.session.rows["IngestLog"] = [set_aside_row()]  # type: ignore[attr-defined]
-    assert "Email could not be imported" not in client.get("/").text
+    board = client.get("/").text
+    assert "Email could not be imported" not in board
+    assert "Your booking is confirmed" not in board
 
 
 def test_the_problems_tab_is_marked_only_while_something_is_waiting(client: TestClient) -> None:
@@ -937,7 +939,10 @@ def test_a_deployment_nobody_has_told_its_address_is_offered_this_one(
     with build_client(unconfigured, monkeypatch) as fresh:
         body = fresh.get("/settings").text
     assert 'value="http://testserver"' in body
+    # The Connect link too: a phone handed the default would be told to ask itself.
+    assert "api=http%3A%2F%2Ftestserver" in body
     assert "localhost:8000" not in body
+    assert "localhost%3A8000" not in body
 
 
 def test_an_address_that_was_set_is_left_alone(client: TestClient) -> None:

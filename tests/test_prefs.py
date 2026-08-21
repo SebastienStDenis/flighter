@@ -70,6 +70,22 @@ async def test_a_trailing_slash_never_reaches_a_generated_link() -> None:
     assert saved.public_base_url == "https://flighter.tailnet.ts.net"
 
 
+def test_an_unsaved_address_gives_way_to_the_one_the_request_came_in_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(prefs, "_current", Prefs())
+    assert prefs.public_base_url("https://flighter.tailnet.ts.net") == (
+        "https://flighter.tailnet.ts.net"
+    )
+
+
+def test_a_saved_address_is_kept_whatever_the_request_came_in_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(prefs, "_current", Prefs(public_base_url="https://flights.example.com"))
+    assert prefs.public_base_url("http://192.168.1.20:8000") == "https://flights.example.com"
+
+
 async def test_the_default_flag_colour_is_one_the_app_can_tell_apart() -> None:
     """Red sets no keyword at all, so it would match every ordinary flag on the account."""
     assert Prefs().imap_flag_colour in FLAG_COLOURS
