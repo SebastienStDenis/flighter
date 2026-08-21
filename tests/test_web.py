@@ -8,8 +8,9 @@ and a page that raises on one of them is a page that fails exactly when it is ne
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -162,6 +163,9 @@ class FakeSession:
     async def flush(self) -> None:
         return None
 
+    async def commit(self) -> None:
+        return None
+
     async def rollback(self) -> None:
         return None
 
@@ -191,6 +195,11 @@ def build_client(
     async def fake_calendars(self: Any) -> list[Collection]:
         return list(CALENDARS)
 
+    @contextlib.asynccontextmanager
+    async def same_session() -> AsyncIterator[FakeSession]:
+        yield session
+
+    monkeypatch.setattr(web, "session_scope", same_session)
     monkeypatch.setattr(web.views, "get_airport", fake_get_airport)
     monkeypatch.setattr(web, "budget_status", fake_budget)
     monkeypatch.setattr(web.booking_repo, "list_bookings", no_bookings)
@@ -244,7 +253,7 @@ def looks_up(
     """Answer every lookup with these, and record what it was asked about."""
     asked: list[tuple[str, str, date]] = []
 
-    async def find_flights(_session: Any, carrier: str, number: str, day: date) -> list[Candidate]:
+    async def find_flights(carrier: str, number: str, day: date) -> list[Candidate]:
         asked.append((carrier, number, day))
         return list(candidates)
 
@@ -357,10 +366,17 @@ def test_the_problems_page_says_when_there_is_nothing(client: TestClient) -> Non
 
 
 def test_trying_a_set_aside_message_again_puts_it_back_in_the_queue(
-    client: TestClient,
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     row = set_aside_row()
     client.session.rows["IngestLog"] = [row]
+    woken = 0
+
+    def wake() -> None:
+        nonlocal woken
+        woken += 1
+
+    monkeypatch.setattr(web.ingest, "wake", wake)
 
     response = client.post(
         "/mail/retry", data={"message_id": row.message_id}, follow_redirects=False
@@ -368,9 +384,11 @@ def test_trying_a_set_aside_message_again_puts_it_back_in_the_queue(
 
     assert response.status_code == 303
     assert response.headers["location"] == "/problems"
-    # The email never lost its flag, so clearing the give-up is all it takes.
+    # The email never lost its flag, so clearing the give-up and waking the watcher is
+    # all it takes.
     assert row.attempts == 0
     assert row.retry_at is not None
+    assert woken == 1
 
 
 def test_ignoring_a_set_aside_message_lets_the_next_sweep_unflag_it(
@@ -385,7 +403,7 @@ def test_ignoring_a_set_aside_message_lets_the_next_sweep_unflag_it(
 
     assert response.status_code == 303
     assert response.headers["location"] == "/problems"
-    assert row.outcome == "no_flight"
+    assert row.outcome == "ignored"
     assert row.retry_at is None
 
 

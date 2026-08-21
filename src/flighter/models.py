@@ -56,6 +56,7 @@ class IngestOutcome(StrEnum):
     CREATED = "created"
     DUPLICATE = "duplicate"
     NO_FLIGHT = "no_flight"
+    IGNORED = "ignored"
     ERROR = "error"
 
 
@@ -272,8 +273,10 @@ class IngestLog(Base):
     It is also the retry state. An `error` row keeps its message flagged and is tried
     again once `retry_at` has passed; a null `retry_at` means the message has either been
     decided or been set aside, and nothing will pick it up again without being asked.
-    Having an outcome already on file is what stops a second push going out about the
-    same email.
+    An `ignored` row was decided by the person on the Problems page and is waiting for
+    the sweep to take its flag off, after which it stands as `no_flight`: a message on
+    file as holding no flight is read again only if it is flagged again. Having an
+    outcome already on file is what stops a second push going out about the same email.
     """
 
     __tablename__ = "ingest_log"

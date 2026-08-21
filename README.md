@@ -161,10 +161,14 @@ again after two minutes and again after ten. If it still fails, your phone is to
 and the email is set aside: it keeps its flag, so it is still where you left it in Mail,
 and it waits on the **Problems** page with **Try again** and **Ignore** beside it; the tab
 in the nav wears a mark while anything is there, so the board itself stays about flights.
-Unflagging it in Mail drops it too. Two things skip the retries and are set aside at once,
-because reading them again reads them the same way: an email naming an airport code the app
-has no row for, where the push names the code, and an email with no flight in it at all.
-Neither loses its flag on its own - **Ignore** is what takes it off.
+**Try again** hands it straight back to the watcher, which reads it again within half a
+minute - as long as it still carries the flag. Unflagging it in Mail drops it too. Two
+things skip the retries and are set aside at once, because reading them again reads them
+the same way: an email naming an airport code the app has no row for, where the push names
+the code, and an email with no flight in it at all. Neither loses its flag on its own -
+**Ignore** is what takes it off. An email once decided to hold no flight is read again if
+you flag it again: the flag came off with that decision, so one on it now is you overruling
+it.
 
 Rename the flag to `flighter` in Mail on the Mac if you want your own word for it -
 **click the flag name in the sidebar, click it again, and type**. That name is a label on

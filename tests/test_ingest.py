@@ -623,6 +623,49 @@ async def test_a_retry_that_works_is_imported_and_reported(
     assert (logged.error, logged.attempts, logged.retry_at) == (None, 0, None)
 
 
+async def test_an_email_flagged_again_after_being_decided_no_flight_is_read_again(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    """The flag came off with that decision, so a flag on it now is the person overruling it."""
+    one_session.log["flight_plain.eml"] = IngestLog(
+        message_id="flight_plain.eml", outcome="no_flight", attempts=0
+    )
+    use_model(monkeypatch, extraction())
+    mailbox, notifier = FakeMailbox(message("flight_plain.eml")), FakeNotifier()
+
+    assert await sweep(mailbox, notifier, settings) == ["created"]
+
+    assert mailbox.cleared == [("INBOX", 1)]
+    assert len(recorder.created) == 1
+    assert [outcome for outcome, _ in notifier.imported] == ["created"]
+
+
+async def test_an_ignored_email_is_unflagged_without_being_read_again(
+    settings: Settings,
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    one_session: FakeSession,
+) -> None:
+    """Ignore is the person's decision: the flag it has not yet taken off is not a re-flag."""
+    fails(monkeypatch)
+    mailbox, notifier = FakeMailbox(message("flight_plain.eml")), FakeNotifier()
+    await sweep_until_set_aside(mailbox, notifier, settings, one_session)
+    assert await ingest.dismiss(one_session, "flight_plain.eml") is not None  # type: ignore[arg-type]
+    # Were the email read again, this would book it.
+    use_model(monkeypatch, extraction())
+
+    assert await sweep(mailbox, notifier, settings) == ["ignored"]
+
+    assert mailbox.cleared == [("INBOX", 1)]
+    assert recorder.created == []
+    # Unflagged, it stands as any other email with no flight in it: flagging it again
+    # would read it again.
+    assert one_session.log["flight_plain.eml"].outcome == "no_flight"
+
+
 async def test_a_marked_email_with_no_flight_is_reported_and_left_flagged(
     settings: Settings, recorder: Recorder, one_session: FakeSession
 ) -> None:

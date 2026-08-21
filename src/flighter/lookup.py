@@ -18,8 +18,9 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .aeroapi import AeroAPIClient, shared_client, split_ident
+from .aeroapi import AeroAPIClient, SessionFactory, shared_client, split_ident
 from .airports import UnknownAirport, airport_tz
+from .db import session_scope
 from .timezones import parse_instant, to_local
 
 log = logging.getLogger(__name__)
@@ -97,12 +98,12 @@ def in_range(day: date, today: date) -> bool:
 
 
 async def find_flights(
-    session: AsyncSession,
     carrier: str,
     number: str,
     day: date,
     client: AeroAPIClient | None = None,
     *,
+    sessions: SessionFactory = session_scope,
     today: date | None = None,
 ) -> list[Candidate]:
     """Every leg published under that flight number, leaving that day at its origin.
@@ -110,6 +111,11 @@ async def find_flights(
     Usually exactly one. A number flown twice a day, or sold as a codeshare on two
     different legs, is why this answers with a list rather than a flight. `today` is the
     clock, and a parameter only so the window can be proven against a fixed date.
+
+    The airports are read in a transaction of this function's own, opened only once the
+    schedule has arrived. Every transaction takes the database's one write lock, and one
+    held across the call would hold every page of the app - and the client's own budget
+    check, which waits on that same lock - for as long as FlightAware takes to answer.
     """
     if not in_range(day, today or datetime.now(UTC).date()):
         raise OutOfRange(day)
@@ -119,17 +125,19 @@ async def find_flights(
     )
 
     found: dict[tuple[str, str, datetime], Candidate] = {}
-    for row in payload.get("scheduled") or []:
-        if not isinstance(row, dict):
-            continue
-        candidate = await _candidate(session, row, carrier, number, day)
-        if candidate is None:
-            continue
-        # One leg can be published more than once - as the operator's flight and as the
-        # codeshare sold on it - and both spellings describe the same aeroplane.
-        found.setdefault(
-            (candidate.origin_iata, candidate.dest_iata, candidate.departure_local), candidate
-        )
+    async with sessions() as session:
+        for row in payload.get("scheduled") or []:
+            if not isinstance(row, dict):
+                continue
+            candidate = await _candidate(session, row, carrier, number, day)
+            if candidate is None:
+                continue
+            # One leg can be published more than once - as the operator's flight and as
+            # the codeshare sold on it - and both spellings describe the same aeroplane.
+            found.setdefault(
+                (candidate.origin_iata, candidate.dest_iata, candidate.departure_local),
+                candidate,
+            )
     return sorted(found.values(), key=lambda candidate: candidate.departure_local)
 
 

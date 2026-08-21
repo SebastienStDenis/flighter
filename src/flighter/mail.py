@@ -34,6 +34,10 @@ from typing import Any, NamedTuple
 from urllib.parse import quote
 
 from imap_tools import FolderInfo, MailBox
+from imap_tools.errors import MailboxTaggedResponseError
+from imap_tools.idle import IdleManager
+from imap_tools.mailbox import BaseMailBox
+from imap_tools.utils import check_command_status
 from pydantic import BaseModel
 
 from . import prefs
@@ -176,6 +180,44 @@ def _parse_date(value: object) -> datetime | None:
 # -- the mailbox ---------------------------------------------------------------------
 
 
+class PatientIdle(IdleManager):
+    """IDLE as imap_tools runs it, except that the server is allowed to speak first.
+
+    iCloud volunteers untagged lines between commands - a FETCH for a flag that has just
+    changed is the usual one - and the stock `start` reads exactly one line after sending
+    IDLE, so a line like that is taken for the command being refused and the connection
+    is dropped and reopened over it. Here whatever arrives before the continuation is kept
+    as the news it is, and a wait that begins with news in hand is over before it idles.
+    """
+
+    def __init__(self, mailbox: BaseMailBox) -> None:
+        super().__init__(mailbox)
+        self._early: list[bytes] = []
+
+    def start(self) -> None:
+        client = self.mailbox.client
+        tag = self._idle_tag = client._command("IDLE")
+        self._early = []
+        while True:
+            line = client._get_line()
+            if line.startswith(b"+"):
+                return
+            if line.startswith(tag + b" "):
+                check_command_status(
+                    (line, "IDLE start"), MailboxTaggedResponseError, expected=None
+                )
+            self._early.append(line)
+
+    def poll(self, timeout: float | None) -> list[bytes]:
+        return self._early or super().poll(timeout)
+
+
+class ICloudMailBox(MailBox):
+    """imap_tools over TLS, idling the way iCloud needs it idled."""
+
+    idle_manager_class = PatientIdle
+
+
 class Mailbox:
     """One IMAP connection, and every mailbox on the account behind it.
 
@@ -256,16 +298,24 @@ class Mailbox:
         """
         await asyncio.to_thread(self._clear_mark, marked)
 
-    async def wait_for_mail(self, seconds: float) -> None:
-        """Idle until the server has something to say, or the cycle is up.
+    async def wait_for_mail(self, seconds: float, *, wake: asyncio.Event | None = None) -> None:
+        """Idle until the server has something to say, `wake` is set, or the cycle is up.
 
         IDLE reports changes in the selected mailbox and nowhere else, so it catches the
         common case - a confirmation flagged where it landed, in the inbox - and the next
         sweep runs within a second or two. A flag set on a message filed somewhere else is
         never announced to anybody, and the sweep this timeout paces is what finds it.
+
+        `wake` is for what the server cannot announce: a message handed back on the
+        Problems page. It is looked at between idles rather than awaited, because the
+        idle runs on a thread that cannot be interrupted, so it is answered within one
+        chunk of idling rather than at once.
         """
         deadline = monotonic() + seconds
         while (remaining := deadline - monotonic()) > 0:
+            if wake is not None and wake.is_set():
+                wake.clear()
+                return
             if await asyncio.to_thread(self._idle, min(remaining, IDLE_CHUNK_SECONDS)):
                 return
 
@@ -278,7 +328,7 @@ class Mailbox:
 
     def _connect(self) -> None:
         if self._box is None:
-            self._box = MailBox(IMAP_HOST, port=IMAP_PORT, timeout=COMMAND_TIMEOUT_SECONDS)
+            self._box = ICloudMailBox(IMAP_HOST, port=IMAP_PORT, timeout=COMMAND_TIMEOUT_SECONDS)
         box = self._box
         box.login(self._settings.icloud_email, self._settings.icloud_app_password)
         # Signing in selects the inbox, which is where the wait between sweeps idles.

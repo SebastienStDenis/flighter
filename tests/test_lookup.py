@@ -7,6 +7,8 @@ a row we cannot use, which must never take the rest of the answer down with it.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import AsyncIterator
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -84,9 +86,16 @@ def airports(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(lookup, "airport_tz", airport_tz)
 
 
+@contextlib.asynccontextmanager
+async def no_session() -> AsyncIterator[Any]:
+    """The airports are faked above, so the session they would be read on is nothing."""
+    yield None
+
+
 async def find(client: FakeClient, day: date = DAY, number: str = "871") -> list[Candidate]:
     """Look up a flight as though the day being asked about were today."""
-    return await find_flights(None, "AC", number, day, client, today=DAY)  # type: ignore[arg-type]
+    lookup_client: Any = client
+    return await find_flights("AC", number, day, lookup_client, sessions=no_session, today=DAY)
 
 
 # --- What somebody types -------------------------------------------------------------
