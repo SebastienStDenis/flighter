@@ -30,10 +30,12 @@ from .phase import (
     LANDED,
     TAXIING,
     Phase,
+    airborne_window,
     arrival_estimate,
     compute_phase,
     departure_estimate,
     landing_estimate,
+    progress_estimate,
 )
 from .timezones import format_local, parse_instant, to_local
 
@@ -208,7 +210,12 @@ class FlightView:
 
     @property
     def progress_percent(self) -> int | None:
-        return self.snapshot.progress_percent if self.snapshot else None
+        return progress_estimate(self.booking, self.snapshot, datetime.now(UTC))
+
+    @property
+    def airborne_window(self) -> tuple[datetime, datetime] | None:
+        """Wheels-up and wheels-down, for the page to move the aircraft between loads."""
+        return airborne_window(self.booking, self.snapshot, datetime.now(UTC))
 
     @property
     def phase(self) -> Phase:

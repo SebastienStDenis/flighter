@@ -7,8 +7,9 @@
    actually flown. The list and the flight page both draw it, so it is one piece. #}
 {% macro route_line(v) %}
 {% set progress = v.progress_percent %}
+{% set window = v.airborne_window %}
 <div class="route-line {{ 'text-live' if progress else 'text-muted-foreground/50' }}"
-     style="--progress: {{ progress or 0 }}%">
+     style="--progress: {{ progress or 0 }}%"{% if window %} data-off="{{ window[0].isoformat() }}" data-on="{{ window[1].isoformat() }}"{% endif %}>
   <span class="route-mark rounded-full bg-card p-0.5" aria-hidden="true">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
       <path d="M22 12 13 7.5V2.8a1.3 1.3 0 0 0-2.6 0v4.7L1.4 12v1.7l9-2.6v4.2L7 17.7V19l4.7-1.1L16.4 19v-1.3l-3.4-2.4v-4.2l9 2.6z"

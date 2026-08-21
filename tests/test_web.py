@@ -515,6 +515,9 @@ def test_a_flight_in_the_air_renders_what_is_worth_knowing(
     assert "B27" in body and "A14" in body
     assert "B789" in body
     assert "X7QW2P" in body and "14A" in body
+    # The aircraft's place on the route rule is the clock's to keep, not the last poll's.
+    assert f'data-off="{(DEPARTURE + timedelta(minutes=35)).isoformat()}"' in body
+    assert f'data-on="{(ARRIVAL + timedelta(minutes=10)).isoformat()}"' in body
     # What is on the ticket, not what is in the flight plan.
     for gone in ("Filed route", "Distance", "Registration", "Timezone", "Last checked"):
         assert gone not in body

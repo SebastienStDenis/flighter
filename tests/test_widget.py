@@ -142,7 +142,8 @@ def test_airborne_counts_down_to_landing_and_shows_progress(settings: Settings) 
     assert flight["phase"] == "airborne"
     assert flight["countdown_label"] == "Lands in"
     assert flight["countdown_to"] == "2026-09-12T22:40:00Z"
-    assert flight["progress_percent"] == 64
+    # Eighty minutes into a six-hour span by the clock, whatever the last poll said.
+    assert flight["progress_percent"] == 22
     assert flight["subtitle"] == "Gate 12 · Terminal B"
     assert flight["delayed"] is True
 

@@ -15,10 +15,12 @@ from flighter.phase import (
     LANDED,
     TAXIING,
     UPCOMING,
+    airborne_window,
     arrival_estimate,
     compute_phase,
     departure_estimate,
     landing_estimate,
+    progress_estimate,
 )
 
 DEPARTURE = datetime(2026, 9, 12, 18, 40, tzinfo=UTC)
@@ -192,3 +194,47 @@ def test_arrival_prefers_the_gate_it_actually_reached_over_touchdown() -> None:
 
 def test_landing_without_any_snapshot_is_the_booked_arrival() -> None:
     assert landing_estimate(booking(), None) == ARRIVAL
+
+
+def test_progress_is_read_off_the_clock_while_airborne() -> None:
+    """The feed's figure is true only at the poll; the clock is true at every instant."""
+    flying = snapshot(
+        actual_off=DEPARTURE, scheduled_on=ARRIVAL, estimated_on=ARRIVAL, progress_percent=10
+    )
+    quarter = DEPARTURE + (ARRIVAL - DEPARTURE) / 4
+    assert airborne_window(booking(), flying, quarter) == (DEPARTURE, ARRIVAL)
+    assert progress_estimate(booking(), flying, quarter) == 25
+
+
+def test_progress_follows_the_landing_estimate_as_it_moves() -> None:
+    flying = snapshot(
+        actual_off=DEPARTURE, scheduled_on=ARRIVAL, estimated_on=ARRIVAL + timedelta(hours=1)
+    )
+    halfway = DEPARTURE + timedelta(hours=2, minutes=17, seconds=30)
+    assert progress_estimate(booking(), flying, halfway) == 50
+
+
+def test_progress_never_runs_past_the_destination() -> None:
+    flying = snapshot(actual_off=DEPARTURE, estimated_on=ARRIVAL)
+    assert progress_estimate(booking(), flying, ARRIVAL + timedelta(minutes=20)) == 100
+
+
+def test_progress_on_the_ground_is_whatever_the_feed_said() -> None:
+    assert progress_estimate(booking(), None, DEPARTURE) is None
+    waiting = snapshot(scheduled_out=DEPARTURE, progress_percent=0)
+    assert airborne_window(booking(), waiting, DEPARTURE - timedelta(hours=1)) is None
+    assert progress_estimate(booking(), waiting, DEPARTURE - timedelta(hours=1)) == 0
+    landed = snapshot(actual_off=DEPARTURE, actual_on=ARRIVAL, progress_percent=100)
+    assert progress_estimate(booking(), landed, ARRIVAL + timedelta(minutes=5)) == 100
+
+
+def test_progress_falls_back_to_the_feed_when_the_times_make_no_span() -> None:
+    """A landing estimate that has not caught up with a late take-off is not a span."""
+    stale = snapshot(
+        actual_off=ARRIVAL + timedelta(minutes=5), estimated_on=ARRIVAL, progress_percent=3
+    )
+    later = ARRIVAL + timedelta(minutes=30)
+    assert airborne_window(booking(), stale, later) is None
+    assert progress_estimate(booking(), stale, later) == 3
+    unknown = snapshot(actual_off=DEPARTURE, progress_percent=40)
+    assert progress_estimate(booking(scheduled_arrival_utc=None), unknown, later) == 40
