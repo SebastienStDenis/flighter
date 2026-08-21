@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Final
@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import bookings as booking_repo
 from . import prefs
 from .aeroapi import budget_status
+from .airports import UnknownAirport, airport_tz
 from .config import Settings, get_settings
 from .db import get_session
 from .models import KV, Booking, BookingStatus, FlightSnapshot
@@ -44,10 +45,13 @@ from .phase import (
     DIVERTED,
     LANDED,
     TAXIING,
+    UPCOMING,
     Phase,
+    arrival_estimate,
     compute_phase,
     departure_estimate,
 )
+from .timezones import format_local
 from .views import countdown, phase_rank
 
 log = logging.getLogger(__name__)
@@ -65,6 +69,10 @@ CANDIDATE_LIMIT: Final = 12
 # row is the "Lands in" countdown - so this has to cover the delay as well as the stretch
 # afterwards where it still says which carousel to walk to.
 LATE_ARRIVAL_ALLOWANCE: Final = timedelta(hours=14)
+# How long a flight that is over keeps its place once it is. Long enough to reach the
+# carousel and the car; after that yesterday's "Landed" is clutter on a lock screen, and
+# a cancelled flight whose day has passed is history that outranks the rebooking.
+OVER_LINGER: Final = timedelta(hours=2)
 
 REFRESH_IDLE_SECONDS: Final = 900
 REFRESH_ACTIVE_SECONDS: Final = 600
@@ -96,11 +104,17 @@ UtcInstant = Annotated[datetime, PlainSerializer(_iso_z, return_type=str)]
 class WidgetFlight(BaseModel):
     detail_url: str
     phase: Phase
-    title: str
+    flight_number: str
+    origin: str
+    dest: str
     subtitle: str | None
+    # The departure as a local time, only for a flight still days away. A timer that far
+    # out is a wall of digits; a date is what the reader wants to know.
+    departs: str | None
     countdown_label: str | None
     countdown_to: UtcInstant | None
-    delayed: bool
+    # None under the threshold, so the phone never has to know what counts as late.
+    delay_minutes: int | None
     progress_percent: int | None
 
 
@@ -126,7 +140,11 @@ async def read_widget(
     await mark_seen(session, now)
     rows = await load_flight_rows(session, now)
     return build_payload(
-        rows, settings=settings, now=now, degraded_reason=await read_degraded(session)
+        rows,
+        settings=settings,
+        now=now,
+        degraded_reason=await read_degraded(session),
+        zones=await origin_zones(session, (booking for booking, _ in rows)),
     )
 
 
@@ -245,15 +263,29 @@ async def load_flight_rows(session: AsyncSession, now: datetime) -> list[FlightR
     return [(booking, latest.get(booking.id)) for booking in bookings]
 
 
+async def origin_zones(session: AsyncSession, bookings: Iterable[Booking]) -> dict[str, str]:
+    """Each origin's zone, for writing a departure the way the ticket does."""
+    zones: dict[str, str] = {}
+    for booking in bookings:
+        if booking.origin_iata in zones:
+            continue
+        try:
+            zones[booking.origin_iata] = await airport_tz(session, booking.origin_iata)
+        except UnknownAirport:
+            log.warning("no zone for %s; the widget dates it in UTC", booking.origin_iata)
+    return zones
+
+
 async def read_degraded(session: AsyncSession) -> str | None:
-    """Why the numbers might be wrong, in words the widget can print verbatim.
+    """Why the numbers might be wrong, in words short enough for a small widget's footer.
 
     The breaker latch lives in KV and `budget_status` owns reading it, including the
     month scoping that unlatches it on the 1st. An absent latch is the healthy case.
+    The figures stay on the settings page, where there is room for them.
     """
     budget = await budget_status(session)
     if budget.tripped:
-        return f"AeroAPI budget reached (${budget.spend_usd} of ${budget.cap_usd})"
+        return "AeroAPI budget reached"
     return None
 
 
@@ -263,13 +295,17 @@ def build_payload(
     settings: Settings,
     now: datetime,
     degraded_reason: str | None = None,
+    zones: Mapping[str, str] | None = None,
 ) -> WidgetPayload:
     ranked: list[tuple[int, datetime, WidgetFlight]] = []
     observed: list[datetime] = []
     for booking, snapshot in rows:
-        flight = _flight(booking, snapshot, settings=settings, now=now)
-        ranked.append((phase_rank(flight.phase), departure_estimate(booking, snapshot), flight))
-        if flight.phase in PHASES_IMMINENT and snapshot is not None and snapshot.observed_at:
+        phase = compute_phase(booking, snapshot, now)
+        if _over(phase, booking, snapshot, now):
+            continue
+        flight = _flight(booking, snapshot, phase, settings=settings, zones=zones or {})
+        ranked.append((phase_rank(phase), departure_estimate(booking, snapshot), flight))
+        if phase in PHASES_IMMINENT and snapshot is not None and snapshot.observed_at:
             observed.append(snapshot.observed_at)
     ranked.sort(key=lambda row: (row[0], row[1]))
     flights = [flight for _, _, flight in ranked[:MAX_FLIGHTS]]
@@ -283,22 +319,44 @@ def build_payload(
     )
 
 
+def _over(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None, now: datetime) -> bool:
+    """Whether a flight that has ended has also had its two hours on the widget."""
+    if phase == LANDED:
+        arrival = arrival_estimate(booking, snapshot)
+        return arrival is not None and now - arrival > OVER_LINGER
+    if phase == CANCELLED:
+        return now - departure_estimate(booking, snapshot) > OVER_LINGER
+    return False
+
+
 def _flight(
-    booking: Booking, snapshot: FlightSnapshot | None, *, settings: Settings, now: datetime
+    booking: Booking,
+    snapshot: FlightSnapshot | None,
+    phase: Phase,
+    *,
+    settings: Settings,
+    zones: Mapping[str, str],
 ) -> WidgetFlight:
-    phase = compute_phase(booking, snapshot, now)
     label, countdown_to = countdown(phase, booking, snapshot)
+    departs = None
+    if phase == UPCOMING:
+        label, countdown_to = None, None
+        departs = format_local(
+            departure_estimate(booking, snapshot),
+            zones.get(booking.origin_iata, "UTC"),
+            with_date=True,
+        )
     return WidgetFlight(
         detail_url=f"{prefs.current().public_base_url}/f/{booking.id}",
         phase=phase,
-        title=(
-            f"{booking.marketing_carrier}{booking.marketing_number}"
-            f"  {booking.origin_iata} → {booking.dest_iata}"
-        ),
+        flight_number=f"{booking.marketing_carrier}{booking.marketing_number}",
+        origin=booking.origin_iata,
+        dest=booking.dest_iata,
         subtitle=_subtitle(phase, booking, snapshot),
+        departs=departs,
         countdown_label=label,
         countdown_to=countdown_to,
-        delayed=_delayed(snapshot),
+        delay_minutes=_delay_minutes(snapshot),
         # Only while airborne: the feed reports 0 on the ground and 100 after landing,
         # either of which draws a bar that says nothing.
         progress_percent=snapshot.progress_percent if snapshot and phase == AIRBORNE else None,
@@ -340,9 +398,10 @@ def _subtitle(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -
     return f"Seat {booking.seat}" if booking.seat else None
 
 
-def _delayed(snapshot: FlightSnapshot | None) -> bool:
+def _delay_minutes(snapshot: FlightSnapshot | None) -> int | None:
+    """How late, in whole minutes, when it is late enough to say so."""
     if snapshot is None:
-        return False
+        return None
     arrival = (snapshot.estimated_in or snapshot.actual_in, snapshot.scheduled_in)
     departure = (snapshot.estimated_out or snapshot.actual_out, snapshot.scheduled_out)
     # Once the aircraft is off the ground a late pushback is history, and the only
@@ -352,10 +411,14 @@ def _delayed(snapshot: FlightSnapshot | None) -> bool:
         if snapshot.actual_off is not None
         else ((departure, DEPARTURE_DELAY_THRESHOLD), (arrival, ARRIVAL_DELAY_THRESHOLD))
     )
-    return any(
-        expected is not None and scheduled is not None and expected - scheduled >= threshold
+    late = [
+        expected - scheduled
         for (expected, scheduled), threshold in pairs
-    )
+        if expected is not None and scheduled is not None and expected - scheduled >= threshold
+    ]
+    if not late:
+        return None
+    return int(max(late).total_seconds() // 60)
 
 
 def _refresh_seconds(flights: Sequence[WidgetFlight]) -> int:
@@ -378,4 +441,4 @@ def _stale_reason(observed: datetime | None, now: datetime) -> str | None:
     age = now - observed
     if age <= POLL_STALE_AFTER:
         return None
-    return f"No status update in {int(age.total_seconds() // 60)} min"
+    return f"No update for {int(age.total_seconds() // 60)} min"
