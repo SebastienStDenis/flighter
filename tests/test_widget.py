@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
+import shutil
+import subprocess
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -19,6 +22,7 @@ from flighter.config import Settings, get_settings
 from flighter.db import get_session
 from flighter.models import KV, Airport, Booking, FlightSnapshot
 from flighter.phase import CANCELLED_NOTICE
+from flighter.views import until
 from flighter.widget import (
     FlightRow,
     authorize,
@@ -81,9 +85,10 @@ def test_upcoming_flight(settings: Settings) -> None:
         "phase": "upcoming",
         "title": "DL1234  JFK → LAX",
         "subtitle": None,
-        "countdown_label": "Departs in",
-        "countdown_to": "2026-09-18T18:00:00Z",
-        "delayed": False,
+        "status_label": "Scheduled",
+        "status_tone": "quiet",
+        "milestone_label": "Scheduled",
+        "milestone_to": "2026-09-18T18:00:00Z",
         "progress_percent": None,
     }
 
@@ -93,8 +98,10 @@ def test_day_of_shows_gate_and_terminal(settings: Settings) -> None:
     flight = payload([(booking(), gated)], settings)["flights"][0]
     assert flight["phase"] == "day_of"
     assert flight["subtitle"] == "Gate B22 · Terminal 4"
-    assert flight["countdown_label"] == "Departs in"
-    assert flight["countdown_to"] == "2026-09-12T18:40:00Z"
+    assert flight["status_label"] == "On time"
+    assert flight["status_tone"] == "ok"
+    assert flight["milestone_label"] == "Departs in"
+    assert flight["milestone_to"] == "2026-09-12T18:40:00Z"
 
 
 def test_upcoming_falls_back_to_the_seat(settings: Settings) -> None:
@@ -102,19 +109,20 @@ def test_upcoming_falls_back_to_the_seat(settings: Settings) -> None:
     assert flight["subtitle"] == "Seat 14A"
 
 
-def test_the_run_up_to_departure_keeps_a_live_countdown(settings: Settings) -> None:
+def test_the_run_up_to_departure_keeps_counting(settings: Settings) -> None:
     """The half hour before departure is when the number matters most, so it must not be
     traded for a word about boarding that no feed reports."""
     imminent = snapshot(scheduled_out=NOW + timedelta(minutes=20), gate_origin="B22")
     flight = payload([(booking(), imminent)], settings)["flights"][0]
     assert flight["phase"] == "day_of"
-    assert flight["countdown_label"] == "Departs in"
-    assert flight["countdown_to"] == "2026-09-12T18:20:00Z"
+    assert flight["milestone_label"] == "Departs in"
+    assert flight["milestone_to"] == "2026-09-12T18:20:00Z"
 
 
-def test_taxiing_has_no_countdown_and_does_not_name_the_gate_it_left(
+def test_taxiing_counts_to_the_landing_and_does_not_name_the_gate_it_left(
     settings: Settings,
 ) -> None:
+    """Nothing upstream estimates wheels up, so the next rung with a time is the landing."""
     taxiing = snapshot(
         scheduled_out=NOW - timedelta(minutes=5),
         actual_out=NOW - timedelta(minutes=2),
@@ -122,8 +130,10 @@ def test_taxiing_has_no_countdown_and_does_not_name_the_gate_it_left(
     )
     flight = payload([(booking(), taxiing)], settings)["flights"][0]
     assert flight["phase"] == "taxiing"
-    assert flight["countdown_to"] is None
-    assert flight["countdown_label"] is None
+    assert flight["status_label"] == "Taxiing"
+    assert flight["status_tone"] == "live"
+    assert flight["milestone_label"] == "Lands in"
+    assert flight["milestone_to"] == "2026-09-12T22:15:00Z"
     assert flight["subtitle"] is None
 
 
@@ -140,18 +150,20 @@ def test_airborne_counts_down_to_landing_and_shows_progress(settings: Settings) 
     )
     flight = payload([(booking(), flying)], settings)["flights"][0]
     assert flight["phase"] == "airborne"
-    assert flight["countdown_label"] == "Lands in"
-    assert flight["countdown_to"] == "2026-09-12T22:40:00Z"
+    assert flight["milestone_label"] == "Lands in"
+    assert flight["milestone_to"] == "2026-09-12T22:40:00Z"
     # Eighty minutes into a six-hour span by the clock, whatever the last poll said.
     assert flight["progress_percent"] == 22
     assert flight["subtitle"] == "Gate 12 · Terminal B"
-    assert flight["delayed"] is True
+    assert flight["status_label"] == "Arriving late"
+    assert flight["status_tone"] == "warn"
 
 
-def test_landed_shows_the_carousel_and_no_countdown(settings: Settings) -> None:
+def test_landed_shows_the_carousel_and_counts_to_the_gate(settings: Settings) -> None:
     landed = snapshot(
         actual_off=DEPARTURE,
-        actual_on=ARRIVAL,
+        actual_on=ARRIVAL - timedelta(minutes=10),
+        estimated_in=ARRIVAL,
         baggage_claim="7",
         terminal_destination="B",
         gate_origin="B22",
@@ -159,34 +171,59 @@ def test_landed_shows_the_carousel_and_no_countdown(settings: Settings) -> None:
     )
     flight = payload([(booking(), landed)], settings)["flights"][0]
     assert flight["phase"] == "landed"
+    assert flight["status_label"] == "Landed"
+    assert flight["status_tone"] == "ok"
     assert flight["subtitle"] == "Bag claim 7 · Terminal B"
-    assert flight["countdown_label"] is None
-    assert flight["countdown_to"] is None
+    assert flight["milestone_label"] == "At the gate in"
+    assert flight["milestone_to"] == "2026-09-12T22:15:00Z"
     # A landed flight must never show the departure gate it left hours ago.
     assert flight["progress_percent"] is None
 
 
-def test_cancelled_has_nothing_to_count_down_to(settings: Settings) -> None:
+def test_at_the_gate_there_is_nothing_left_to_count(settings: Settings) -> None:
+    done = snapshot(actual_off=DEPARTURE, actual_on=ARRIVAL, actual_in=ARRIVAL, baggage_claim="7")
+    flight = payload([(booking(), done)], settings)["flights"][0]
+    assert flight["status_label"] == "Landed"
+    assert flight["milestone_label"] is None
+    assert flight["milestone_to"] is None
+
+
+def test_cancelled_has_nothing_to_count_to(settings: Settings) -> None:
     """FlightAware's flag means "no longer tracked", so the widget says who said it."""
     flight = payload([(booking(), snapshot(cancelled=True))], settings)["flights"][0]
     assert flight["phase"] == "cancelled"
+    assert flight["status_label"] == "Maybe cancelled"
+    assert flight["status_tone"] == "stop"
     assert flight["subtitle"] == CANCELLED_NOTICE
-    assert flight["countdown_label"] is None
-    assert flight["countdown_to"] is None
+    assert flight["milestone_label"] is None
+    assert flight["milestone_to"] is None
 
 
 def test_diverted_still_lands_somewhere(settings: Settings) -> None:
     diverted = snapshot(diverted=True, actual_off=DEPARTURE, estimated_in=ARRIVAL)
     flight = payload([(booking(), diverted)], settings)["flights"][0]
     assert flight["phase"] == "diverted"
+    assert flight["status_label"] == "Diverted"
+    assert flight["status_tone"] == "stop"
     assert flight["subtitle"] == "Diverted"
-    assert flight["countdown_label"] == "Lands in"
-    assert flight["countdown_to"] == "2026-09-12T22:15:00Z"
+    assert flight["milestone_label"] == "Lands in"
+    assert flight["milestone_to"] == "2026-09-12T22:15:00Z"
 
 
-def test_a_minute_late_is_not_delayed(settings: Settings) -> None:
+def test_a_late_departure_is_the_pill_the_board_shows(settings: Settings) -> None:
+    waiting = snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=30))
+    flight = payload([(booking(), waiting)], settings)["flights"][0]
+    assert flight["status_label"] == "Departure delayed"
+    assert flight["status_tone"] == "warn"
+    assert flight["milestone_label"] == "Departs in"
+    assert flight["milestone_to"] == "2026-09-12T19:10:00Z"
+
+
+def test_a_minute_late_is_still_on_time(settings: Settings) -> None:
     jitter = snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=1))
-    assert payload([(booking(), jitter)], settings)["flights"][0]["delayed"] is False
+    flight = payload([(booking(), jitter)], settings)["flights"][0]
+    assert flight["status_label"] == "On time"
+    assert flight["status_tone"] == "ok"
 
 
 # --- instants -------------------------------------------------------------------------
@@ -212,7 +249,7 @@ def test_every_instant_is_utc_with_a_z(settings: Settings) -> None:
     ]
     body = payload(rows, settings)
     found = list(_instants(body))
-    assert len(found) == 3  # one countdown per flight
+    assert len(found) == 3  # one milestone per flight
     assert all(instant.endswith("Z") for instant in found)
 
 
@@ -220,7 +257,7 @@ def test_instants_survive_a_non_utc_input(settings: Settings) -> None:
     """AeroAPI states offsets; whatever arrives must leave as Z."""
     tokyo = datetime(2026, 9, 12, 18, 40, tzinfo=UTC).astimezone()
     flight = payload([(booking(scheduled_departure_utc=tokyo), None)], settings)["flights"][0]
-    assert flight["countdown_to"] == "2026-09-12T18:40:00Z"
+    assert flight["milestone_to"] == "2026-09-12T18:40:00Z"
 
 
 # --- ordering and cadence -------------------------------------------------------------
@@ -493,7 +530,7 @@ def test_the_bundle_leaves_the_header_to_scriptable() -> None:
     assert "icon-glyph" not in body
 
 
-def test_airborne_countdown_targets_touchdown_not_the_gate(settings: Settings) -> None:
+def test_airborne_milestone_is_touchdown_not_the_gate(settings: Settings) -> None:
     """The number someone reads from seat 32A is time to wheels down.
 
     Taxiing to a stand is ten minutes nobody counts, so a countdown aimed at the gate
@@ -510,15 +547,15 @@ def test_airborne_countdown_targets_touchdown_not_the_gate(settings: Settings) -
         progress_percent=70,
     )
     flight = payload([(booking(), flying)], settings)["flights"][0]
-    assert flight["countdown_label"] == "Lands in"
-    assert flight["countdown_to"] == "2026-09-12T22:04:00Z"
+    assert flight["milestone_label"] == "Lands in"
+    assert flight["milestone_to"] == "2026-09-12T22:04:00Z"
 
 
-def test_a_late_pushback_stops_counting_once_the_flight_is_off_the_ground(
+def test_a_late_pushback_is_history_once_the_flight_is_off_the_ground(
     settings: Settings,
 ) -> None:
     """A flight that left the gate late but is landing on time is not delayed, and saying
-    so for the rest of the cruise makes the flag mean nothing."""
+    so for the rest of the cruise makes the pill mean nothing."""
     recovered = snapshot(
         scheduled_out=DEPARTURE,
         actual_out=DEPARTURE + timedelta(minutes=40),
@@ -527,7 +564,50 @@ def test_a_late_pushback_stops_counting_once_the_flight_is_off_the_ground(
         estimated_in=ARRIVAL,
     )
     flight = payload([(booking(), recovered)], settings)["flights"][0]
-    assert flight["delayed"] is False
+    assert flight["status_label"] == "In the air"
+    assert flight["status_tone"] == "live"
+
+
+# --- the script -----------------------------------------------------------------------
+
+
+def test_the_script_draws_what_it_is_told() -> None:
+    """Every word and colour is the server's. The phase is for the server's own ranking,
+    and a timer element would count seconds, which nothing on any screen shows."""
+    source = script_source()
+    assert ".phase" not in source
+    assert "applyTimerStyle" not in source
+    assert "applyRelativeStyle" not in source
+
+
+FIGURES = [
+    timedelta(days=3, hours=5),
+    timedelta(hours=24, minutes=1),
+    timedelta(hours=23, minutes=59, seconds=30),
+    timedelta(hours=1, minutes=5, seconds=30),
+    timedelta(minutes=12, seconds=30),
+    timedelta(seconds=40),
+    timedelta(minutes=-20, seconds=-30),
+    timedelta(seconds=-20),
+]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the widget script")
+def test_the_script_builds_the_same_figure_as_the_page() -> None:
+    """The board and the lock screen must never disagree about how far off a flight is."""
+    source = script_source()
+    start = source.index("function figure(ms)")
+    end = source.index("function staleNote(", start)
+    offsets = [int(ahead.total_seconds() * 1000) for ahead in FIGURES]
+    program = (
+        f"{source[start:end]} console.log(JSON.stringify({json.dumps(offsets)}.map("
+        "function (ms) { return until(new Date(Date.now() + ms)); })));"
+    )
+    rendered = subprocess.run(
+        ["node", "-e", program], capture_output=True, text=True, check=True
+    ).stdout
+    now = datetime.now(UTC)
+    assert json.loads(rendered) == [until(now + ahead) for ahead in FIGURES]
 
 
 # --- the query ------------------------------------------------------------------------

@@ -1,14 +1,15 @@
 """The phone widget's only endpoint: every display decision, already made.
 
-The Scriptable script on the phone is deliberately stupid. It draws strings and starts
-one live timer; it does not know what a diversion is or which gate belongs to which end
-of the flight. Everything that could be got wrong is got wrong here, once, where it is
-covered by tests.
+The Scriptable script on the phone is deliberately stupid. It draws strings and colours
+one of them by a tone it is told; it does not know what a diversion is or which gate
+belongs to which end of the flight. The status pill and the milestone are the web UI's
+own, read from the same functions, so the lock screen and the board never disagree.
+Everything that could be got wrong is got wrong here, once, where it is covered by tests.
 
 Two rules hold the contract together. Every instant is ISO-8601 UTC with a `Z`, because
-the phone renders it relative to its own clock and a missing zone silently shifts the
-countdown. And the payload is a pydantic model, so a field that drifts breaks a test
-rather than a lock screen.
+the phone measures it against its own clock and a missing zone silently shifts the
+figure. And the payload is a pydantic model, so a field that drifts breaks a test rather
+than a lock screen.
 """
 
 from __future__ import annotations
@@ -29,18 +30,16 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import bookings as booking_repo
-from . import prefs
+from . import prefs, views
 from .aeroapi import budget_status
 from .config import Settings, get_settings
 from .db import get_session
 from .models import KV, Booking, BookingStatus, FlightSnapshot
 from .phase import (
     AIRBORNE,
-    ARRIVAL_DELAY_THRESHOLD,
     CANCELLED,
     CANCELLED_NOTICE,
     DAY_OF,
-    DEPARTURE_DELAY_THRESHOLD,
     DIVERTED,
     LANDED,
     TAXIING,
@@ -49,7 +48,6 @@ from .phase import (
     departure_estimate,
     progress_estimate,
 )
-from .views import countdown, phase_rank
 
 log = logging.getLogger(__name__)
 
@@ -96,12 +94,15 @@ UtcInstant = Annotated[datetime, PlainSerializer(_iso_z, return_type=str)]
 
 class WidgetFlight(BaseModel):
     detail_url: str
+    # For the server's own ranking and refresh cadence. The script never reads it: what
+    # it draws is the pill and the milestone, which are words already chosen.
     phase: Phase
     title: str
     subtitle: str | None
-    countdown_label: str | None
-    countdown_to: UtcInstant | None
-    delayed: bool
+    status_label: str
+    status_tone: str
+    milestone_label: str | None
+    milestone_to: UtcInstant | None
     progress_percent: int | None
 
 
@@ -277,7 +278,9 @@ def build_payload(
     observed: list[datetime] = []
     for booking, snapshot in rows:
         flight = _flight(booking, snapshot, settings=settings, now=now, base_url=base_url)
-        ranked.append((phase_rank(flight.phase), departure_estimate(booking, snapshot), flight))
+        ranked.append(
+            (views.phase_rank(flight.phase), departure_estimate(booking, snapshot), flight)
+        )
         if flight.phase in PHASES_IMMINENT and snapshot is not None and snapshot.observed_at:
             observed.append(snapshot.observed_at)
     ranked.sort(key=lambda row: (row[0], row[1]))
@@ -301,7 +304,8 @@ def _flight(
     base_url: str,
 ) -> WidgetFlight:
     phase = compute_phase(booking, snapshot, now)
-    label, countdown_to = countdown(phase, booking, snapshot)
+    pill = views.status(phase, booking, snapshot)
+    next_up = views.milestone(phase, booking, snapshot)
     return WidgetFlight(
         detail_url=f"{base_url}/f/{booking.id}",
         phase=phase,
@@ -310,9 +314,10 @@ def _flight(
             f"  {booking.origin_iata} → {booking.dest_iata}"
         ),
         subtitle=_subtitle(phase, booking, snapshot),
-        countdown_label=label,
-        countdown_to=countdown_to,
-        delayed=_delayed(snapshot),
+        status_label=pill.label,
+        status_tone=pill.tone,
+        milestone_label=next_up.label if next_up else None,
+        milestone_to=next_up.target if next_up else None,
         # Only while airborne: the feed reports 0 on the ground and 100 after landing,
         # either of which draws a bar that says nothing.
         progress_percent=progress_estimate(booking, snapshot, now) if phase == AIRBORNE else None,
@@ -352,24 +357,6 @@ def _subtitle(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -
     if parts:
         return " · ".join(parts)
     return f"Seat {booking.seat}" if booking.seat else None
-
-
-def _delayed(snapshot: FlightSnapshot | None) -> bool:
-    if snapshot is None:
-        return False
-    arrival = (snapshot.estimated_in or snapshot.actual_in, snapshot.scheduled_in)
-    departure = (snapshot.estimated_out or snapshot.actual_out, snapshot.scheduled_out)
-    # Once the aircraft is off the ground a late pushback is history, and the only
-    # question left is whether it still arrives late.
-    pairs = (
-        ((arrival, ARRIVAL_DELAY_THRESHOLD),)
-        if snapshot.actual_off is not None
-        else ((departure, DEPARTURE_DELAY_THRESHOLD), (arrival, ARRIVAL_DELAY_THRESHOLD))
-    )
-    return any(
-        expected is not None and scheduled is not None and expected - scheduled >= threshold
-        for (expected, scheduled), threshold in pairs
-    )
 
 
 def _refresh_seconds(flights: Sequence[WidgetFlight]) -> int:
