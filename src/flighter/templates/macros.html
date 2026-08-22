@@ -29,8 +29,7 @@
 
 {# The two ends of the flight, one row per fact: the day each is now expected, and the
    time. The pairs share rows, so the arrival's time sits level with the departure's,
-   and a time that moved carries what it was on the same line, so nothing grows. A move
-   across midnight leaves the day it was booked for struck beside the day it is now. #}
+   and a time that moved carries what it was on the same line, so nothing grows. #}
 {% macro ends(v) %}
 {% set sides = [
   {"line": v.departs, "tz": v.origin_tz, "right": false},
@@ -50,11 +49,8 @@
   </div>
   {% endfor %}
   {% for side in sides %}
-  {% set crossed = side.line.moved and not same_local_date(side.line.scheduled, side.line.best, side.tz) %}
   <div class="mt-0.5 font-mono text-xs text-muted-foreground">
-    {%- if crossed and side.right %}{{ was_day(side.line, side.tz, right=true) }}{% endif -%}
     {%- if side.line.best is not none %}{{ day(side.line.best, side.tz) }}{% endif -%}
-    {%- if crossed and not side.right %}{{ was_day(side.line, side.tz) }}{% endif -%}
   </div>
   {% endfor %}
 </div>
@@ -215,17 +211,12 @@
 
 {# What a time was before it moved, small beside the time that replaced it. Never its
    zone, because the time that replaced it is read at the same airport, and never its
-   day: when the move crossed midnight the day row underneath strikes the old day. #}
+   day: the day row underneath names the day it is now, and a struck day beside that
+   would not fit a phone's width. #}
 {% macro was(line, tz, right=false) -%}
 <s class="{{ 'mr-1.5' if right else 'ml-1.5' }} text-xs font-normal text-muted-foreground">
   {{- clock(line.scheduled, tz) -}}
 </s>
-{%- endmacro %}
-
-{# The day a time was booked for, struck beside the day it moved to. On the outside of
-   the new day, the way the struck time sits on the outside of the new time above. #}
-{% macro was_day(line, tz, right=false) -%}
-<s class="{{ 'mr-1.5' if right else 'ml-1.5' }}">{{ day(line.scheduled, tz) }}</s>
 {%- endmacro %}
 
 {# One change, on one line: what moved, from what to what, and when we were told. #}

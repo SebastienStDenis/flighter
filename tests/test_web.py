@@ -597,14 +597,6 @@ def struck(was: datetime, tz: str, *, arrival: bool = False) -> str:
     return f'<s class="{side} text-xs font-normal text-muted-foreground">{local:%H:%M}</s>'
 
 
-def struck_day(was: datetime, tz: str, *, arrival: bool = False) -> str:
-    """The day a flight was booked for, struck beside the day it moved to: after the
-    departure's day and before the arrival's, the way the struck time sits."""
-    local = to_local(was, tz)
-    side = "mr-1.5" if arrival else "ml-1.5"
-    return f'<s class="{side}">{local:%a %-d %b}</s>'
-
-
 def big_time(
     instant: datetime,
     tz: str,
@@ -665,12 +657,11 @@ def test_each_end_of_a_red_eye_names_its_own_day(
         assert "Sun 13 Sep" in body
 
 
-def test_a_delay_past_midnight_strikes_the_day_it_was_booked_for(
+def test_a_delay_past_midnight_names_only_the_day_it_now_leaves(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """23:50 struck next to 00:30 reads as earlier, unless the day row says Saturday is
-    gone: the struck day sits after the new day for a departure, and the card's heading
-    names only the day it now leaves."""
+    """23:50 struck next to 00:30 carries no day of its own, and the day row and the
+    heading name Sunday alone: a struck Saturday beside it would not fit a phone."""
     tz = "America/Toronto"
     booked = datetime(2026, 9, 13, 3, 50, tzinfo=UTC)
     slipped = datetime(2026, 9, 13, 4, 30, tzinfo=UTC)
@@ -682,14 +673,13 @@ def test_a_delay_past_midnight_strikes_the_day_it_was_booked_for(
 
     body = client.get("/f/1").text
     assert big_time(slipped, tz, "text-stop", was=booked) in body
-    assert day_of(slipped, tz) + struck_day(booked, tz) in body
-    assert "Sat 12 Sep 23:50" not in body
+    assert day_of(slipped, tz) in body and day_of(booked, tz) not in body
     assert "23:50 EDT" not in body
     heading = body[body.index("<h2") : body.index("</h2>")]
-    assert day_of(slipped, tz) in heading and day_of(booked, tz) not in heading
+    assert day_of(slipped, tz) in heading
 
 
-def test_an_arrival_past_midnight_strikes_its_old_day_before_the_new_one(
+def test_an_arrival_past_midnight_names_only_the_day_it_now_lands(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tz = "Europe/London"
@@ -703,16 +693,7 @@ def test_an_arrival_past_midnight_strikes_its_old_day_before_the_new_one(
 
     body = client.get("/f/1").text
     assert big_time(slipped, tz, "text-stop", arrival=True, was=booked) in body
-    assert struck_day(booked, tz, arrival=True) + day_of(slipped, tz) in body
-
-
-def test_a_delay_inside_its_day_strikes_no_day(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    late = DEPARTURE + timedelta(minutes=40)
-    show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=late))
-    body = client.get("/f/1").text
-    assert struck_day(DEPARTURE, "America/Toronto") not in body
+    assert day_of(slipped, tz) in body and day_of(booked, tz) not in body
 
 
 def top_card(body: str) -> str:
