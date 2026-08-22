@@ -884,6 +884,32 @@ async def test_a_cancelled_flight_keeps_its_day_like_the_card_does(
     assert [(row.id, snap.cancelled if snap else None) for row, snap in rows] == [(1, True)]
 
 
+async def test_friend_flights_follow_the_widget_preference(
+    database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with database() as session:
+        await _seed(
+            session,
+            booking(id=1, marketing_number="1", departure_local_date=DEPARTURE.date()),
+            booking(
+                id=2,
+                marketing_number="2",
+                departure_local_date=DEPARTURE.date(),
+                friend_name="Sam",
+            ),
+        )
+        mine_only = await widget.load_flight_rows(session, NOW)
+        monkeypatch.setattr(
+            prefs,
+            "_current",
+            prefs.current().model_copy(update={"show_friend_flights_in_widget": True}),
+        )
+        with_friends = await widget.load_flight_rows(session, NOW)
+
+    assert [row.id for row, _ in mine_only] == [1]
+    assert [row.id for row, _ in with_friends] == [1, 2]
+
+
 def test_at_the_gate_the_status_says_arrived(settings: Settings) -> None:
     parked = snapshot(
         actual_off=DEPARTURE, actual_on=ARRIVAL - timedelta(minutes=10), actual_in=ARRIVAL

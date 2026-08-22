@@ -42,13 +42,10 @@ log = logging.getLogger(__name__)
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
 
-# What the board shows above the fold. Archived bookings are gone as far as the UI is
-# concerned, and a completed one belongs under Flown.
-BOARD_STATUSES = (BookingStatus.ACTIVE,)
-
-# Flown flights are history, and history is not what this screen is for. Five is enough
-# to recognise the trip you just took and few enough to keep the query bounded.
-FLOWN_LIMIT = 5
+# Archived bookings are gone as far as the UI is concerned. Active and completed rows
+# are partitioned by the same lifecycle boundary the cards and widget use.
+BOARD_STATUSES = (BookingStatus.ACTIVE, BookingStatus.COMPLETED)
+BOARD_TABS = ("mine", "friends", "flown")
 
 # What the board's one-tap button adds to the monthly limit. Big enough to buy a few
 # hundred more polls, small enough that pressing it twice is not a surprise bill.
@@ -204,28 +201,33 @@ def create_app(settings: Settings) -> FastAPI:
         tracked = await build_views(
             session, await booking_repo.list_bookings(session, statuses=BOARD_STATUSES)
         )
-        # The poller closes a booking soon after it lands, so a flight someone is still
-        # walking off is found among the flown as often as among the tracked.
-        flown = await build_views(
-            session, await booking_repo.list_recently_flown(session, FLOWN_LIMIT)
-        )
         now = datetime.now(UTC)
-        upcoming = sorted(
-            (view for view in tracked + flown if view.off_board_at >= now),
+        upcoming = [view for view in tracked if view.off_board_at >= now]
+        mine = sorted(
+            (view for view in upcoming if view.booking.friend_name is None),
+            key=lambda view: view.departure,
+        )
+        friends = sorted(
+            (view for view in upcoming if view.booking.friend_name is not None),
             key=lambda view: view.departure,
         )
         past = sorted(
-            (view for view in tracked + flown if view.off_board_at < now),
+            (view for view in tracked if view.off_board_at < now),
             key=lambda view: view.departure,
             reverse=True,
         )
         budget = await budget_status(session)
+        tab = request.query_params.get("tab", BOARD_TABS[0])
+        if tab not in BOARD_TABS:
+            tab = BOARD_TABS[0]
         return page(
             request,
             "index.html",
             {
-                "flights": upcoming,
-                "past": past[:FLOWN_LIMIT],
+                "mine": mine,
+                "friends": friends,
+                "past": past,
+                "tab": tab,
                 "budget": budget,
                 "raised_cap": budget.cap_usd + LIMIT_STEP,
                 # An empty board on a fresh deployment is not the same thing as an empty
@@ -365,7 +367,14 @@ def create_app(settings: Settings) -> FastAPI:
             .where(FlightEvent.booking_id == booking_id)
             .order_by(FlightEvent.occurred_at.desc())
         )
-        return page(request, "detail.html", {"v": view, "events": list(events.scalars())})
+        return_tab = request.query_params.get("from", BOARD_TABS[0])
+        if return_tab not in BOARD_TABS:
+            return_tab = BOARD_TABS[0]
+        return page(
+            request,
+            "detail.html",
+            {"v": view, "events": list(events.scalars()), "return_tab": return_tab},
+        )
 
     @app.post("/f/{booking_id}/ticket")
     async def update_ticket(
@@ -374,6 +383,8 @@ def create_app(settings: Settings) -> FastAPI:
         confirmation_code: Annotated[str, Form()] = "",
         seat: Annotated[str, Form()] = "",
         notes: Annotated[str, Form()] = "",
+        friend_name: Annotated[str, Form()] = "",
+        return_tab: Annotated[str, Form()] = "",
     ) -> Response:
         """What is written on the ticket, which is the only part of a flight a person
         gets to change. The flight itself is the airline's; a wrong one is deleted."""
@@ -383,10 +394,12 @@ def create_app(settings: Settings) -> FastAPI:
             confirmation_code=confirmation_code.strip() or None,
             seat=seat.strip() or None,
             notes=notes.strip() or None,
+            friend_name=friend_name.strip() or None,
         )
         if booking is None:
             raise HTTPException(status_code=404, detail="No such flight.")
-        return RedirectResponse(f"/f/{booking_id}", status_code=303)
+        suffix = f"?from={return_tab}" if return_tab in BOARD_TABS else ""
+        return RedirectResponse(f"/f/{booking_id}{suffix}", status_code=303)
 
     # An HTML form can only send GET or POST, so removal is a POST to its own path
     # rather than DELETE /f/{id}.
@@ -471,6 +484,9 @@ def create_app(settings: Settings) -> FastAPI:
         aeroapi_monthly_cap_usd: Annotated[str | None, Form()] = None,
         imap_flag_colour: Annotated[str | None, Form()] = None,
         icloud_calendar_url: Annotated[str | None, Form()] = None,
+        sync_friend_flights_to_calendar: Annotated[str | None, Form()] = None,
+        notify_for_friend_flights: Annotated[str | None, Form()] = None,
+        show_friend_flights_in_widget: Annotated[str | None, Form()] = None,
         tab: Annotated[str, Form()] = SETTINGS_TABS[0],
     ) -> Response:
         """Save whichever preferences were posted.
@@ -484,8 +500,12 @@ def create_app(settings: Settings) -> FastAPI:
             "aeroapi_monthly_cap_usd": aeroapi_monthly_cap_usd,
             "imap_flag_colour": imap_flag_colour,
             "icloud_calendar_url": icloud_calendar_url,
+            "sync_friend_flights_to_calendar": sync_friend_flights_to_calendar,
+            "notify_for_friend_flights": notify_for_friend_flights,
+            "show_friend_flights_in_widget": show_friend_flights_in_widget,
         }
         posted = {name: value.strip() for name, value in entered.items() if value is not None}
+        previous = prefs.current()
         try:
             updated = await prefs.save(session, posted)
         except ValidationError as exc:
@@ -494,6 +514,27 @@ def create_app(settings: Settings) -> FastAPI:
             context["posted"] = context["posted"] | posted
             context["tab"] = tab
             return page(request, "settings.html", context, status_code=400)
+        calendar_toggled = (
+            previous.sync_friend_flights_to_calendar != updated.sync_friend_flights_to_calendar
+        )
+        if calendar_toggled:
+            friend_bookings = await booking_repo.queue_friend_calendar_updates(session)
+            await session.commit()
+            if not updated.sync_friend_flights_to_calendar:
+                calendar = CalendarClient(settings)
+                for booking in friend_bookings:
+                    try:
+                        removed = await calendar.delete(booking)
+                    except Exception:
+                        log.warning(
+                            "could not remove the calendar event for friend booking %s",
+                            booking.id,
+                            exc_info=True,
+                        )
+                        continue
+                    if removed:
+                        booking.calendar_event_uid = None
+                        await session.commit()
         # Applied here rather than only at boot, so turning the logs up to find out what
         # is going wrong does not need the restart that would clear the evidence.
         logging.getLogger().setLevel(updated.log_level.upper())

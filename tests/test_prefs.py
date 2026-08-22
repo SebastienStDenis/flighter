@@ -46,6 +46,13 @@ async def test_a_missing_row_is_created_with_the_defaults() -> None:
     assert session.row is not None
 
 
+def test_friend_integrations_are_opt_in() -> None:
+    defaults = Prefs()
+    assert not defaults.sync_friend_flights_to_calendar
+    assert not defaults.notify_for_friend_flights
+    assert not defaults.show_friend_flights_in_widget
+
+
 async def test_saving_one_field_leaves_the_others_alone() -> None:
     session = FakeSession(Preferences(id=1, values={"imap_flag_colour": "blue"}))
     saved = await prefs.save(session, {"log_level": "DEBUG"})  # type: ignore[arg-type]

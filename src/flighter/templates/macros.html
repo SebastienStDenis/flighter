@@ -115,6 +115,13 @@
      width="24" height="24" loading="lazy" decoding="async">
 {% endmacro %}
 
+{% macro friend_avatar(v, size="size-6", text="text-xs") %}
+<span class="friend-avatar flex {{ size }} shrink-0 items-center justify-center rounded-full {{ text }} font-semibold"
+      style="--friend-hue: {{ v.friend_hue }}" aria-hidden="true">
+  {{- v.booking.friend_name[0]|upper -}}
+</span>
+{% endmacro %}
+
 {# The flight's card: the number, its day and its pill; the two airports with the rule
    between them; what each end reads; where in the building; and what it counts to.
    The four groups sit the same distance apart, and the facts inside each closer than
@@ -130,6 +137,12 @@
 {% else %}
 <div class="card gap-5">
 {% endif %}
+  {% if v.booking.friend_name %}
+  <div class="-mb-2 flex items-center gap-2 px-6">
+    {{ friend_avatar(v) }}
+    <span class="text-sm font-medium">{{ v.booking.friend_name }}</span>
+  </div>
+  {% endif %}
   <header>
     <h2 class="flex items-center gap-2 font-mono tracking-tight">
       {{ logo(v.booking.marketing_carrier) }}
@@ -191,10 +204,12 @@
 {% endmacro %}
 
 {# A flight already flown. Same facts, one line each. #}
-{% macro row(v) %}
-<a class="item" data-variant="outline" data-size="sm" href="/f/{{ v.booking.id }}">
+{% macro row(v, from_tab=none) %}
+<a class="item" data-variant="outline" data-size="sm"
+   href="/f/{{ v.booking.id }}{{ '?from=' ~ from_tab if from_tab else '' }}">
   <section>
     <h3>
+      {% if v.booking.friend_name %}{{ friend_avatar(v, "size-4", "text-[0.625rem]") }}{% endif %}
       {{ logo(v.booking.marketing_carrier, "size-4") }}
       <span class="font-mono">{{ v.flight_number }}</span>
       <span class="font-mono font-normal text-muted-foreground">

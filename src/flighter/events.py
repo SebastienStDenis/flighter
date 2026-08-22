@@ -23,6 +23,7 @@ from sqlalchemy import Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
+from . import prefs
 from .bookings import latest_snapshots
 from .db import session_scope
 from .models import Airport, Booking, BookingStatus, EventKind, FlightEvent, FlightSnapshot
@@ -80,6 +81,8 @@ class Notifier(Protocol):
 
 class Calendar(Protocol):
     async def upsert(self, booking: Booking, snapshot: FlightSnapshot | None) -> str | None: ...
+
+    async def delete(self, booking: Booking) -> bool: ...
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -277,7 +280,9 @@ async def _dispatch_notifications(notifier: Notifier) -> None:
         }
 
     for event, booking in rows:
-        if event.kind in NOTIFIABLE_KINDS:
+        if event.kind in NOTIFIABLE_KINDS and (
+            not booking.friend_name or prefs.current().notify_for_friend_flights
+        ):
             origin_tz, dest_tz = zones[booking.id]
             try:
                 await notifier.flight_event(booking, event, origin_tz=origin_tz, dest_tz=dest_tz)
@@ -305,6 +310,25 @@ async def _dispatch_calendar(calendar: Calendar) -> None:
 
     for booking_id, event_ids in pending.items():
         booking = bookings[booking_id]
+        if booking.friend_name and not prefs.current().sync_friend_flights_to_calendar:
+            try:
+                removed = await calendar.delete(booking)
+            except Exception:
+                log.warning(
+                    "calendar cleanup for booking %s failed; will retry", booking_id, exc_info=True
+                )
+                continue
+            if booking.calendar_event_uid and not removed:
+                continue
+            if removed:
+                async with session_scope() as session:
+                    await session.execute(
+                        update(Booking)
+                        .where(Booking.id == booking_id)
+                        .values(calendar_event_uid=None)
+                    )
+            await _stamp(FlightEvent.calendar_synced_at, event_ids)
+            continue
         try:
             uid = await calendar.upsert(booking, snapshots.get(booking_id))
         except Exception:

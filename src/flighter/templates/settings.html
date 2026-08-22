@@ -314,6 +314,30 @@
     </section>
   </div>
 
+  <div class="card mt-3" data-size="sm">
+    <header>
+      <h3>Friends</h3>
+      <p>Choose where flights you are following for someone else should appear.</p>
+    </header>
+    <section class="fieldset gap-4">
+      {% set friend_options = [
+        ('sync_friend_flights_to_calendar', 'Calendar', 'Create calendar events for friends flights.'),
+        ('notify_for_friend_flights', 'Notifications', 'Send status notifications for friends flights.'),
+        ('show_friend_flights_in_widget', 'Widget', 'Include friends flights alongside yours in the widget.'),
+      ] %}
+      {% for field, label, help in friend_options %}
+      <div role="group" class="field">
+        <label for="{{ field }}">{{ label }}</label>
+        <select id="{{ field }}" name="{{ field }}" aria-describedby="{{ field }}-help">
+          <option value="false"{{ ' selected' if not posted[field] }}>Mine only</option>
+          <option value="true"{{ ' selected' if posted[field] }}>Mine and friends</option>
+        </select>
+        <p id="{{ field }}-help">{{ help }}</p>
+      </div>
+      {% endfor %}
+    </section>
+  </div>
+
   <div class="accordion mt-3 rounded-lg border px-3">
     <details>
       <summary>

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
+{% import "basecoat/tabs.html.jinja" as bc %}
 {% block content %}
 
 <h1 class="sr-only">Flights</h1>
@@ -22,7 +23,12 @@
 </div>
 {% endif %}
 
-{% if not flights and not past %}
+{% set mine_panel %}
+{% if mine %}
+<div class="flex flex-col gap-3 pt-3">
+  {% for v in mine %}{{ m.flight_card(v, link="/f/" ~ v.booking.id ~ "?from=mine") }}{% endfor %}
+</div>
+{% else %}
 <section class="empty mt-8">
   <header>
     <figure>
@@ -41,30 +47,50 @@
     {% endif %}
   </header>
 </section>
-{% else %}
+{% endif %}
+{% endset %}
 
-<div class="flex flex-col gap-3">
-  {% for v in flights %}
-  {{ m.flight_card(v, link="/f/" ~ v.booking.id) }}
-  {% endfor %}
+{% set friends_panel %}
+{% if friends %}
+<div class="flex flex-col gap-3 pt-3">
+  {% for v in friends %}{{ m.flight_card(v, link="/f/" ~ v.booking.id ~ "?from=friends") }}{% endfor %}
 </div>
+{% else %}
+<section class="empty mt-8">
+  <header>
+    <figure>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+        <circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+      </svg>
+    </figure>
+    <h2>No friends flying soon</h2>
+    <p>Open any flight and change its owner to a friend.</p>
+  </header>
+</section>
+{% endif %}
+{% endset %}
 
+{% set flown_panel %}
 {% if past %}
-<details class="group mt-6">
-  <summary class="flex cursor-pointer list-none items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase [&::-webkit-details-marker]:hidden">
-    Flown
-    <span class="badge" data-variant="outline">{{ past|length }}</span>
-    <svg class="ml-auto size-4 transition-transform group-open:rotate-180" viewBox="0 0 24 24"
-         fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-         stroke-linejoin="round" aria-hidden="true">
-      <path d="m6 9 6 6 6-6"/>
-    </svg>
-  </summary>
-  <div class="item-group mt-3">
-    {% for v in past %}{{ m.row(v) }}{% endfor %}
-  </div>
-</details>
+<div class="item-group mt-3">
+  {% for v in past %}{{ m.row(v, from_tab="flown") }}{% endfor %}
+</div>
+{% else %}
+<section class="empty mt-8">
+  <header><h2>No flown flights yet</h2><p>Past flights, yours and friends', will collect here.</p></header>
+</section>
 {% endif %}
+{% endset %}
 
-{% endif %}
+{{ bc.tabs(
+     id='flight-tabs',
+     tablist_attrs={'class': 'w-full'},
+     default_tab_index={'mine': 1, 'friends': 2, 'flown': 3}.get(tab, 1),
+     tabsets=[
+       {'tab': 'My flights', 'panel': mine_panel},
+       {'tab': 'Friends', 'panel': friends_panel},
+       {'tab': 'Flown', 'panel': flown_panel},
+     ]) }}
 {% endblock %}

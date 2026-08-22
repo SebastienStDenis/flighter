@@ -77,3 +77,9 @@ def test_the_status_constraint_is_spelled_from_the_enum() -> None:
     for status in BookingStatus:
         assert f"'{status}'" in status_check
     assert "cancelled" not in status_check
+
+
+def test_a_booking_is_mine_until_a_friend_is_named() -> None:
+    column = Booking.__table__.columns["friend_name"]
+    assert column.nullable
+    assert Booking(friend_name=None).friend_name is None

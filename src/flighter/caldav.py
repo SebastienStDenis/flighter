@@ -158,6 +158,8 @@ def event_body(
         end = start + ASSUMED_DURATION
 
     label = flight_label(booking)
+    if booking.friend_name:
+        label = f"{booking.friend_name} - {label}"
     event = Event()
     event.add("uid", event_uid(booking))
     event.add("dtstamp", datetime.now(UTC))
@@ -242,6 +244,9 @@ class CalendarClient:
         if not configured(self._settings):
             log.debug("iCloud Calendar is not configured; skipping booking %s", booking.id)
             return None
+        if booking.friend_name and not prefs.current().sync_friend_flights_to_calendar:
+            log.debug("friend calendar sync is off; skipping booking %s", booking.id)
+            return None
         body = event_body(booking, snapshot, self._airports, base_url=prefs.public_base_url())
         uid = event_uid(booking)
         # No If-Match: this restates the whole flight from the newest snapshot, so there
@@ -256,16 +261,17 @@ class CalendarClient:
         _written(response)
         return uid
 
-    async def delete(self, booking: Booking) -> None:
+    async def delete(self, booking: Booking) -> bool:
         if not configured(self._settings) or not booking.calendar_event_uid:
-            return
+            return False
         response = await self._request(
             "DELETE", _event_url(prefs.current().icloud_calendar_url, booking.calendar_event_uid)
         )
         if response.status_code == 404:
             log.info("calendar event %s was already gone", booking.calendar_event_uid)
-            return
+            return True
         _written(response)
+        return True
 
     async def calendars(self) -> list[Collection]:
         """Every calendar on the account that can hold events, in the order iCloud lists them.

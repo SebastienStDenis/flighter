@@ -178,12 +178,19 @@ class FakeCalendar:
     def __init__(self, *, failing: bool = False) -> None:
         self.failing = failing
         self.upserts: list[tuple[int, str | None]] = []
+        self.deleted: list[int] = []
 
     async def upsert(self, booking: Booking, snapshot: FlightSnapshot | None) -> str | None:
         if self.failing:
             raise RuntimeError("iCloud is down")
         self.upserts.append((booking.id, snapshot.gate_origin if snapshot else None))
         return f"flighter-{booking.id}@flighter.invalid"
+
+    async def delete(self, booking: Booking) -> bool:
+        if self.failing:
+            raise RuntimeError("iCloud is down")
+        self.deleted.append(booking.id)
+        return booking.calendar_event_uid is not None
 
 
 async def tracked(database: async_sessionmaker[AsyncSession], *events: FlightEvent) -> int:
@@ -281,6 +288,30 @@ async def test_a_delivered_event_is_stamped_on_both_sides(
         booking = await session.get(Booking, booking_id)
         assert booking is not None
         assert booking.calendar_event_uid == f"flighter-{booking_id}@flighter.invalid"
+
+
+async def test_disabled_friend_outputs_are_stamped_and_calendar_entries_are_removed(
+    database: async_sessionmaker[AsyncSession],
+) -> None:
+    booking_id = await tracked(
+        database, FlightEvent(kind=EventKind.GATE_CHANGED, old_value="B22", new_value="C14")
+    )
+    async with session_scope() as session:
+        booking = await session.get(Booking, booking_id)
+        assert booking is not None
+        booking.friend_name = "Sam"
+        booking.calendar_event_uid = f"flighter-{booking_id}@flighter.invalid"
+
+    notifier, calendar = FakeNotifier(), FakeCalendar()
+    await dispatch_pending(notifier, calendar)
+
+    assert notifier.sent == []
+    assert calendar.upserts == []
+    assert calendar.deleted == [booking_id]
+    assert (await pending())[-1] == (EventKind.GATE_CHANGED, True, True)
+    async with session_scope() as session:
+        booking = await session.get(Booking, booking_id)
+        assert booking is not None and booking.calendar_event_uid is None
 
 
 async def test_a_failed_push_is_not_stamped_and_is_retried(

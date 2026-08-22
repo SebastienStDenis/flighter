@@ -49,6 +49,10 @@ class Prefs(BaseModel):
     # because a stored URL is a sync that costs one request instead of four.
     icloud_calendar_url: str = ""
 
+    sync_friend_flights_to_calendar: bool = False
+    notify_for_friend_flights: bool = False
+    show_friend_flights_in_widget: bool = False
+
     @field_validator("public_base_url")
     @classmethod
     def _strip_trailing_slash(cls, value: str) -> str:

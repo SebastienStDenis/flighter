@@ -162,6 +162,8 @@ class Notifier:
         origin_tz: str = FALLBACK_TZ,
         dest_tz: str = FALLBACK_TZ,
     ) -> None:
+        if booking.friend_name and not prefs.current().notify_for_friend_flights:
+            return
         priority = PRIORITY_HIGH if event.kind in _HIGH_PRIORITY_KINDS else PRIORITY_NORMAL
         await self._send(
             title=flight_label(booking),

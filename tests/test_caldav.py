@@ -125,6 +125,14 @@ def test_normal_flight() -> None:
     assert description.endswith(f"\n\n{BASE_URL}/f/7")
 
 
+def test_a_friend_calendar_event_names_the_friend() -> None:
+    body = event_body(booking(friend_name="Sam"), None, AIRPORTS, base_url=BASE_URL)
+    [event] = body.walk("VEVENT")
+    [alarm] = body.walk("VALARM")
+    assert str(event["SUMMARY"]) == "Sam - DL1234 JFK -> LAX"
+    assert str(alarm["DESCRIPTION"]) == "Sam - DL1234 JFK -> LAX"
+
+
 def test_a_flight_from_an_email_carries_a_link_to_it() -> None:
     """The confirmation itself, one tap from the entry it became."""
     body = event_body(
@@ -452,3 +460,15 @@ async def test_an_unpicked_calendar_is_a_quiet_no_op(
     client = CalendarClient(settings, AIRPORTS, transport=httpx.MockTransport(refuse))
     assert await client.upsert(booking(), None) is None
     await client.delete(booking(calendar_event_uid="flighter-7@flighter.invalid"))
+
+
+async def test_friend_sync_is_skipped_but_cleanup_still_works(
+    settings: Settings, icloud: FakeICloud
+) -> None:
+    client = CalendarClient(settings, AIRPORTS, transport=icloud.transport)
+    friend = booking(friend_name="Sam", calendar_event_uid="flighter-7@flighter.invalid")
+    icloud.events[f"{FLIGHTS}{friend.calendar_event_uid}.ics"] = "event"
+
+    assert await client.upsert(friend, None) is None
+    assert await client.delete(friend)
+    assert icloud.events == {}
