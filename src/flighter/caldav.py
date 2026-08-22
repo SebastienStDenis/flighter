@@ -125,12 +125,6 @@ def calendar_link(departure: datetime, tz: str) -> str:
     return f"calshow:{int(noon.timestamp()) - APPLE_EPOCH_OFFSET}"
 
 
-def macos_calendar_link(departure: datetime, tz: str) -> str:
-    """Open macOS Calendar on the flight's departure day."""
-    noon = to_local(departure, tz).replace(hour=12, minute=0, second=0, microsecond=0)
-    return f"ical://date/{noon:%Y-%m-%d_%H-%M-%S}?method=show"
-
-
 def _zone(airports: Mapping[str, Airport], iata: str) -> str:
     airport = airports.get(iata)
     return airport.tz if airport else FALLBACK_TZ

@@ -22,7 +22,6 @@ from flighter.caldav import (
     calendar_link,
     event_body,
     event_uid,
-    macos_calendar_link,
 )
 from flighter.config import Settings
 from flighter.models import Airport, Booking, FlightSnapshot
@@ -396,11 +395,6 @@ def test_the_calendar_link_takes_the_day_from_the_airport_not_from_utc() -> None
     """A 23:30 departure in New York is already tomorrow in UTC, and the entry is not."""
     link = calendar_link(datetime(2026, 9, 12, 3, 30, tzinfo=UTC), "America/New_York")
     assert link == "calshow:810835200"
-
-
-def test_the_macos_calendar_link_uses_calendars_date_route() -> None:
-    link = macos_calendar_link(datetime(2026, 9, 12, 3, 30, tzinfo=UTC), "America/New_York")
-    assert link == "ical://date/2026-09-11_12-00-00?method=show"
 
 
 async def test_the_event_lands_under_the_calendar(
