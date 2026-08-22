@@ -211,7 +211,7 @@
   }
 
   .replaced[aria-expanded='true'] .replaced-now {
-    @apply opacity-40 blur-[5px];
+    @apply opacity-60 blur-[2px];
   }
 
   /* What it replaced is the same lines over again, smaller and with nothing drawn
