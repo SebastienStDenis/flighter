@@ -75,10 +75,11 @@
   --warn: oklch(0.48 0.14 72);
   --stop: oklch(0.495 0.17 25);
 
-  /* The same two tones washed out, for the dot beside a value that replaced another. A
+  /* The same two tones washed out, for a value on the card that replaced another. A
      card can carry three of those at once, and at the badge's own chroma three of them
-     read as three alarms. Nothing is read in these - the figures they mark keep the
-     card's own ink - so they answer to no contrast bar but their own visibility. */
+     read as three alarms. These only ever paint the big bold figures - a time, an
+     airport code - so they are held to the 3:1 large text asks for rather than the
+     4.5:1 the badges clear, which is what buys them their lightness. */
   --ok-soft: oklch(0.6 0.12 158);
   --stop-soft: oklch(0.62 0.14 25);
 }
@@ -197,18 +198,6 @@
 
   .ends > :nth-child(even) {
     @apply text-right;
-  }
-
-  /* The mark on a value that moved: a dot in that value's tone, sitting on the outer
-     side of the figure so the marks line up down the edges of the board however wide
-     the figures beside them are. The figure keeps the colour every other figure has. */
-  .dot {
-    @apply inline-block size-1.5 shrink-0 rounded-full;
-    background: currentColor;
-    /* Middle alignment splits the x-height, which sits low against figures that are all
-       cap height and have nothing below the baseline. Lifted to the middle of the digits
-       themselves, in em so it holds for the time and the larger airport code alike. */
-    vertical-align: 0.2em;
   }
 
   /* A value that replaced another. The card carries only what holds now; what it
