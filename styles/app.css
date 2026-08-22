@@ -208,8 +208,11 @@
     -webkit-tap-highlight-color: transparent;
   }
 
+  /* Both layers name the properties they actually move - the blur sits in `filter` and
+     the smaller copy in `scale`, not in `transform` - so neither of them snaps to its
+     end state while the other is still on its way there. */
   .replaced-now {
-    @apply transition-[filter,opacity] duration-150;
+    @apply transition-[opacity,filter] duration-150 ease-out;
   }
 
   .replaced[aria-expanded='true'] .replaced-now {
@@ -222,7 +225,7 @@
   .replaced-was {
     @apply pointer-events-none absolute inset-0 flex scale-[0.72] items-center
       justify-center whitespace-nowrap text-muted-foreground opacity-0
-      transition-[opacity,transform] duration-150;
+      transition-[opacity,scale] duration-150 ease-out;
   }
 
   .replaced[aria-expanded='true'] .replaced-was {
