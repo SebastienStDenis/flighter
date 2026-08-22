@@ -62,25 +62,40 @@ restriction and not a choice made here.
 A list. Each flight is two lines: the airline's mark with the flight number and route,
 and under them the board's status pill and one line beside it.
 
-The line is the next thing worth knowing, and it always leads with a time, read on the
-clock at the airport where that thing happens and carrying that airport's zone:
+The line is the next thing worth knowing, and it always leads with a time:
 
 | While it is | The line reads |
 | --- | --- |
 | Days off | `Fri 18 Sep 18:00 EDT` |
 | Leaving tomorrow | `Tomorrow 02:00 EDT · Seat 14A` |
 | On the day | `14:40 EDT · Gate B22 · Seat 14A` |
-| Pushed back, or in the air | `Lands 15:15 PDT` |
-| On the ground | `At the gate 22:15 PDT` |
+| Pushed back, or in the air | `Lands 18:15 EDT · 15:15 PDT` |
+| On the ground | `At the gate 01:15 EDT · 22:15 PDT` |
 | Parked | `Baggage claim 7` |
 | Cancelled, or lost by the feed | nothing; the pill has said it |
 
 The gate and the seat join the line only on the day of the flight, which is the one
-stretch where a person is on their way to use them. The day goes in front of the time
-whenever the time is not today's at that airport, because `02:00 EDT` on its own reads
-as today's and a flight leaving tomorrow morning would look hours overdue all evening.
-The time leads, so a row too narrow for the whole line loses the seat rather than the
-flight. Every word and tone comes from the server; the script picks nothing on its own.
+stretch where a person is on their way to use them. The time leads, so a row too narrow
+for the whole line loses the seat rather than the flight. Every word and tone comes from
+the server; the script picks nothing on its own.
+
+### Whose clock
+
+The time is the one on the phone's own clock, because that is the watch the person
+reading it is going to check it against. `Lands 15:15 PDT` on a phone in Ottawa is
+arithmetic, not information.
+
+So the widget sends the zone it is set to with every request, and the server renders
+every time in it. Where the airport's clock reads differently, it follows on the same
+line: `Lands 18:15 EDT · 15:15 PDT` is when it lands for you, and what the clock will
+say when you step off. Where the two read the same, which is nearly always true of a
+departure, there is only one time. A phone that will not name its zone gets the
+airport's clock alone, which is right, just harder work.
+
+Neither time ever loses its zone, and the day goes in front whenever the time is not
+today's **on the phone's clock**, since that is the clock the line leads with. `02:00`
+on its own reads as today's, and a flight leaving tomorrow morning would otherwise look
+hours overdue all evening.
 
 The pill is the board's, in the board's tones, with two exceptions the board does not
 need. The board says "Taxiing" for the ten minutes between pushback and wheels up; a

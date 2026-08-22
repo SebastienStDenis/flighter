@@ -369,6 +369,84 @@ def test_a_late_pushback_is_history_once_the_flight_is_off_the_ground(
     assert flight["status_tone"] == "live"
 
 
+# --- the phone's own clock --------------------------------------------------------------
+
+
+HOME = "America/Toronto"
+
+
+def test_the_times_are_the_ones_on_the_phones_clock(settings: Settings) -> None:
+    """A time four zones away is arithmetic, not information.
+
+    Watching from Ottawa, a flight landing at 15:15 in Los Angeles is 18:15 on the
+    watch of the person reading it, and that is the figure the line leads with. The
+    airport's own clock follows, because on the ground at the other end it is the one
+    that matters.
+    """
+    flying = snapshot(actual_off=DEPARTURE - timedelta(hours=2), estimated_in=ARRIVAL)
+    flight = payload([(booking(), flying)], settings, airports=AIRPORTS, viewer_tz=HOME)["flights"][
+        0
+    ]
+    assert detail(flight) == "Lands 18:15 EDT · 15:15 PDT"
+
+
+def test_one_clock_where_the_phone_is_already_on_the_airports(settings: Settings) -> None:
+    """The everyday case, and the one a departure is almost always in: no second time,
+    because there is no second reading."""
+    gated = snapshot(scheduled_out=DEPARTURE, gate_origin="B22")
+    flight = payload([(booking(seat="14A"), gated)], settings, airports=AIRPORTS, viewer_tz=HOME)[
+        "flights"
+    ][0]
+    assert detail(flight) == "14:40 EDT · Gate B22 · Seat 14A"
+
+
+def test_the_day_in_front_is_the_phones_day(settings: Settings) -> None:
+    """The day belongs to the clock the line leads with, or it contradicts it.
+
+    NOW is the 12th in Toronto and already the 13th in Tokyo, so a departure on the
+    13th is tomorrow to the person reading it and today at the airport. The line leads
+    with their clock, so it is their day that goes in front.
+    """
+    tokyo = booking(origin_iata="HND", scheduled_departure_utc=NOW + timedelta(hours=20))
+    flight = payload([(tokyo, None)], settings, airports=AIRPORTS, viewer_tz=HOME)["flights"][0]
+    assert detail(flight) == "Tomorrow 10:00 EDT · 23:00 JST"
+
+
+def test_a_phone_that_says_nothing_gets_the_airports_clock(settings: Settings) -> None:
+    """What every copy drew before the zone was sent, and still right, just harder work."""
+    flying = snapshot(actual_off=DEPARTURE - timedelta(hours=2), estimated_in=ARRIVAL)
+    rows: list[FlightRow] = [(booking(), flying)]
+    assert detail(payload(rows, settings, airports=AIRPORTS)["flights"][0]) == "Lands 15:15 PDT"
+    blank = payload(rows, settings, airports=AIRPORTS, viewer_tz="")["flights"][0]
+    assert detail(blank) == "Lands 15:15 PDT"
+
+
+def test_a_zone_the_phone_made_up_does_not_break_the_widget(settings: Settings) -> None:
+    """`zone()` falls back to UTC on a name it does not know, and a widget that draws
+    the wrong clock is still better than one that draws an error."""
+    flying = snapshot(actual_off=DEPARTURE - timedelta(hours=2), estimated_in=ARRIVAL)
+    flight = payload(
+        [(booking(), flying)], settings, airports=AIRPORTS, viewer_tz="Mars/Olympus_Mons"
+    )["flights"][0]
+    assert detail(flight) == "Lands 22:15 UTC · 15:15 PDT"
+
+
+def test_the_phones_zone_reaches_the_payload_from_the_query(client: TestClient) -> None:
+    """The one thing the server cannot work out for itself."""
+    response = client.get(
+        "/api/widget?tz=Asia/Tokyo", headers={"Authorization": "Bearer test-token"}
+    )
+    assert response.status_code == 200
+    # The fixture's flight leaves JFK at 18:40 UTC, which is 03:40 the next day in Tokyo.
+    assert "03:40 JST" in response.json()["flights"][0]["detail"]
+
+
+def test_the_script_tells_the_server_where_the_phone_is() -> None:
+    source = script_source()
+    assert "tz=${encodeURIComponent(timeZone())}" in source
+    assert "resolvedOptions().timeZone" in source
+
+
 # --- instants -------------------------------------------------------------------------
 
 

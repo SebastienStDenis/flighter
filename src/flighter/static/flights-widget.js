@@ -123,7 +123,10 @@ async function load(server) {
 }
 
 async function request({ api, token }) {
-  const req = new Request(`${api}/api/widget`);
+  // The zone goes with the ask so the times come back on this phone's clock rather than
+  // on the airport's. It is the one thing the server cannot know and the phone cannot
+  // work out for itself once the strings are built.
+  const req = new Request(`${api}/api/widget?tz=${encodeURIComponent(timeZone())}`);
   req.headers = { Authorization: `Bearer ${token}` };
   req.timeoutInterval = REQUEST_TIMEOUT_SECONDS;
   const body = await req.loadJSON();
@@ -481,6 +484,17 @@ function staleNote(result) {
     return null;
   }
   return result.cachedAt ? `Cached ${timeOfDay(result.cachedAt)}` : "Cached";
+}
+
+// The IANA name of the zone the phone is set to, or nothing if it will not say, which
+// the server reads as "use the airport's clock".
+function timeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch (error) {
+    console.warn(`could not read the time zone: ${error}`);
+    return "";
+  }
 }
 
 function timeOfDay(date) {

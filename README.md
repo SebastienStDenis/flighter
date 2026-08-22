@@ -81,10 +81,11 @@ interval tightens as departure approaches, and stops once the flight is on the g
 its bag belt is known.
 
 **The widget is a list.** Two lines per flight: the board's own status pill, and beside
-it the next thing worth knowing, which always starts with a time read at the airport it
-happens at. Nothing on it is counted from the phone's clock, because iOS redraws a
-widget about every quarter of an hour and a countdown would be that far wrong by the
-next reload; a time at the airport is right until the estimate itself moves.
+it the next thing worth knowing, which always starts with a time. Nothing on it is
+counted from the phone's clock, because iOS redraws a widget about every quarter of an
+hour and a countdown would be that far wrong by the next reload; a clock face is right
+until the estimate itself moves. The phone sends the zone it is in, so the time is the
+one on the reader's own watch, with the airport's beside it where the two differ.
 
 **Everything is configured in the app.** There is no file to fill in before first boot.
 You start the container, open `/settings`, and type your Apple ID, your FlightAware key
