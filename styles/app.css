@@ -39,6 +39,8 @@
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-stop: var(--stop);
+  --color-ok-soft: var(--ok-soft);
+  --color-stop-soft: var(--stop-soft);
 }
 
 /* A cold, low-chroma slate for the page and one blue for anything you can act on, so
@@ -72,6 +74,12 @@
   --ok: oklch(0.455 0.13 158);
   --warn: oklch(0.48 0.14 72);
   --stop: oklch(0.495 0.17 25);
+
+  /* The same two tones with most of the colour taken out, for a value on the card that
+     replaced another. A card can carry three of those at once, and at the badge's
+     chroma three of them read as three alarms. Both still clear 4.5:1 on the card. */
+  --ok-soft: oklch(0.5 0.07 158);
+  --stop-soft: oklch(0.52 0.09 25);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -103,6 +111,8 @@
     --ok: oklch(0.74 0.13 158);
     --warn: oklch(0.78 0.14 72);
     --stop: oklch(0.73 0.17 25);
+    --ok-soft: oklch(0.76 0.07 158);
+    --stop-soft: oklch(0.75 0.09 25);
 
     /* Basecoat bakes the chevron's colour into a data URI, so the dark one is its own
        image rather than a variable it can inherit. */
@@ -186,6 +196,35 @@
 
   .ends > :nth-child(even) {
     @apply text-right;
+  }
+
+  /* A value that replaced another. The card carries only what holds now; what it
+     replaced is behind a tap on it, blurred over rather than set beside it, so a card
+     with three changes on it reads as cleanly as a card with none. */
+  .replaced {
+    @apply relative inline-block cursor-pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .replaced-now {
+    @apply transition-[filter,opacity] duration-150;
+  }
+
+  .replaced[aria-expanded='true'] .replaced-now {
+    @apply opacity-40 blur-[5px];
+  }
+
+  /* What it replaced is the same lines over again, smaller and with nothing drawn
+     around them, so it reads as held above the card rather than printed on it. Only
+     the lines the move changed are struck; the ones it left alone stand as they are. */
+  .replaced-was {
+    @apply pointer-events-none absolute inset-0 flex scale-[0.72] items-center
+      justify-center whitespace-nowrap text-muted-foreground opacity-0
+      transition-[opacity,transform] duration-150;
+  }
+
+  .replaced[aria-expanded='true'] .replaced-was {
+    @apply scale-[0.82] opacity-100;
   }
 
   /* The Apple Mail flag colours, drawn as Mail draws them. This is the one place in the
