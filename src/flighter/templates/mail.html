@@ -25,32 +25,36 @@
 </section>
 {% else %}
 
-{# One row for every email, whatever became of it. An email waiting on a decision is the
-   same row with the buttons that make it: the badge is what says it is waiting, because
+{# One card for every email, whatever became of it. An email waiting on a decision is the
+   same card with the buttons that make it: the badge is what says it is waiting, because
    a page that shouts at a person about a receipt they flagged by mistake is a page they
    stop opening. #}
 {% for title, group in [("Needs attention", waiting), ("Recent", history)] %}
 {% if group %}
 <h2 class="mt-6 mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase first:mt-0">
   {{- title -}}</h2>
-<div class="item-group -mx-2.5 mb-2 w-auto">
+<div class="item-group mb-2 gap-2">
   {% for v in group %}
-  <div class="item" data-size="sm">
-    <section class="min-w-0">
+  <div class="item" data-variant="outline" data-size="sm">
+    {# Aligned to the top of the card rather than centred on it, so the badge sits on the
+       same line as the subject however many lines the words under it run to. #}
+    <section class="min-w-0 self-start">
       <h3 class="max-w-full"><span class="truncate">{{ v.subject }}</span></h3>
       {% if v.account %}<p>{{ v.account }}</p>{% endif %}
     </section>
-    <aside class="flex-col items-end gap-1">
+    <aside class="flex-col items-end gap-1 self-start">
       {{ m.badge(v.status) }}
       <span class="text-xs whitespace-nowrap text-muted-foreground">{{ v.when }}</span>
     </aside>
     {% if v.flights %}
-    <footer class="mt-1.5 flex-wrap justify-start gap-x-3 gap-y-1">
+    <footer class="mt-2 flex-wrap justify-start gap-2">
       {% for booking in v.flights %}
-      <a class="font-mono text-xs hover:underline" href="/f/{{ booking.id }}">
+      <a class="btn font-mono" data-variant="outline" data-size="xs" href="/f/{{ booking.id }}">
+        {{ m.logo(booking.marketing_carrier, "size-4") }}
         {{ booking.marketing_carrier }}{{ booking.marketing_number }}
-        <span class="text-muted-foreground">
-          {{- booking.origin_iata }} &rarr; {{ booking.dest_iata }}</span></a>
+        <span class="font-normal text-muted-foreground">
+          {{- booking.origin_iata }} &rarr; {{ booking.dest_iata }}</span>
+      </a>
       {% endfor %}
     </footer>
     {% endif %}

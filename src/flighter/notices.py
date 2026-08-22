@@ -53,8 +53,19 @@ def import_failed(*, subject: str | None, reason: str | None) -> Notice:
     about one email among the several they flagged this morning.
     """
     named = f"Subject: {subject.strip()}" if subject and subject.strip() else None
-    said = f"{_sentence(reason) if reason else UNEXPLAINED} {STILL_FLAGGED}"
+    said = f"{sentence(reason)} {STILL_FLAGGED}"
     return Notice(HEADLINE, (named, said) if named else (said,))
+
+
+def sentence(reason: str | None) -> str:
+    """What went wrong, on its own.
+
+    The page shows this much and no more: the buttons beside it are the whole of what
+    to do about the email, so a sentence telling a person where to find it in Mail is
+    one they have already been given a shorter answer to. A push has no buttons, which
+    is why it adds one.
+    """
+    return _sentence(reason) if reason else UNEXPLAINED
 
 
 def _sentence(text: str) -> str:

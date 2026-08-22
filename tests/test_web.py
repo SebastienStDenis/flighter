@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
-from flighter import prefs, web
+from flighter import notices, prefs, web
 from flighter.aeroapi import BREAKER_KEY, BudgetExceeded, BudgetStatus
 from flighter.caldav import CalendarUnavailable, Collection
 from flighter.config import Settings
@@ -381,7 +381,7 @@ def test_the_email_page_says_which_email_was_set_aside_and_why(client: TestClien
 
     assert ">Needs attention</span>" in body
     assert "Your booking is confirmed" in body
-    assert "RuntimeError: the model timed out. It is still flagged in Mail." in body
+    assert "RuntimeError: the model timed out." in body
     assert "Try again" in body
     assert "Ignore" in body
     # The email itself, in Mail, is where the other half of the decision is made.
@@ -393,8 +393,9 @@ def test_the_page_and_the_push_say_the_same_thing(client: TestClient, settings: 
     not told two different stories about it.
 
     The push names the email in a line of its own because a lock screen has nothing else
-    to name it with; the page has the subject at the top of the card, so what has to
-    match word for word is the reason underneath.
+    to name it with, and says where it still is because it can offer nothing to do about
+    it; the page has the subject at the top of the card and the buttons under it, so what
+    has to match word for word is the reason in the middle.
     """
     row = set_aside_row()
     client.session.rows["IngestLog"] = [row]
@@ -402,10 +403,14 @@ def test_the_page_and_the_push_say_the_same_thing(client: TestClient, settings: 
     sent = asyncio.run(_push_about(row, settings))
     body = client.get("/mail").text
 
-    subject, reason = sent["message"].split("\n")
+    subject, said = sent["message"].split("\n")
     assert subject == f"Subject: {row.subject}"
     assert row.subject in body
-    assert reason in body
+    assert said == f"{notices.sentence(row.error)} {notices.STILL_FLAGGED}"
+    # Where the email is, is the one thing the page does not have to say: the buttons
+    # that do something about it are right there under the words.
+    assert notices.sentence(row.error) in body
+    assert notices.STILL_FLAGGED not in body
 
 
 async def _push_about(row: IngestLog, settings: Settings) -> dict[str, str]:

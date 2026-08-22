@@ -674,7 +674,7 @@ class MailImport:
         say it better than a sentence about them would.
         """
         if self.row.outcome == IngestOutcome.ERROR:
-            return notices.import_failed(subject=None, reason=self.row.error).body
+            return notices.sentence(self.row.error)
         return _ACCOUNT.get(self.row.outcome)
 
 
