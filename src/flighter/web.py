@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import bookings as booking_repo
 from . import ingest, lookup, prefs, views
 from .aeroapi import BudgetExceeded, budget_status, clear_breaker
-from .caldav import CalendarClient, CalendarUnavailable, Collection
+from .caldav import CalendarClient, CalendarUnavailable, Collection, macos_calendar_link
 from .checks import run_checks
 from .config import CREDENTIALS, SERVICES, Settings, mint_widget_token, write_secrets
 from .db import get_session, session_scope
@@ -377,7 +377,7 @@ def create_app(settings: Settings) -> FastAPI:
         calendar_link = view.calendar_link
         user_agent = request.headers.get("user-agent", "")
         if calendar_link and "Macintosh" in user_agent and "Mobile/" not in user_agent:
-            calendar_link = "ical://"
+            calendar_link = macos_calendar_link(view.scheduled_departure, view.origin_tz)
         events = await session.execute(
             select(FlightEvent)
             .where(FlightEvent.booking_id == booking_id)
