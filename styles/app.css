@@ -208,9 +208,9 @@
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* Both layers name the properties they actually move - the blur sits in `filter` and
-     the smaller copy in `scale`, not in `transform` - so neither of them snaps to its
-     end state while the other is still on its way there. */
+  /* The swap is a cross-fade and nothing else: what holds now softens away under a
+     blur while the copy over it comes up in its place. Neither layer moves or changes
+     size, so the only thing the eye has to follow is which of the two is legible. */
   .replaced-now {
     @apply transition-[opacity,filter] duration-150 ease-out;
   }
@@ -223,13 +223,13 @@
      around them, so it reads as held above the card rather than printed on it. Only
      the lines the move changed are struck; the ones it left alone stand as they are. */
   .replaced-was {
-    @apply pointer-events-none absolute inset-0 flex scale-[0.72] items-center
+    @apply pointer-events-none absolute inset-0 flex scale-[0.82] items-center
       justify-center whitespace-nowrap text-muted-foreground opacity-0
-      transition-[opacity,scale] duration-150 ease-out;
+      transition-opacity duration-150 ease-out;
   }
 
   .replaced[aria-expanded='true'] .replaced-was {
-    @apply scale-[0.82] opacity-100;
+    @apply opacity-100;
   }
 
   /* The Apple Mail flag colours, drawn as Mail draws them. This is the one place in the
