@@ -49,13 +49,42 @@ does the same thing at once, and says so.
 | Family | What it shows |
 | --- | --- |
 | `accessoryRectangular` (Lock Screen) | Next flight only, three tight lines. **iOS 16 or later.** |
-| Small | Next flight: the number, the route under it, its status pill, the next milestone large, and the card's detail line underneath |
-| Medium | Up to three flights, one row each, each row tappable |
-| Large | Same rows, with room to breathe |
+| Small | Next flight: the number, the route under it, its status pill, the next milestone large, and the card's detail line underneath. While a flight is under way, its card in small type |
+| Medium | Up to three flights, one row each, each row tappable. While a flight is under way, its card alone |
+| Large | Same rows, with room to breathe. While a flight is under way, its card with the other flights' rows under it |
 
 Tapping opens the flight's page on your server. On medium and large each row deep-links
 to its own flight; small and Lock Screen widgets get a single tap target, which is an iOS
 restriction and not a choice made here.
+
+## The card
+
+While a flight is under way the widget stops being a list and becomes that flight's
+card, the one the flight page opens with, drawn a little tighter: the number and the
+pill; the two airport codes with the rule between them and the aircraft on it, as far
+along as it has got; the time at each end in the card's tone, red once it has slipped
+later than booked and green when it came forward, with its zone beside it; the terminal
+and gate at each end; and what it counts to. A diverted flight's new airport stands in
+red where the code goes, with the booked one small beside it.
+
+"Under way" is the server's call, and it is made by the same rules the page uses. The
+card opens once the aircraft has pushed back and stays until the flight leaves the
+board, and it opens early for a flight inside the poller's close window, the last three
+hours before departure, which is as near as the server itself calls a departure
+imminent. A flight still days or hours off keeps its row.
+
+When more than one flight could have the card, an aircraft still moving comes first,
+taxiing in included. Then one about to leave. A flight already parked comes last,
+because its card has nothing left to say but the belt: on a layover the leg just flown
+hands the screen to the leg about to be, the moment it is at the gate and not before,
+and keeps it while the next leg is still hours off. The flight with the card is also
+the one the small and Lock Screen sizes show, so every size changes over at the same
+moment.
+
+The aircraft's place on the rule is the second thing the script works out for itself,
+for the same reason as the figure: it moves between reloads. The server hands over
+wheels-up and the landing estimate, and the phone puts the aircraft where its own clock
+says it is, as the page does between loads.
 
 ## What it shows
 
@@ -80,8 +109,8 @@ network is there. The Lock Screen widget goes without it, because iOS draws ever
 there in a single tint. A mark that cannot be fetched is left out; the number beside it
 already names the airline.
 
-The figure beside the milestone is the one thing the script works out, because it
-depends on the phone's clock. It follows the page's rules: whole days once a day or more
+The figure beside the milestone is worked out on the phone, because it depends on the
+phone's clock. It follows the page's rules: whole days once a day or more
 away, then hours and minutes (`1h 05m`), then minutes, `<1m` inside a minute, and
 `20m ago` once the instant has passed, at which point "Lands in" turns into "Due to
 land" the way it does on the page. There are never seconds.
