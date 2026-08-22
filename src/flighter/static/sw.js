@@ -1,9 +1,11 @@
 // Caches the shell so the app opens fullscreen from the home screen without waiting on
-// the network, and caches no flight data at all. A gate number from an hour ago is
-// worse than a page that says it could not reach the server, so every navigation and
-// every API call goes to the network and is never stored.
+// the network, and keeps the last copy of every page so the board still opens when
+// there is no network at all. A copy is only ever the fallback: every page request goes
+// to the server first, and the copy is served when the server cannot be reached. The
+// page itself says how old it is, so a gate number from an hour ago reads as one.
 
 const SHELL = "shell-v6";
+const PAGES = "pages-v1";
 const ASSETS = [
   "/static/flighter.css",
   "/static/basecoat.min.js",
@@ -14,6 +16,16 @@ const ASSETS = [
   "/static/favicon.svg",
   "/static/manifest.json",
 ];
+
+// How long a page request waits on the network before the last copy is shown instead. A
+// phone on dead wifi does not error, it hangs, and this is the difference between the
+// board and a white screen.
+const PATIENCE_MS = 4000;
+
+// A copy older than this is not shown even offline: a flight stopped a day ago should
+// not come back, and nothing about a flight from yesterday is worth knowing now.
+const KEEP_MS = 24 * 60 * 60 * 1000;
+const SAVED_AT = "x-flighter-saved-at";
 
 const OFFLINE_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -32,7 +44,9 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== SHELL).map((key) => caches.delete(key))))
+      .then((keys) =>
+        Promise.all(keys.filter((key) => key !== SHELL && key !== PAGES).map((key) => caches.delete(key)))
+      )
       .then(() => self.clients.claim())
   );
 });
@@ -64,12 +78,40 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Everything else is flight data: the list, a flight, the widget feed.
-  event.respondWith(
-    fetch(request, { cache: "no-store" }).catch(() =>
-      request.mode === "navigate"
-        ? new Response(OFFLINE_PAGE, { headers: { "Content-Type": "text/html; charset=utf-8" } })
-        : Response.error()
-    )
-  );
+  if (request.mode === "navigate") {
+    event.respondWith(pageOrLastCopy(request));
+    return;
+  }
+
+  // Anything else is a feed, and a feed is never served stale.
+  event.respondWith(fetch(request, { cache: "no-store" }).catch(() => Response.error()));
 });
+
+async function pageOrLastCopy(request) {
+  const cache = await caches.open(PAGES);
+  try {
+    const response = await withPatience(fetch(request, { cache: "no-store" }));
+    // A redirect is the page after a form post, and the browser refuses a redirected
+    // response served back to a navigation, so only a page that came straight is kept.
+    if (response.ok && !response.redirected) await cache.put(request, stamped(response));
+    return response;
+  } catch {
+    const copy = await cache.match(request);
+    if (copy && Date.now() - Number(copy.headers.get(SAVED_AT)) < KEEP_MS) return copy;
+    if (copy) await cache.delete(request);
+    return new Response(OFFLINE_PAGE, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+  }
+}
+
+function withPatience(pending) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("no answer")), PATIENCE_MS);
+    pending.then(resolve, reject).finally(() => clearTimeout(timer));
+  });
+}
+
+function stamped(response) {
+  const copy = new Response(response.clone().body, response);
+  copy.headers.set(SAVED_AT, String(Date.now()));
+  return copy;
+}

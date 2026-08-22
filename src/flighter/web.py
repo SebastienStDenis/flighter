@@ -142,6 +142,7 @@ def create_app(settings: Settings) -> FastAPI:
         logo_url=views.logo_url,
         missing=views.MISSING,
         problem_notice=views.problem_notice,
+        rendered_at=lambda: datetime.now(UTC).isoformat(timespec="seconds"),
         until=views.until,
         zone=views.zone,
     )
