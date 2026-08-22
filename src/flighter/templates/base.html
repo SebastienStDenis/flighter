@@ -10,6 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Flighter">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="rendered-at" content="{{ rendered_at() }}">
 <link rel="manifest" href="/static/manifest.json">
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
@@ -76,6 +77,16 @@
     </a>
   </nav>
 </header>
+{# A page the server rendered a while ago, whether left open or served from the cache
+   with no network: the countdowns are right, the gates and times may not be. #}
+<div class="mx-auto flex w-full max-w-lg items-center gap-2 px-4 pt-3 text-sm text-muted-foreground"
+     role="status" id="stale" hidden>
+  <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+  </svg>
+  <span data-note></span>
+</div>
 <main class="mx-auto flex w-full max-w-lg flex-1 flex-col px-4 pt-4">
 {% block content %}{% endblock %}
 </main>
@@ -114,15 +125,59 @@
         var fraction = Math.min(Math.max((now - off) / (on - off), 0), 1);
         el.style.setProperty("--progress", Math.round(fraction * 100) + "%");
       });
+      age();
       // Nothing on screen is finer than a minute, and the feed's times are whole
       // minutes, so the figures only ever change on the minute.
       setTimeout(tick, 60000 - (now % 60000));
     }
+
+    // The closest the poller ever looks is every ten minutes, so a page older than that
+    // may be behind the feed. Once it is, it asks the server for a fresh one whenever it
+    // is in front, and when the server does not answer it says how old it is and that
+    // there is no connection. The page asks rather than trusting navigator.onLine, which
+    // is true on wifi with nothing behind it.
+    var STALE_MS = 10 * 60000;
+    var rendered = Date.parse(document.querySelector('meta[name="rendered-at"]').content);
+    var stale = document.getElementById("stale");
+    function since() {
+      return Date.now() - rendered;
+    }
+    function age() {
+      if (isNaN(rendered) || since() < STALE_MS) return;
+      if (document.visibilityState === "visible") reach();
+      else show(false);
+    }
+    function show(unreachable) {
+      stale.querySelector("[data-note]").textContent =
+        (unreachable ? "No connection, loaded " : "Loaded ") + figure(since()) + " ago";
+      stale.hidden = false;
+    }
+    // The server's clock decides whether the page is really old before it is reloaded:
+    // a phone whose clock runs ahead would otherwise find every fresh page stale and
+    // reload without end.
+    function reach() {
+      fetch("/healthz", { cache: "no-store", signal: AbortSignal.timeout(4000) }).then(
+        function (response) {
+          var serverNow = Date.parse(response.headers.get("date"));
+          if (!response.ok) show(true);
+          else if (isNaN(serverNow) || serverNow - rendered >= STALE_MS) location.reload();
+          else stale.hidden = true;
+        },
+        function () {
+          show(true);
+        }
+      );
+    }
+    window.addEventListener("online", age);
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") age();
+    });
+
     tick();
   })();
 
-  // The shell is cached so the app opens from the home screen with no network. Flight
-  // data is never cached; see sw.js.
+  // The shell is cached so the app opens from the home screen with no network, and the
+  // last copy of each page is kept for when the server cannot be reached; see sw.js.
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js");
   }

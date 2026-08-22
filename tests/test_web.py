@@ -287,6 +287,16 @@ def looks_up(
 # --- The board -----------------------------------------------------------------------
 
 
+def test_every_page_says_when_it_was_rendered(client: TestClient) -> None:
+    """The page's script turns this into "Loaded 12m ago" once the page is old, whether
+    it was left open or served from the cache with no network."""
+    for path in ("/", "/f/new", "/problems", "/settings"):
+        found = re.search(r'<meta name="rendered-at" content="([^"]+)">', client.get(path).text)
+        assert found, path
+        rendered = datetime.fromisoformat(found.group(1))
+        assert abs(datetime.now(UTC) - rendered) < timedelta(seconds=5)
+
+
 def test_the_board_says_what_to_do_when_there_are_no_flights(client: TestClient) -> None:
     page = client.get("/")
     assert page.status_code == 200
