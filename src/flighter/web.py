@@ -374,6 +374,10 @@ def create_app(settings: Settings) -> FastAPI:
     @app.get("/f/{booking_id}")
     async def detail(request: Request, session: SessionDep, booking_id: int) -> Response:
         view = await load(session, booking_id)
+        calendar_link = view.calendar_link
+        user_agent = request.headers.get("user-agent", "")
+        if calendar_link and "Macintosh" in user_agent and "Mobile/" not in user_agent:
+            calendar_link = "ical://"
         events = await session.execute(
             select(FlightEvent)
             .where(FlightEvent.booking_id == booking_id)
@@ -385,7 +389,12 @@ def create_app(settings: Settings) -> FastAPI:
         return page(
             request,
             "detail.html",
-            {"v": view, "events": list(events.scalars()), "return_tab": return_tab},
+            {
+                "v": view,
+                "calendar_link": calendar_link,
+                "events": list(events.scalars()),
+                "return_tab": return_tab,
+            },
         )
 
     @app.post("/f/{booking_id}/ticket")
