@@ -315,6 +315,10 @@ class FlightView:
         )
 
     @property
+    def at_the_gate(self) -> bool:
+        return at_the_gate(self.phase, self.booking, self.snapshot, datetime.now(UTC))
+
+    @property
     def watched(self) -> bool:
         """Whether there is anything on the flight to watch yet.
 
@@ -322,30 +326,43 @@ class FlightView:
         it has neither, and called off it has nothing left, so the card keeps to what is
         settled: the number, the route and the times at each end.
         """
-        return self.phase not in (UPCOMING, CANCELLED)
+        return watched(self.phase)
 
     @property
     def ended(self) -> datetime:
-        """When this flight stopped being something to wait for.
-
-        The same rule `list_bookings(upcoming_only=True)` applies: a flight in the air
-        has departed but is still very much upcoming to the person meeting it.
-        """
-        arrival = self.arrival
-        if arrival is not None:
-            return arrival
-        # Nothing anywhere says when it lands, so assume the longest plausible hop
-        # rather than pinning a departed flight to the top of the list forever.
-        return self.departure + timedelta(hours=3)
+        return ended(self.booking, self.snapshot)
 
     @property
     def off_board_at(self) -> datetime:
-        """When the board files this flight under Flown.
+        return off_board_at(self.booking, self.snapshot)
 
-        Not the moment it is at the gate: the carousel and the terminal are what someone
-        is reading while they wait for their bags and find their way out.
-        """
-        return self.ended + LINGER
+
+def watched(phase: Phase) -> bool:
+    """Whether there is anything on the flight to watch yet: see `FlightView.watched`."""
+    return phase not in (UPCOMING, CANCELLED)
+
+
+def ended(booking: Booking, snapshot: FlightSnapshot | None) -> datetime:
+    """When this flight stopped being something to wait for.
+
+    The same rule `list_bookings(upcoming_only=True)` applies: a flight in the air has
+    departed but is still very much upcoming to the person meeting it.
+    """
+    arrival = arrival_estimate(booking, snapshot)
+    if arrival is not None:
+        return arrival
+    # Nothing anywhere says when it lands, so assume the longest plausible hop rather
+    # than pinning a departed flight to the top of the list forever.
+    return departure_estimate(booking, snapshot) + timedelta(hours=3)
+
+
+def off_board_at(booking: Booking, snapshot: FlightSnapshot | None) -> datetime:
+    """When the board files this flight under Flown, and the widget lets it go.
+
+    Not the moment it is at the gate: the carousel and the terminal are what someone is
+    reading while they wait for their bags and find their way out.
+    """
+    return ended(booking, snapshot) + LINGER
 
 
 def flown(booking: Booking) -> bool:
@@ -420,6 +437,26 @@ def status(
         if word is not None:
             return Status(word, "plan")
     return Status("Scheduled", "quiet")
+
+
+def at_the_gate(
+    phase: Phase, booking: Booking, snapshot: FlightSnapshot | None, now: datetime
+) -> bool:
+    """Whether the aircraft is parked, as far as anyone can tell.
+
+    On-blocks is the one event the feed confirms unreliably: wheels down comes off the
+    radar, but the gate needs a word from the airline or the airport that often comes
+    late or never, and the poller stops asking ninety minutes after the landing. So a
+    landed flight whose gate time has come and gone counts as parked rather than left
+    taxiing for a confirmation that may not arrive. With no gate time at all there is
+    nothing to wait for, and it is parked too.
+    """
+    if phase != LANDED:
+        return False
+    if snapshot is not None and snapshot.actual_in is not None:
+        return True
+    expected = arrival_estimate(booking, snapshot)
+    return expected is None or expected <= now
 
 
 def day_word(instant: datetime, now: datetime, tz: str) -> str | None:
@@ -502,20 +539,6 @@ def destination_iata(booking: Booking, snapshot: FlightSnapshot | None) -> str:
     if snapshot is not None and snapshot.diverted and snapshot.destination_iata:
         return snapshot.destination_iata
     return booking.dest_iata
-
-
-def phase_rank(phase: Phase) -> int:
-    """In progress first, then what is still coming, then what has already landed.
-
-    Departure time breaks the tie in every band, including for a cancelled flight, which
-    still belongs on the day it was supposed to leave. The board leads with the same
-    flight the widget does, because it asks this the same question.
-    """
-    if phase in (TAXIING, AIRBORNE, DIVERTED):
-        return 0
-    if phase == LANDED:
-        return 2
-    return 1
 
 
 def duration(delta: timedelta) -> str:

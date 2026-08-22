@@ -209,6 +209,17 @@ async def list_bookings(
     return list(result.scalars().all())
 
 
+async def list_recently_flown(session: AsyncSession, limit: int) -> list[Booking]:
+    """The last few flights that have been taken, newest first and never more."""
+    result = await session.execute(
+        select(Booking)
+        .where(Booking.status == BookingStatus.COMPLETED)
+        .order_by(Booking.scheduled_departure_utc.desc())
+        .limit(limit)
+    )
+    return list(result.scalars())
+
+
 async def find_duplicate(
     session: AsyncSession,
     carrier: str,

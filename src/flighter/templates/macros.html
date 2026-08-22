@@ -57,9 +57,10 @@
 {% endmacro %}
 
 {# Where in the building at each end: the terminal and gate it leaves from, and the
-   belt, gate and terminal it arrives at. The arrival side mirrors the departure side,
-   so the terminal sits on the outside and the gate beside it at both ends. On the same
-   grid as the times, so each side's boxes start under its own clock. #}
+   gate and terminal it arrives at. The arrival side mirrors the departure side, so the
+   terminal sits on the outside and the gate beside it at both ends. On the same grid
+   as the times, so each side's boxes start under its own clock. The belt is not here:
+   it is what the footer says once the aircraft is parked. #}
 {% macro places(v, s) %}
 {% set sides = [
   {"right": false, "places": [
@@ -67,7 +68,6 @@
     ("Gate", s.gate_origin if s else none, "text-plan font-semibold"),
   ]},
   {"right": true, "places": [
-    ("Bags", s.baggage_claim if s else none, ""),
     ("Gate", s.gate_destination if s else none, "text-plan font-semibold"),
     ("Term", s.terminal_destination if s else none, ""),
   ]},
@@ -103,7 +103,8 @@
    that, so the card reads as four things rather than a dozen. The flight page opens
    with it and the board draws it for every flight, so the two cannot drift apart. With
    a link it is the way onto the flight page. A flight with nothing to watch yet, days
-   out or called off, stops at the times. #}
+   out or called off, stops at the times. Once parked, the footer's number is the belt
+   rather than a time: the last thing the flight has left to point at. #}
 {% macro flight_card(v, link=none) %}
 {% set s = v.snapshot %}
 {% if link %}
@@ -145,7 +146,12 @@
     {{ places(v, s) }}
     {% endif %}
   </section>
-  {% if v.watched and v.milestone %}
+  {% if v.at_the_gate %}
+  <footer class="-mt-2 -mb-3 border-t pt-3">
+    <span class="text-sm text-muted-foreground">Bags</span>
+    <span class="ml-auto font-mono text-lg font-bold{{ '' if s.baggage_claim else ' text-muted-foreground' }}">{{ dash(s.baggage_claim) }}</span>
+  </footer>
+  {% elif v.watched and v.milestone %}
   <footer class="-mt-2 -mb-3 border-t pt-3">
     <span class="text-sm text-muted-foreground">{{ v.milestone_label }}</span>
     <time class="countdown ml-auto font-mono text-lg font-bold"

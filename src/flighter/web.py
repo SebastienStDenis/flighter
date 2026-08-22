@@ -32,7 +32,7 @@ from .checks import run_checks
 from .config import CREDENTIALS, SERVICES, Settings, mint_widget_token, write_secrets
 from .db import get_session, session_scope
 from .mail import FLAG_COLOURS, message_url
-from .models import Booking, BookingSource, BookingStatus, FlightEvent
+from .models import BookingSource, BookingStatus, FlightEvent
 from .timezones import same_local_date
 from .views import FlightView, build_views
 from .widget import connect_url, last_seen, script_source
@@ -115,17 +115,6 @@ def _first_validation_message(exc: ValidationError) -> str:
     error = exc.errors()[0]
     field = ".".join(str(part) for part in error["loc"]) or "value"
     return f"{field.replace('_', ' ')}: {error['msg']}"
-
-
-async def recently_flown(session: AsyncSession, limit: int) -> list[Booking]:
-    """The last few flights that have been taken, newest first and never more."""
-    rows = await session.execute(
-        select(Booking)
-        .where(Booking.status == BookingStatus.COMPLETED)
-        .order_by(Booking.scheduled_departure_utc.desc())
-        .limit(limit)
-    )
-    return list(rows.scalars())
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -212,7 +201,9 @@ def create_app(settings: Settings) -> FastAPI:
         )
         # The poller closes a booking soon after it lands, so a flight someone is still
         # walking off is found among the flown as often as among the tracked.
-        flown = await build_views(session, await recently_flown(session, FLOWN_LIMIT))
+        flown = await build_views(
+            session, await booking_repo.list_recently_flown(session, FLOWN_LIMIT)
+        )
         now = datetime.now(UTC)
         upcoming = sorted(
             (view for view in tracked + flown if view.off_board_at >= now),
