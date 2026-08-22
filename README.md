@@ -1,7 +1,7 @@
 # flighter
 
 A self-hosted replacement for Flighty. You flag a booking email grey; it reads the flight
-out, tracks it on FlightAware, keeps an iCloud calendar honest, and puts a live countdown
+out, tracks it on FlightAware, keeps an iCloud calendar honest, and puts the next flight
 on your phone's lock screen. One user, one machine, no App Store.
 
 ```
@@ -15,7 +15,7 @@ imported, or why not                                                          �
                                                                         Pushover push     iCloud Calendar
                                                                               │                 CalDAV
                                                         web UI  ←─────────────┘─────→  Scriptable widget
-                                                        flight detail                  live countdown
+                                                        flight detail                  pill and next time
 ```
 
 The point is not that a phone can show a flight number. The point is that the gate change
@@ -80,12 +80,12 @@ flight: anything asked earlier is a result set spent on an empty list. From ther
 interval tightens as departure approaches, and stops once the flight is on the ground and
 its bag belt is known.
 
-**The widget is the board in miniature.** It draws the same status pill and the same
-next milestone the web UI does, in the web UI's colours, light or dark, and while a
-flight is under way it becomes that flight's card, the way the flight page opens. The
-only things it works out for itself depend on the phone's clock: the figure beside the
-milestone, in whole days, hours and minutes and never seconds, and where the aircraft
-sits on the card's rule.
+**The widget is a list.** Two lines per flight: the board's own status pill, and beside
+it the next thing worth knowing, which always starts with a time. Nothing on it is
+counted from the phone's clock, because iOS redraws a widget about every quarter of an
+hour and a countdown would be that far wrong by the next reload; a clock face is right
+until the estimate itself moves. The phone sends the zone it is in, so the time is the
+one on the reader's own watch, with the airport's beside it where the two differ.
 
 **Everything is configured in the app.** There is no file to fill in before first boot.
 You start the container, open `/settings`, and type your Apple ID, your FlightAware key
