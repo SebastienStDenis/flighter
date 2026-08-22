@@ -339,7 +339,9 @@ function renderSmall(widget, flight, logos) {
   route.lineLimit = 1;
 
   widget.addSpacer(6);
-  pill(widget.addStack(), flight);
+  const line = widget.addStack();
+  pill(line, flight);
+  line.addSpacer();
 
   if (flight.detail) {
     widget.addSpacer(4);
@@ -381,6 +383,7 @@ function renderList(widget, flights, logos) {
       detail.textColor = TEXT;
       detail.lineLimit = 1;
     }
+    line.addSpacer();
   });
 }
 
@@ -408,6 +411,7 @@ function titleRow(container, flight, logos, size, withRoute) {
     route.lineLimit = 1;
     route.minimumScaleFactor = 0.7;
   }
+  row.addSpacer();
   return row;
 }
 
