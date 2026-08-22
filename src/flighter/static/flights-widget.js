@@ -4,20 +4,13 @@
 
 // Flight tracker widget.
 //
-// The server decides everything: which flights, in what order, which one of them is
-// under way and gets the whole screen as its card, what the pill says and in which
-// tone, what the next milestone is and the instant it is expected, and where the
-// airline's mark is to be fetched from. This file draws that and nothing else. The two
-// things it works out for itself depend on the phone's clock: the figure beside the
-// milestone, and where the aircraft sits on the card's rule. The figure is built from
-// the same units the web page uses: whole days once a day or more away, hours and
-// minutes inside that, never seconds, and "ago" once the instant has gone by, at which
-// point the label turns into the one the server said to use for a milestone that is due.
-//
-// The figure is a string, so it is only as fresh as the last reload, and iOS reloads
-// widgets when it feels like it rather than when we ask. Nothing drawn here is finer
-// than a minute, and the ask for a reload is made on the minute only while a milestone
-// is close enough for a stale figure to be the first thing anyone notices.
+// The server decides everything: which flights, in what order, what the status says and
+// in which tone, what time goes on the right and what word goes under it, and where the
+// airline's mark is to be fetched from. This file draws that and nothing else. Nothing
+// here is measured against the phone's clock: iOS reloads a widget when it feels like
+// it, about every quarter of an hour, and a figure counted from the clock is that far
+// wrong by the time it is drawn again. A time read at the airport is right until the
+// estimate itself moves.
 //
 // There is nothing to edit here. The server's address and the token arrive through the
 // Connect button on the settings page, which runs this script with both in the URL, and
@@ -33,57 +26,20 @@ const LOGO_PREFIX = "flighter-logo-";
 const REQUEST_TIMEOUT_SECONDS = 15;
 // iOS budgets reloads and ignores an eager request anyway, so do not ask for one.
 const MIN_REFRESH_SECONDS = 60;
-// Inside this the figure is minutes, and a minute stale is a minute wrong.
-const IMMINENT_MS = 60 * 60 * 1000;
-// The milestone column on the home screen rows. Fixed, because a row with a flexible
-// spacer in it hands each text an equal share of the width before the spacer takes the
-// rest, and the detail line is cut short with room to spare. With the column's width
-// known, the rest of the row is the card's to fill.
-const MILESTONE_COLUMN = 84;
-// The rule between the card's two airports, for the same reason: the aircraft's place
-// on it is a share of a width the script has to know, and it takes what the codes
-// leave of the row, so the widget's width has to be known too. Scriptable does not say
-// how big the widget is, so the screen does: the home screen's widget sizes by screen,
-// in points, as the side of the small size and the width of the medium. The small and
-// medium sizes are as tall as the small is wide, and the large is as wide as the
-// medium. A screen not listed gets the narrowest, which fits on every phone.
-const WIDGET_SIZES = {
-  "440x956": [170, 364],
-  "430x932": [170, 364],
-  "428x926": [170, 364],
-  "414x896": [169, 360],
-  "414x736": [159, 348],
-  "402x874": [158, 338],
-  "393x852": [158, 338],
-  "390x844": [158, 338],
-  "375x812": [155, 329],
-  "375x667": [148, 321],
-  "360x780": [155, 329],
-  "320x568": [141, 292],
-};
-const NARROWEST = [148, 321];
-const PLANE = 11;
-// Either side of the rule, between it and the codes.
-const RULE_GUTTER = 8;
-// SF Mono advances this much of the point size per glyph, whatever the weight, which
-// is what lets a monospaced text be given a box exactly its own width.
-const MONO_ADVANCE = 0.62;
-// The medium card's rows with nothing between them: the header, the codes, the times,
-// the places on their two lines, and the figure, each as tall as its type.
-const CARD_ROWS = 18 + 24 + 22 + 26 + 22;
+// The time column on the home screen rows. Fixed, because a row with a flexible spacer
+// in it hands each text an equal share of the width before the spacer takes the rest,
+// and the detail line is cut short with room to spare. With the column's width known,
+// the rest of the row is the flight's to fill.
+const TIME_COLUMN = 84;
 
 // The web UI's palette, each value as styles/app.css defines it for the light and the
 // dark scheme, rendered from oklch to sRGB. The phone's appearance picks the side, the
-// same way the page does, so the widget is the card it would be on the board.
+// same way the page does.
 const BACKGROUND = Color.dynamic(new Color("#ffffff"), new Color("#14171e"));
 const TEXT = Color.dynamic(new Color("#111720"), new Color("#e9edf2"));
 const MUTED = Color.dynamic(new Color("#5f656e"), new Color("#989fa9"));
-// The card's rule, before the aircraft has got to a point on it: the muted colour let
-// half through, as the page draws it.
-const RULE = Color.dynamic(new Color("#5f656e", 0.5), new Color("#989fa9", 0.5));
 
-// The six tones a status can be drawn in, light then dark. The pill's background is the
-// same colour let through at the strength the page mixes it into its card.
+// The six tones a status can be drawn in, light then dark.
 const TONES = {
   quiet: ["#565b63", "#9fa5ae"],
   plan: ["#0c60a3", "#67b0f9"],
@@ -92,7 +48,6 @@ const TONES = {
   warn: ["#815200", "#eea743"],
   stop: ["#ae282b", "#ff7871"],
 };
-const TINT_ALPHA = 0.14;
 
 // The one repair for a missing or rejected token, and the same sentence for both.
 const RECONNECT_TEXT = "Open the settings page on this phone and tap Connect.";
@@ -106,18 +61,6 @@ const isAccessory = family.startsWith("accessory");
 // Per-element tap targets exist only on medium and large. Everywhere else the whole
 // widget gets one URL.
 const supportsRowLinks = family === "medium" || family === "large";
-// The widget's margin. The small size is six lines tall once the route has its own
-// line, so it gives up a little of it to keep the last of them on screen.
-const INSET = family === "small" ? 12 : 14;
-// The room inside the margin: the width at this size, and the height of the sizes a
-// single flight has to itself.
-const CONTENT = contentSize();
-// The space between the card's rows on the large size, which has the board under the
-// card and so cannot spread them over the height the way the medium size does: the
-// points the medium size's rows are spread by on this phone, the height they leave
-// over shared out between the gaps, and never tighter than the rows would be on their
-// own.
-const LARGE_GAP = Math.max(8, Math.floor((CONTENT.height - CARD_ROWS - 3) / 3));
 
 const server = connect();
 const result = server ? await load(server) : null;
@@ -168,8 +111,7 @@ async function load(server) {
       return { data: null, stale: false, cachedAt: null, rejected: true, error: null };
     }
     // A stale widget beats a blank one. The flight has almost certainly not changed,
-    // and the figure is measured against the phone's clock whether or not the network
-    // came back.
+    // and the footer says how old what is drawn is.
     const cached = readCache();
     if (cached) {
       return { data: cached.data, stale: true, cachedAt: cached.cachedAt, rejected: false, error: null };
@@ -328,38 +270,19 @@ async function buildWidget(result) {
     return widget;
   }
 
-  // The flight the server gave the card to is the one the sizes with room for a
-  // single flight show, so a leg about to leave takes over the Lock Screen the same
-  // moment it takes over the home screen.
-  const featured = flights.find((flight) => flight.card) || flights[0];
-
   // The Lock Screen draws everything in its own tint, which would turn a mark into a
   // blot, so only the home screen sizes carry one.
   if (isAccessory) {
-    renderAccessory(widget, featured, result);
+    renderAccessory(widget, flights[0], result);
     return widget;
   }
   const logos = await loadLogos(flights);
-  if (featured.card) {
-    renderCard(widget, featured, logos);
-    // Only the large size has room under the card for the rest of the board.
-    const rest = family === "large" ? flights.filter((flight) => flight !== featured) : [];
-    if (rest.length) {
-      widget.addSpacer(10);
-      divider(widget);
-      widget.addSpacer(10);
-      renderList(widget, rest, logos);
-    }
-  } else if (family === "small") {
-    renderSmall(widget, featured, logos);
+  if (family === "small") {
+    renderSmall(widget, flights[0], logos);
   } else {
     renderList(widget, flights, logos);
   }
-  // The card spreads itself over the sizes it has to itself; elsewhere the rows keep
-  // to the top and the footer goes to the bottom.
-  if (!featured.card || family === "large") {
-    widget.addSpacer();
-  }
+  widget.addSpacer();
   footer(widget, data, result);
   return widget;
 }
@@ -372,7 +295,10 @@ function newWidget() {
     widget.setPadding(2, 2, 2, 2);
   } else {
     widget.backgroundColor = BACKGROUND;
-    widget.setPadding(INSET, INSET, INSET, INSET);
+    // The small size is six lines tall once the route has its own line, so it gives up
+    // a little margin to keep the last of them on screen.
+    const inset = family === "small" ? 12 : 14;
+    widget.setPadding(inset, inset, inset, inset);
   }
   return widget;
 }
@@ -391,22 +317,26 @@ function renderAccessory(widget, flight, result) {
   const row = widget.addStack();
   row.centerAlignContent();
   row.spacing = 5;
-  if (hasMilestone(flight)) {
-    const label = row.addText(milestoneLabel(flight));
+  if (flight.milestone_text) {
+    const label = row.addText(flight.milestone_label);
     label.font = Font.systemFont(11);
     label.textOpacity = 0.7;
-    figureText(row, flight, Font.boldMonospacedSystemFont(17), null);
+    label.lineLimit = 1;
+    const time = row.addText(flight.milestone_text);
+    time.font = Font.boldMonospacedSystemFont(17);
+    time.lineLimit = 1;
   } else {
     const state = row.addText(flight.status_label);
     state.font = Font.semiboldSystemFont(15);
     state.lineLimit = 1;
   }
 
-  // The third line is the card's detail, else the pill's word, which the second line
-  // has already used when there was nothing to count to.
-  const detail = flight.detail || (hasMilestone(flight) ? flight.status_label : null);
-  if (detail) {
-    const text = widget.addText(detail);
+  // The third line is the status with the detail after it, unless the second line has
+  // already said the status because there was no time to give.
+  if (flight.milestone_text) {
+    const text = widget.addText(
+      flight.detail ? `${flight.status_label} · ${flight.detail}` : flight.status_label,
+    );
     text.font = Font.systemFont(11);
     text.textOpacity = 0.7;
     text.lineLimit = 1;
@@ -426,17 +356,19 @@ function renderSmall(widget, flight, logos) {
   route.lineLimit = 1;
 
   widget.addSpacer(4);
-  const line = widget.addStack();
-  pill(line, flight);
-  line.addSpacer();
+  statusText(widget, flight, 11);
 
-  if (hasMilestone(flight)) {
+  if (flight.milestone_text) {
     widget.addSpacer(4);
-    const label = widget.addText(milestoneLabel(flight));
+    const label = widget.addText(flight.milestone_label);
     label.font = Font.systemFont(11);
     label.textColor = MUTED;
     label.lineLimit = 1;
-    figureText(widget, flight, Font.boldMonospacedSystemFont(24), TEXT);
+    const time = widget.addText(flight.milestone_text);
+    time.font = Font.boldMonospacedSystemFont(24);
+    time.textColor = TEXT;
+    time.lineLimit = 1;
+    time.minimumScaleFactor = 0.6;
   }
 
   if (flight.detail) {
@@ -469,310 +401,51 @@ function renderList(widget, flights, logos) {
 
     const line = left.addStack();
     line.centerAlignContent();
-    line.spacing = 6;
-    pill(line, flight);
+    line.spacing = 4;
+    statusText(line, flight, 11);
     if (flight.detail) {
-      // No scale factor: a text that can shrink is sized before the pill and handed
+      // No scale factor: a text that can shrink is sized before the status and handed
       // half the line, and is cut short with room beside it. One that only truncates
-      // is sized after the pill and gets everything the pill left.
-      const detail = line.addText(flight.detail);
+      // is sized after the status and gets everything the status left.
+      const detail = line.addText(`· ${flight.detail}`);
       detail.font = Font.systemFont(11);
       detail.textColor = MUTED;
       detail.lineLimit = 1;
     }
 
     // A line of nothing but a spacer is what stretches the column to every point the
-    // milestone column leaves, without sharing a line with any text.
+    // time column leaves, without sharing a line with any text.
     const stretch = left.addStack();
     stretch.addSpacer();
     stretch.size = new Size(0, 1);
 
-    if (hasMilestone(flight)) {
+    if (flight.milestone_text) {
       const right = row.addStack();
       right.layoutVertically();
       right.spacing = 1;
-      right.size = new Size(MILESTONE_COLUMN, 0);
+      right.size = new Size(TIME_COLUMN, 0);
       // Each line sits behind a spacer of its own: that is what puts it against the
       // right edge, since a text aligns only within its own width.
       const labelLine = right.addStack();
       labelLine.addSpacer();
-      const label = labelLine.addText(milestoneLabel(flight));
+      const label = labelLine.addText(flight.milestone_label);
       label.font = Font.systemFont(10);
       label.textColor = MUTED;
       label.lineLimit = 1;
       label.minimumScaleFactor = 0.8;
-      const figureLine = right.addStack();
-      figureLine.addSpacer();
-      figureText(figureLine, flight, Font.boldMonospacedSystemFont(21), TEXT);
+      const timeLine = right.addStack();
+      timeLine.addSpacer();
+      const time = timeLine.addText(flight.milestone_text);
+      time.font = Font.boldMonospacedSystemFont(21);
+      time.textColor = TEXT;
+      time.lineLimit = 1;
+      time.minimumScaleFactor = 0.6;
     }
   });
 }
 
-// The board's card, a little tighter: the number and the pill; the two codes with the
-// rule between them and the aircraft on it; the time at each end in its tone, with its
-// zone on the outside the way the card sets it; the terminal and gate at each end, the
-// word over the value; and what it counts to, the label on the left and the figure on
-// the right as in the card's footer. The rows are spread over the height on the sizes
-// the card has to itself. The small size has room for the codes, the times and the
-// count, in smaller type, with the pill and the count's label on lines of their own.
-//
-// A text in a row with a flexible spacer is handed a share of the row rather than the
-// width it needs, and is cut short with room beside it. So every monospaced text here
-// sits in a box exactly its own width, and nothing but the spacers is left to flex. The
-// rows set no spacing of their own, since that would go between the pieces of the rule.
-function renderCard(widget, flight, logos) {
-  const card = flight.card;
-  const compact = family === "small";
-  const container = widget.addStack();
-  container.layoutVertically();
-  if (supportsRowLinks) {
-    container.url = flight.detail_url;
-  } else {
-    widget.url = flight.detail_url;
-  }
-
-  const size = compact ? 12 : 14;
-  const header = container.addStack();
-  header.centerAlignContent();
-  const logo = logos[flight.logo_url];
-  if (logo) {
-    const mark = header.addImage(logo);
-    mark.imageSize = new Size(size + 3, size + 3);
-    mark.cornerRadius = 3;
-    header.addSpacer(5);
-  }
-  mono(header, flight.number, size, "semibold", TEXT);
-  if (compact) {
-    container.addSpacer(3);
-    pill(container.addStack(), flight);
-  } else {
-    header.addSpacer();
-    pill(header, flight);
-  }
-
-  gap(container);
-  routeRow(container, card, compact);
-  // The times stay close under the codes: each end's code and time read as one.
-  container.addSpacer(compact ? 2 : 3);
-  timesRow(container, card, compact);
-  if (family === "large") {
-    container.addSpacer(1);
-    daysRow(container, card);
-  }
-  if (!compact) {
-    gap(container);
-    placesRow(container, card);
-  }
-
-  if (hasMilestone(flight)) {
-    gap(container);
-    if (compact) {
-      const label = container.addText(milestoneLabel(flight));
-      label.font = Font.systemFont(10);
-      label.textColor = MUTED;
-      label.lineLimit = 1;
-      figureText(container, flight, Font.boldMonospacedSystemFont(18), TEXT);
-    } else {
-      const line = container.addStack();
-      line.bottomAlignContent();
-      const label = line.addText(milestoneLabel(flight));
-      label.font = Font.systemFont(11);
-      label.textColor = MUTED;
-      label.lineLimit = 1;
-      line.addSpacer();
-      figureText(line, flight, Font.boldMonospacedSystemFont(18), TEXT);
-    }
-  }
-}
-
-// A monospaced text in a box exactly its own width, so nothing in the row can hand it
-// less than it needs.
-function mono(row, text, size, weight, color) {
-  const box = row.addStack();
-  box.size = new Size(monoWidth(text, size), 0);
-  const element = box.addText(text);
-  element.font = monoFont(size, weight);
-  element.textColor = color;
-  element.lineLimit = 1;
-  return element;
-}
-
-function monoWidth(text, size) {
-  return Math.ceil(text.length * size * MONO_ADVANCE) + 1;
-}
-
-function monoFont(size, weight) {
-  if (weight === "bold") return Font.boldMonospacedSystemFont(size);
-  if (weight === "semibold") return Font.semiboldMonospacedSystemFont(size);
-  if (weight === "medium") return Font.mediumMonospacedSystemFont(size);
-  return Font.regularMonospacedSystemFont(size);
-}
-
-// The space between the card's rows: on the sizes the card has to itself, whatever
-// spreads the rows over the widget's height; on the large size, the points the medium
-// size's rows are spread by.
-function gap(container) {
-  if (family === "large") {
-    container.addSpacer(LARGE_GAP);
-  } else {
-    container.addSpacer();
-  }
-}
-
-function routeRow(container, card, compact) {
-  const row = container.addStack();
-  row.centerAlignContent();
-  const origin = code(row, card.origin.iata, compact, null);
-  row.addSpacer();
-  // The rule takes what the codes leave of the row, bar a gutter either side; the
-  // spacers soak up the point or two of rounding.
-  const destination = codeWidth(card.destination.iata, compact, card.booked_destination);
-  rule(row, card, CONTENT.width - origin - destination - 2 * RULE_GUTTER, compact);
-  row.addSpacer();
-  code(row, card.destination.iata, compact, card.booked_destination);
-}
-
-// A diverted flight's new airport stands where the code goes, in red, with the one it
-// was booked for small beside it. Returns the width the group takes.
-function code(row, iata, compact, booked) {
-  const group = row.addStack();
-  group.bottomAlignContent();
-  mono(group, iata, compact ? 16 : 20, "bold", booked ? toneColor("stop") : TEXT);
-  if (booked) {
-    group.addSpacer(3);
-    mono(group, booked, compact ? 9 : 11, "regular", MUTED);
-  }
-  return codeWidth(iata, compact, booked);
-}
-
-function codeWidth(iata, compact, booked) {
-  const main = monoWidth(iata, compact ? 16 : 20);
-  return booked ? main + 3 + monoWidth(booked, compact ? 9 : 11) : main;
-}
-
-// The rule from code to code. With the aircraft in the air it is drawn as far as the
-// aircraft has got, in the page's plan colour, with the aircraft at the end of that and
-// the rest faint; before wheels-up it carries how long the hop is, where the rule is
-// long enough to hold the words; and with nothing to say it is a faint line.
-function rule(row, card, width, compact) {
-  const progress = ruleProgress(card);
-  if (progress === null) {
-    if (!card.block_time || compact) {
-      stroke(row, width, RULE);
-      return;
-    }
-    const label = monoWidth(card.block_time, 9);
-    const half = Math.floor((width - label - 8) / 2);
-    stroke(row, half, RULE);
-    row.addSpacer(4);
-    mono(row, card.block_time, 9, "regular", MUTED);
-    row.addSpacer(4);
-    stroke(row, half, RULE);
-    return;
-  }
-  const span = width - PLANE - 2;
-  const flown = Math.round(span * progress);
-  stroke(row, flown, toneColor("plan"));
-  row.addSpacer(1);
-  const plane = row.addImage(SFSymbol.named("airplane").image);
-  plane.imageSize = new Size(PLANE, PLANE);
-  plane.tintColor = toneColor("plan");
-  row.addSpacer(1);
-  stroke(row, span - flown, RULE);
-}
-
-// A stack of a fixed width and one point of height is a line; a width of zero would
-// mean "as wide as there is room", so the shortest line is a point long.
-function stroke(row, width, color) {
-  const bar = row.addStack();
-  bar.size = new Size(Math.max(1, width), 1);
-  bar.backgroundColor = color;
-}
-
-// A line the width of the widget, between the card and the rows under it.
-function divider(widget) {
-  const bar = widget.addStack();
-  bar.addSpacer();
-  bar.size = new Size(0, 1);
-  bar.backgroundColor = RULE;
-}
-
-function timesRow(container, card, compact) {
-  const row = container.addStack();
-  row.bottomAlignContent();
-  clock(row, card.origin, compact, false);
-  row.addSpacer();
-  clock(row, card.destination, compact, true);
-}
-
-// The time at one end, in its tone, with the zone small and grey on the outside: after
-// a departure and before an arrival. The small size has no room for the zone.
-function clock(row, end, compact, right) {
-  const group = row.addStack();
-  group.bottomAlignContent();
-  const time = () => {
-    mono(group, end.time, compact ? 15 : 18, "bold", end.tone ? toneColor(end.tone) : TEXT);
-  };
-  const zone = () => {
-    if (compact || !end.zone) return;
-    // Bottom-aligned, the zone's descender room is shallower than the time's, so its
-    // baseline lands below the time's; a spacer under it makes up the difference.
-    const lift = group.addStack();
-    lift.layoutVertically();
-    const text = lift.addText(end.zone);
-    text.font = Font.mediumSystemFont(9);
-    text.textColor = MUTED;
-    text.lineLimit = 1;
-    lift.addSpacer(2);
-  };
-  if (right) {
-    zone();
-    if (!compact && end.zone) group.addSpacer(3);
-    time();
-  } else {
-    time();
-    if (!compact && end.zone) group.addSpacer(3);
-    zone();
-  }
-}
-
-function daysRow(container, card) {
-  const row = container.addStack();
-  mono(row, card.origin.day || "", 10, "regular", MUTED);
-  row.addSpacer();
-  mono(row, card.destination.day || "", 10, "regular", MUTED);
-}
-
-// Where in the building at each end: terminal then gate where it leaves from, gate then
-// terminal where it arrives, so the terminal sits on the outside at both ends and the
-// gate beside the rule, as on the card, and as on the card each word stands over its
-// value.
-function placesRow(container, card) {
-  const row = container.addStack();
-  row.centerAlignContent();
-  places(row, [["Term", card.origin.terminal, false], ["Gate", card.origin.gate, true]]);
-  row.addSpacer();
-  places(row, [["Gate", card.destination.gate, true], ["Term", card.destination.terminal, false]]);
-}
-
-function places(row, pairs) {
-  const group = row.addStack();
-  pairs.forEach(([name, value, isGate], index) => {
-    if (index) group.addSpacer(8);
-    const cell = group.addStack();
-    cell.layoutVertically();
-    cell.spacing = 1;
-    const label = cell.addText(name.toUpperCase());
-    label.font = Font.mediumSystemFont(8);
-    label.textColor = MUTED;
-    label.lineLimit = 1;
-    const tone = value ? (isGate ? toneColor("plan") : TEXT) : MUTED;
-    mono(cell, value || "-", 12, isGate && value ? "semibold" : "medium", tone);
-  });
-}
-
-// The card's heading: the airline's mark, when it came, then the number, and the route
-// beside it where the row is wide enough to hold both.
+// The heading: the airline's mark, when it came, then the number, and the route beside
+// it where the row is wide enough to hold both.
 function titleRow(container, flight, logos, size, withRoute) {
   const row = container.addStack();
   row.centerAlignContent();
@@ -798,29 +471,14 @@ function titleRow(container, flight, logos, size, withRoute) {
   return row;
 }
 
-// The board's badge: the word in its tone, on the same tone let through the card.
-function pill(container, flight) {
-  const badge = container.addStack();
-  badge.centerAlignContent();
-  badge.setPadding(2, 6, 2, 6);
-  badge.cornerRadius = 7;
-  badge.backgroundColor = toneColor(flight.status_tone, TINT_ALPHA);
-  const text = badge.addText(flight.status_label);
-  text.font = Font.semiboldSystemFont(10);
+// The status as a word in its tone. Not a badge: a badge reads as live, and this is as
+// old as the last reload.
+function statusText(container, flight, size) {
+  const text = container.addText(flight.status_label);
+  text.font = Font.semiboldSystemFont(size);
   text.textColor = toneColor(flight.status_tone);
   text.lineLimit = 1;
-  return badge;
-}
-
-function figureText(container, flight, font, color) {
-  const element = container.addText(milestoneFigure(flight));
-  element.font = font;
-  if (color) {
-    element.textColor = color;
-  }
-  element.lineLimit = 1;
-  element.minimumScaleFactor = 0.6;
-  return element;
+  return text;
 }
 
 function footer(widget, data, result) {
@@ -864,59 +522,17 @@ function setupWidget() {
 }
 
 function scheduleRefresh(widget, data) {
-  const now = Date.now();
+  // The server's cadence is the one to keep: the data does not move faster than that,
+  // and nothing drawn here moves on its own between reloads.
   const cadence = Math.max(data.refresh_seconds || 900, MIN_REFRESH_SECONDS) * 1000;
-  // The feed's times are whole minutes, so a figure only ever changes on the minute.
-  // Close to a milestone the figure is minutes and every one of them counts, so the
-  // ask is the next minute; iOS grants it or not. Further out, the server's cadence
-  // is the one to keep, since the data does not move faster than that.
-  const imminent = (data.flights || []).some(
-    (flight) => flight.milestone_to && Math.abs(new Date(flight.milestone_to).getTime() - now) < IMMINENT_MS,
-  );
-  const when = imminent ? now - (now % 60000) + 60000 : now + cadence;
-  widget.refreshAfterDate = new Date(when);
+  widget.refreshAfterDate = new Date(Date.now() + cadence);
 }
 
 // --- text ------------------------------------------------------------------------------
 
-function toneColor(name, alpha = 1) {
+function toneColor(name) {
   const [light, dark] = TONES[name] || TONES.quiet;
-  return Color.dynamic(new Color(light, alpha), new Color(dark, alpha));
-}
-
-function hasMilestone(flight) {
-  return Boolean(flight.milestone_to || flight.milestone_text);
-}
-
-// The same string the page builds from the same milliseconds: whole days past a day,
-// then hours and minutes, then minutes, and never a second.
-function figure(ms) {
-  const total = Math.floor(Math.abs(ms) / 60000);
-  const days = Math.floor(total / 1440);
-  const hours = Math.floor(total / 60) % 24;
-  const minutes = total % 60;
-  if (days) return `${days}d`;
-  if (hours) return `${hours}h ${minutes < 10 ? "0" : ""}${minutes}m`;
-  if (minutes) return `${minutes}m`;
-  return "<1m";
-}
-
-function until(instant) {
-  const ms = new Date(instant).getTime() - Date.now();
-  // A target in the past counts up: "20m ago" is a fact, "-20m" is arithmetic.
-  return figure(ms) + (ms < 0 ? " ago" : "");
-}
-
-// The figure beside the milestone: counted to the instant, or the belt as given.
-function milestoneFigure(flight) {
-  return flight.milestone_to ? until(flight.milestone_to) : flight.milestone_text;
-}
-
-// The words in front of it change with it, so "at the gate in" becomes "due at the
-// gate" the minute it passes, as they do on the page, without waiting for a reload.
-function milestoneLabel(flight) {
-  const passed = flight.milestone_to && new Date(flight.milestone_to).getTime() < Date.now();
-  return passed && flight.milestone_due ? flight.milestone_due : flight.milestone_label;
+  return Color.dynamic(new Color(light), new Color(dark));
 }
 
 function staleNote(result) {
@@ -924,28 +540,6 @@ function staleNote(result) {
     return null;
   }
   return result.cachedAt ? `Cached ${timeOfDay(result.cachedAt)}` : "Cached";
-}
-
-// Where the aircraft sits on the card's rule, as a share of it, or null with nothing
-// to place. Between wheels-up and the landing estimate the phone's clock moves it, the
-// way the page moves it between loads; with no span to measure against the feed's own
-// figure stands, which is also what a flight on the ground has.
-function ruleProgress(card) {
-  if (card.airborne_off && card.airborne_on) {
-    const off = new Date(card.airborne_off).getTime();
-    const on = new Date(card.airborne_on).getTime();
-    if (on > off) {
-      return Math.min(Math.max((Date.now() - off) / (on - off), 0), 1);
-    }
-  }
-  return typeof card.progress === "number" ? card.progress / 100 : null;
-}
-
-function contentSize() {
-  const screen = Device.screenSize();
-  const key = `${Math.min(screen.width, screen.height)}x${Math.max(screen.width, screen.height)}`;
-  const [side, medium] = WIDGET_SIZES[key] || NARROWEST;
-  return { width: (family === "small" ? side : medium) - 2 * INSET, height: side - 2 * INSET };
 }
 
 function timeOfDay(date) {
