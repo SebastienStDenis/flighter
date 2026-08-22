@@ -384,8 +384,11 @@ def test_the_email_page_says_which_email_was_set_aside_and_why(client: TestClien
     assert "RuntimeError: the model timed out." in body
     assert "Try again" in body
     assert "Ignore" in body
+    # The quoted subject is distinguished from the service's own account of it.
+    assert '<span class="truncate italic">Your booking is confirmed</span>' in body
     # The email itself, in Mail, is where the other half of the decision is made.
     assert 'href="message://%3Cabc@icloud.invalid%3E"' in body
+    assert 'title="Open in Mail" aria-label="Open in Mail"' in body
 
 
 def test_the_page_and_the_push_say_the_same_thing(client: TestClient, settings: Settings) -> None:
@@ -471,6 +474,8 @@ def test_the_email_page_lists_what_became_of_every_email(client: TestClient) -> 
         assert subject in body
     for label in ("Imported", "Already added", "Ignored", "Retrying"):
         assert f">{label}</span>" in body
+    # Opening the source email is available on history as well as failures needing attention.
+    assert body.count('title="Open in Mail" aria-label="Open in Mail"') == 4
     # An imported email points at what it put on the board.
     assert 'href="/f/1"' in body
     assert "AC871" in body
