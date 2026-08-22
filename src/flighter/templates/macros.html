@@ -76,7 +76,7 @@
    outer side of the figure. The figure itself is left the colour every other figure on
    the card is, so a card with three moves on it is still a card of times. #}
 {% macro dot(tone, right=false) -%}
-<span class="dot {{ tone }} {{ 'ml-2' if right else 'mr-2' }}" aria-hidden="true"></span>
+<span class="dot {{ tone }} {{ 'ml-1.5' if right else 'mr-1.5' }}" aria-hidden="true"></span>
 {%- endmacro %}
 
 {# One line of an end drawn as it was booked, ruled through when the move changed it. #}

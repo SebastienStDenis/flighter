@@ -618,7 +618,7 @@ def tap_for_was(*, arrival: bool = False) -> str:
 def dot(tone: str, *, arrival: bool = False) -> str:
     """The mark a move earns: a dot in its tone on the outer side of the figure, which
     is before a departure's time and after an arrival's."""
-    return f'<span class="dot {tone} {"ml-2" if arrival else "mr-2"}" aria-hidden="true"></span>'
+    return f'<span class="dot {tone} {"ml-1.5" if arrival else "mr-1.5"}" aria-hidden="true"></span>'
 
 
 def big_time(instant: datetime, tz: str, *, arrival: bool = False, moved: str = "") -> str:
