@@ -390,6 +390,13 @@ def test_a_flight_that_has_landed_is_drawn_all_the_way_there() -> None:
     assert view(booking(scheduled_departure_utc=leaves), airborne).progress_percent < 100
 
 
+def test_a_cancelled_flight_is_drawn_at_the_origin() -> None:
+    """The poller closes a cancelled booking too, but the aircraft never left."""
+    closed = booking(scheduled_departure_utc=now_ish(days=-1), status=BookingStatus.COMPLETED)
+    assert view(closed, snapshot(cancelled=True, progress_percent=100)).progress_percent is None
+    assert view(closed, snapshot(cancelled=True)).airborne_window is None
+
+
 # --- arrived, and a milestone whose time has passed ----------------------------------------
 
 

@@ -225,8 +225,11 @@ class FlightView:
         """How far along the rule the aircraft is drawn.
 
         A flight that has landed is all the way there whatever the feed last said: its
-        figure stops at the last poll, which may have been well short of the runway.
+        figure stops at the last poll, which may have been well short of the runway. A
+        cancelled one never left, however the poller closed it.
         """
+        if self.cancelled:
+            return None
         if self.phase == LANDED or self.flown:
             return 100
         return progress_estimate(self.booking, self.snapshot, datetime.now(UTC))
