@@ -191,7 +191,7 @@
   // The shell is cached so the app opens from the home screen with no network, and the
   // last copy of each page is kept for when the server cannot be reached; see sw.js.
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/sw.js?v={{ build_id }}");
+    navigator.serviceWorker.register("/sw.js");
   }
 </script>
 </body>

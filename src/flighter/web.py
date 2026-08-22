@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from hashlib import sha256
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -63,16 +62,6 @@ SETTINGS_TABS = ("connections", "preferences", "widget")
 WIDGET_QUIET_AFTER = timedelta(days=1)
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-
-
-def _build_id() -> str:
-    digest = sha256()
-    for path in sorted(Path(__file__).parent.rglob("*")):
-        if path.suffix not in {".css", ".html", ".jinja", ".js", ".json", ".py"}:
-            continue
-        digest.update(path.relative_to(Path(__file__).parent).as_posix().encode())
-        digest.update(path.read_bytes())
-    return digest.hexdigest()[:12]
 
 
 async def note_problems(request: Request) -> None:
@@ -155,7 +144,6 @@ def create_app(settings: Settings) -> FastAPI:
         duration=views.duration,
         email_url=message_url,
         logo_url=views.logo_url,
-        build_id=_build_id(),
         missing=views.MISSING,
         rendered_at=lambda: datetime.now(UTC).isoformat(timespec="seconds"),
         until=views.until,

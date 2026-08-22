@@ -60,7 +60,7 @@
       {{ m.editable("Confirmation", dash(v.booking.confirmation_code), "confirmation_code", mono=true) }}
       {{ m.editable("Seat", dash(v.booking.seat), "seat", mono=true) }}
       {{ m.editable("Notes", dash(v.booking.notes), "notes") }}
-      {{ m.editable("Owner", v.booking.friend_name or "Me", "owner", friend=v if v.booking.friend_name else none) }}
+      {{ m.editable("Owner", v.booking.friend_name or "Me", "owner") }}
       {% if s and s.aircraft_type %}
       {{ m.detail("Aircraft", s.aircraft_type, mono=true) }}
       {% endif %}

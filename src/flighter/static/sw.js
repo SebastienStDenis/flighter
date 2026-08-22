@@ -5,8 +5,7 @@
 // page itself says how old it is, so a gate number from an hour ago reads as one.
 
 const SHELL = "shell-v6";
-const RELEASE = new URL(self.location.href || self.location.origin).searchParams.get("v") || "v1";
-const PAGES = `pages-${RELEASE}`;
+const PAGES = "pages-v1";
 const AIRLINE_LOGOS = "airline-logos-v1";
 const AIRLINE_LOGO_ORIGIN = "https://www.gstatic.com";
 const AIRLINE_LOGO_PATH = "/flights/airline_logos/70px/";

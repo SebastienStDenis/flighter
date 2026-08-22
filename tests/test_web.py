@@ -1435,17 +1435,11 @@ def test_the_friend_owner_is_selected_in_the_ticket_editor(
     show(monkeypatch, booking(friend_name="Sam"), empty_snapshot())
     body = client.get("/f/1").text
     assert "Owner" in body and "Sam" in body
-    assert 'class="friend-avatar flex size-4 shrink-0' in body
     assert 'name="friend_name"' in body and 'value="Sam"' in body
     assert re.search(r'name="owner" value="friend"[^>]+ checked', body)
     assert 'id="friend-name-field" role="group" class="field" hidden' not in body
     assert not re.search(r'name="friend_name"[^>]+ disabled', body)
     assert "Friend's name" not in body and "My flight" not in body
-
-
-def test_the_service_worker_version_tracks_the_application_code(client: TestClient) -> None:
-    body = client.get("/").text
-    assert re.search(r'serviceWorker\.register\("/sw\.js\?v=[a-f0-9]{12}"\)', body)
 
 
 def test_saving_the_ticket_hands_the_booking_layer_what_was_written(
