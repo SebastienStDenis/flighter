@@ -43,8 +43,11 @@ const MILESTONE_COLUMN = 84;
 // The rule between the card's two airports, for the same reason: the aircraft's place
 // on it is a share of a width the script has to know. What the row has left over goes
 // either side of it.
-const RULE_WIDTH = { small: 52, medium: 168, large: 168 };
+const RULE_WIDTH = { small: 44, medium: 150, large: 150 };
 const PLANE = 11;
+// SF Mono advances this much of the point size per glyph, whatever the weight, which
+// is what lets a monospaced text be given a box exactly its own width.
+const MONO_ADVANCE = 0.62;
 
 // The web UI's palette, each value as styles/app.css defines it for the light and the
 // dark scheme, rendered from oklch to sRGB. The phone's appearance picks the side, the
@@ -307,7 +310,9 @@ async function buildWidget(result) {
     // Only the large size has room under the card for the rest of the board.
     const rest = family === "large" ? flights.filter((flight) => flight !== featured) : [];
     if (rest.length) {
-      widget.addSpacer(14);
+      widget.addSpacer(10);
+      divider(widget);
+      widget.addSpacer(10);
       renderList(widget, rest, logos);
     }
   } else if (family === "small") {
@@ -471,9 +476,13 @@ function renderList(widget, flights, logos) {
 // rule between them and the aircraft on it; the time at each end in its tone, with its
 // zone on the outside the way the card sets it; the terminal and gate at each end; and
 // what it counts to, the label on the left and the figure on the right as in the card's
-// footer. The small size keeps every row and shrinks the type, and gives the pill a
-// line of its own, since it has no room beside the number for one that says
-// "Departure delayed".
+// footer. The small size has room for the codes, the times and the count, in smaller
+// type, with the pill and the count's label on lines of their own.
+//
+// A text in a row with a flexible spacer is handed a share of the row rather than the
+// width it needs, and is cut short with room beside it. So every monospaced text here
+// sits in a box exactly its own width, and nothing but the spacers is left to flex. The
+// rows set no spacing of their own, since that would go between the pieces of the rule.
 function renderCard(widget, flight, logos) {
   const card = flight.card;
   const compact = family === "small";
@@ -485,9 +494,17 @@ function renderCard(widget, flight, logos) {
     widget.url = flight.detail_url;
   }
 
+  const size = compact ? 12 : 14;
   const header = container.addStack();
   header.centerAlignContent();
-  titleRow(header, flight, logos, compact ? 12 : 14, false);
+  const logo = logos[flight.logo_url];
+  if (logo) {
+    const mark = header.addImage(logo);
+    mark.imageSize = new Size(size + 3, size + 3);
+    mark.cornerRadius = 3;
+    header.addSpacer(5);
+  }
+  mono(header, flight.number, size, "semibold", TEXT);
   if (compact) {
     container.addSpacer(3);
     pill(container.addStack(), flight);
@@ -496,33 +513,62 @@ function renderCard(widget, flight, logos) {
     pill(header, flight);
   }
 
-  container.addSpacer(compact ? 4 : 8);
+  container.addSpacer(compact ? 5 : 6);
   routeRow(container, card, compact);
-  container.addSpacer(compact ? 2 : 4);
+  container.addSpacer(compact ? 2 : 3);
   timesRow(container, card, compact);
   if (family === "large") {
+    container.addSpacer(1);
     daysRow(container, card);
   }
-  container.addSpacer(compact ? 3 : 6);
-  placesRow(container, card, compact);
+  if (!compact) {
+    container.addSpacer(4);
+    placesRow(container, card);
+  }
 
   if (hasMilestone(flight)) {
-    container.addSpacer(compact ? 4 : 8);
-    const line = container.addStack();
-    line.bottomAlignContent();
-    const label = line.addText(milestoneLabel(flight));
-    label.font = Font.systemFont(compact ? 10 : 11);
-    label.textColor = MUTED;
-    label.lineLimit = 1;
-    line.addSpacer();
-    figureText(line, flight, Font.boldMonospacedSystemFont(compact ? 17 : 20), TEXT);
+    container.addSpacer(5);
+    if (compact) {
+      const label = container.addText(milestoneLabel(flight));
+      label.font = Font.systemFont(10);
+      label.textColor = MUTED;
+      label.lineLimit = 1;
+      figureText(container, flight, Font.boldMonospacedSystemFont(18), TEXT);
+    } else {
+      const line = container.addStack();
+      line.bottomAlignContent();
+      const label = line.addText(milestoneLabel(flight));
+      label.font = Font.systemFont(11);
+      label.textColor = MUTED;
+      label.lineLimit = 1;
+      line.addSpacer();
+      figureText(line, flight, Font.boldMonospacedSystemFont(18), TEXT);
+    }
   }
+}
+
+// A monospaced text in a box exactly its own width, so nothing in the row can hand it
+// less than it needs.
+function mono(row, text, size, weight, color) {
+  const box = row.addStack();
+  box.size = new Size(Math.ceil(text.length * size * MONO_ADVANCE) + 1, 0);
+  const element = box.addText(text);
+  element.font = monoFont(size, weight);
+  element.textColor = color;
+  element.lineLimit = 1;
+  return element;
+}
+
+function monoFont(size, weight) {
+  if (weight === "bold") return Font.boldMonospacedSystemFont(size);
+  if (weight === "semibold") return Font.semiboldMonospacedSystemFont(size);
+  if (weight === "medium") return Font.mediumMonospacedSystemFont(size);
+  return Font.regularMonospacedSystemFont(size);
 }
 
 function routeRow(container, card, compact) {
   const row = container.addStack();
   row.centerAlignContent();
-  row.spacing = compact ? 6 : 8;
   code(row, card.origin.iata, compact, null);
   row.addSpacer();
   rule(row, card, RULE_WIDTH[family] || RULE_WIDTH.medium, compact);
@@ -535,58 +581,58 @@ function routeRow(container, card, compact) {
 function code(row, iata, compact, booked) {
   const group = row.addStack();
   group.bottomAlignContent();
-  group.spacing = 3;
-  const text = group.addText(iata);
-  text.font = Font.boldMonospacedSystemFont(compact ? 16 : 20);
-  text.textColor = booked ? toneColor("stop") : TEXT;
-  text.lineLimit = 1;
+  mono(group, iata, compact ? 16 : 20, "bold", booked ? toneColor("stop") : TEXT);
   if (booked) {
-    const was = group.addText(booked);
-    was.font = Font.regularMonospacedSystemFont(compact ? 9 : 11);
-    was.textColor = MUTED;
-    was.lineLimit = 1;
+    group.addSpacer(3);
+    mono(group, booked, compact ? 9 : 11, "regular", MUTED);
   }
 }
 
 // The rule from code to code. With the aircraft in the air it is drawn as far as the
 // aircraft has got, in the page's plan colour, with the aircraft at the end of that and
-// the rest faint; before wheels-up it carries how long the hop is; and with nothing to
-// say it is a faint line.
+// the rest faint; before wheels-up it carries how long the hop is, where the rule is
+// long enough to hold the words; and with nothing to say it is a faint line.
 function rule(row, card, width, compact) {
   const progress = ruleProgress(card);
   if (progress === null) {
-    if (!card.block_time) {
-      line(row, width, RULE);
+    if (!card.block_time || compact) {
+      stroke(row, width, RULE);
       return;
     }
-    const half = Math.floor((width - 8) / 2);
-    line(row, half, RULE);
+    const label = Math.ceil(card.block_time.length * 9 * MONO_ADVANCE) + 1;
+    const half = Math.floor((width - label - 8) / 2);
+    stroke(row, half, RULE);
     row.addSpacer(4);
-    const length = row.addText(card.block_time);
-    length.font = Font.regularMonospacedSystemFont(compact ? 8 : 9);
-    length.textColor = MUTED;
-    length.lineLimit = 1;
+    mono(row, card.block_time, 9, "regular", MUTED);
     row.addSpacer(4);
-    line(row, half, RULE);
+    stroke(row, half, RULE);
     return;
   }
-  const span = width - PLANE - 4;
+  const span = width - PLANE - 2;
   const flown = Math.round(span * progress);
-  line(row, flown, toneColor("plan"));
-  row.addSpacer(2);
+  stroke(row, flown, toneColor("plan"));
+  row.addSpacer(1);
   const plane = row.addImage(SFSymbol.named("airplane").image);
   plane.imageSize = new Size(PLANE, PLANE);
   plane.tintColor = toneColor("plan");
-  row.addSpacer(2);
-  line(row, span - flown, RULE);
+  row.addSpacer(1);
+  stroke(row, span - flown, RULE);
 }
 
 // A stack of a fixed width and one point of height is a line; a width of zero would
 // mean "as wide as there is room", so the shortest line is a point long.
-function line(row, width, color) {
+function stroke(row, width, color) {
   const bar = row.addStack();
   bar.size = new Size(Math.max(1, width), 1);
   bar.backgroundColor = color;
+}
+
+// A line the width of the widget, between the card and the rows under it.
+function divider(widget) {
+  const bar = widget.addStack();
+  bar.addSpacer();
+  bar.size = new Size(0, 1);
+  bar.backgroundColor = RULE;
 }
 
 function timesRow(container, card, compact) {
@@ -598,71 +644,62 @@ function timesRow(container, card, compact) {
 }
 
 // The time at one end, in its tone, with the zone small and grey on the outside: after
-// a departure and before an arrival.
+// a departure and before an arrival. The small size has no room for the zone.
 function clock(row, end, compact, right) {
   const group = row.addStack();
   group.bottomAlignContent();
-  group.spacing = 3;
   const time = () => {
-    const text = group.addText(end.time);
-    text.font = Font.boldMonospacedSystemFont(compact ? 15 : 18);
-    text.textColor = end.tone ? toneColor(end.tone) : TEXT;
-    text.lineLimit = 1;
+    mono(group, end.time, compact ? 15 : 18, "bold", end.tone ? toneColor(end.tone) : TEXT);
   };
   const zone = () => {
-    if (!end.zone) return;
+    if (compact || !end.zone) return;
     const text = group.addText(end.zone);
-    text.font = Font.mediumSystemFont(compact ? 8 : 9);
+    text.font = Font.mediumSystemFont(9);
     text.textColor = MUTED;
     text.lineLimit = 1;
   };
   if (right) {
     zone();
+    if (!compact && end.zone) group.addSpacer(3);
     time();
   } else {
     time();
+    if (!compact && end.zone) group.addSpacer(3);
     zone();
   }
 }
 
 function daysRow(container, card) {
   const row = container.addStack();
-  for (const [index, end] of [card.origin, card.destination].entries()) {
-    if (index) row.addSpacer();
-    const day = row.addText(end.day || "");
-    day.font = Font.regularMonospacedSystemFont(10);
-    day.textColor = MUTED;
-    day.lineLimit = 1;
-  }
+  mono(row, card.origin.day || "", 10, "regular", MUTED);
+  row.addSpacer();
+  mono(row, card.destination.day || "", 10, "regular", MUTED);
 }
 
 // Where in the building at each end: terminal then gate where it leaves from, gate then
 // terminal where it arrives, so the terminal sits on the outside at both ends and the
 // gate beside the rule, as on the card.
-function placesRow(container, card, compact) {
+function placesRow(container, card) {
   const row = container.addStack();
-  row.centerAlignContent();
-  places(row, [["Term", card.origin.terminal, false], ["Gate", card.origin.gate, true]], compact);
+  row.bottomAlignContent();
+  places(row, [["Term", card.origin.terminal, false], ["Gate", card.origin.gate, true]]);
   row.addSpacer();
-  places(row, [["Gate", card.destination.gate, true], ["Term", card.destination.terminal, false]], compact);
+  places(row, [["Gate", card.destination.gate, true], ["Term", card.destination.terminal, false]]);
 }
 
-function places(row, pairs, compact) {
+function places(row, pairs) {
   const group = row.addStack();
   group.bottomAlignContent();
-  group.spacing = compact ? 6 : 8;
-  for (const [name, value, isGate] of pairs) {
-    const cell = group.addStack();
-    cell.bottomAlignContent();
-    cell.spacing = 3;
-    const label = cell.addText(name.toUpperCase());
-    label.font = Font.mediumSystemFont(compact ? 7 : 8);
+  pairs.forEach(([name, value, isGate], index) => {
+    if (index) group.addSpacer(8);
+    const label = group.addText(name.toUpperCase());
+    label.font = Font.mediumSystemFont(8);
     label.textColor = MUTED;
-    const text = cell.addText(value || "-");
-    text.font = isGate && value ? Font.semiboldMonospacedSystemFont(compact ? 11 : 12) : Font.mediumMonospacedSystemFont(compact ? 11 : 12);
-    text.textColor = value ? (isGate ? toneColor("plan") : TEXT) : MUTED;
-    text.lineLimit = 1;
-  }
+    label.lineLimit = 1;
+    group.addSpacer(3);
+    const tone = value ? (isGate ? toneColor("plan") : TEXT) : MUTED;
+    mono(group, value || "-", 12, isGate && value ? "semibold" : "medium", tone);
+  });
 }
 
 // The card's heading: the airline's mark, when it came, then the number, and the route

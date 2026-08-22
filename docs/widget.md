@@ -49,9 +49,9 @@ does the same thing at once, and says so.
 | Family | What it shows |
 | --- | --- |
 | `accessoryRectangular` (Lock Screen) | Next flight only, three tight lines. **iOS 16 or later.** |
-| Small | Next flight: the number, the route under it, its status pill, the next milestone large, and the card's detail line underneath. While a flight is under way, its card in small type |
+| Small | Next flight: the number, the route under it, its status pill, the next milestone large, and the card's detail line underneath. While a flight is under way, the heart of its card: the codes with the rule between them, the times, and the count |
 | Medium | Up to three flights, one row each, each row tappable. While a flight is under way, its card alone |
-| Large | Same rows, with room to breathe. While a flight is under way, its card with the other flights' rows under it |
+| Large | Same rows, with room to breathe. While a flight is under way, its card, a rule, and the other flights' rows under it |
 
 Tapping opens the flight's page on your server. On medium and large each row deep-links
 to its own flight; small and Lock Screen widgets get a single tap target, which is an iOS
