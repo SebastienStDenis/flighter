@@ -15,6 +15,7 @@ from flighter.bookings import (
     delete_booking,
     find_duplicate,
     flight_label,
+    from_messages,
     latest_snapshot,
     latest_snapshots,
     on_board_from_message,
@@ -290,3 +291,40 @@ async def test_latest_snapshots_picks_the_newest_row_per_booking(seeded: None) -
         assert one is not None and one.gate_origin == "new"
         assert await latest_snapshot(session, unpolled.id) is None
         assert await latest_snapshots(session, []) == {}
+
+
+async def test_an_email_is_answered_with_the_flights_it_put_on_the_board(
+    seeded: None,
+) -> None:
+    """One query for a page of emails, and a deleted flight is not one of the answers."""
+    async with session_scope() as session:
+        outbound = await book(
+            session, datetime(2026, 9, 12, 9, 0), source="email", source_message_id="<trip@x>"
+        )
+        await book(
+            session,
+            datetime(2026, 9, 19, 9, 0),
+            marketing_number="5678",
+            source="email",
+            source_message_id="<trip@x>",
+        )
+        gone = await book(
+            session,
+            datetime(2026, 9, 20, 9, 0),
+            marketing_number="9012",
+            source="email",
+            source_message_id="<deleted@x>",
+        )
+        await delete_booking(session, gone.id)
+
+    async with session_scope() as session:
+        found = await from_messages(session, ["<trip@x>", "<deleted@x>", "<never@x>"])
+
+    assert list(found) == ["<trip@x>"]
+    # In the order they are flown, which is the order the email listed them in.
+    assert [b.marketing_number for b in found["<trip@x>"]] == [outbound.marketing_number, "5678"]
+
+
+async def test_no_emails_is_no_query(seeded: None) -> None:
+    async with session_scope() as session:
+        assert await from_messages(session, []) == {}

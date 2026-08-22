@@ -281,6 +281,31 @@ async def on_board_from_message(session: AsyncSession, message_id: str) -> bool:
     return await session.scalar(stmt) is not None
 
 
+async def from_messages(
+    session: AsyncSession, message_ids: Sequence[str]
+) -> dict[str, list[Booking]]:
+    """The flights each of these emails put on the board and that are still there.
+
+    One query for a page of them rather than one per row. An email whose flights have
+    all been deleted is absent rather than empty: nothing on the board came of it, which
+    is the same answer as never having booked anything.
+    """
+    if not message_ids:
+        return {}
+    result = await session.execute(
+        select(Booking)
+        .where(
+            Booking.source_message_id.in_(message_ids),
+            Booking.status != BookingStatus.ARCHIVED,
+        )
+        .order_by(Booking.scheduled_departure_utc)
+    )
+    found: dict[str, list[Booking]] = {}
+    for booking in result.scalars():
+        found.setdefault(str(booking.source_message_id), []).append(booking)
+    return found
+
+
 async def latest_snapshot(session: AsyncSession, booking_id: int) -> FlightSnapshot | None:
     """The newest observation of one booking, or None before the first poll."""
     return (await latest_snapshots(session, [booking_id])).get(booking_id)

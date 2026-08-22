@@ -6,7 +6,7 @@ being processed twice. One bad email is never allowed to stop the loop.
 
 The flag is the queue, so the row is also the retry state. A message that failed keeps
 its flag and is swept again a couple of times, minutes apart; if it still fails it is set
-aside, and only a person asking for it on the Problems page brings it back. An email that
+aside, and only a person asking for it on the email page brings it back. An email that
 held no flight is set aside at once, because reading it again reads it the same way. A
 message that reached the board is unflagged where it stands, and comes back only by being
 flagged again: that is the person overruling a decision that it held no flight, or asking
@@ -67,8 +67,13 @@ ERROR = IngestOutcome.ERROR
 # there are delays here and the message is set aside: whatever is wrong with it is not
 # the kind of wrong that fixes itself, and a sweep that keeps re-running a model against
 # the same broken email costs money and says nothing new. The flag stays on so the email
-# is still where the person left it, and the Problems page offers it back.
+# is still where the person left it, and the email page offers it back.
 RETRY_DELAYS = (timedelta(minutes=2), timedelta(minutes=10))
+
+# How far back the email page reads. A deployment that has been running for years has
+# a mailbox behind it, and nobody scrolls a list of every confirmation they have ever
+# been sent; what is set aside is added to this however old it is.
+ACTIVITY_LIMIT = 50
 
 # How often the watcher looks again while there is nothing to sign in with. Seconds
 # rather than minutes because no connection is open to cost anybody anything, and because
@@ -162,7 +167,7 @@ async def _extract(message: Message, settings: Settings) -> Extraction | None:
 
 
 def _failed(exc: Exception) -> Ingested:
-    """The exception's own words, which a person reads on a push and on the Problems page.
+    """The exception's own words, which a person reads on a push and on the email page.
 
     The class name is in the traceback the caller has already logged; on a phone it is
     noise in front of the sentence that matters.
@@ -174,7 +179,7 @@ def _no_flight() -> Ingested:
     """An answer, but not one that takes the flag off.
 
     Reading the email again reads it the same way, so there is nothing to retry. The flag
-    stays on all the same: the email is still where the person left it, and the Problems
+    stays on all the same: the email is still where the person left it, and the email
     page asks them whether it really held nothing rather than deciding that on its own.
     """
     return Ingested(ERROR, error=notices.NO_FLIGHT, retryable=False)
@@ -310,6 +315,22 @@ async def list_set_aside(session: AsyncSession) -> list[IngestLog]:
     return list(rows.scalars())
 
 
+async def list_activity(session: AsyncSession, limit: int = ACTIVITY_LIMIT) -> list[IngestLog]:
+    """What the service has made of the mailbox lately, newest first.
+
+    Anything set aside is on the list wherever it falls, because the nav counts those
+    rows whatever their age and a marked tab over a page that does not show them would
+    be a tab that lies. They are older than everything in the recent run by definition,
+    so they go on the end and the order still reads newest first.
+    """
+    rows = await session.execute(
+        select(IngestLog).order_by(IngestLog.processed_at.desc()).limit(limit)
+    )
+    recent = list(rows.scalars())
+    seen = {row.message_id for row in recent}
+    return recent + [row for row in await list_set_aside(session) if row.message_id not in seen]
+
+
 async def retry(session: AsyncSession, message_id: str) -> IngestLog | None:
     """Put a set-aside message back at the front of the queue.
 
@@ -355,7 +376,7 @@ async def _settle_ignored(message_id: str) -> None:
 # -- the loop ------------------------------------------------------------------------
 
 
-# Set from the Problems page when a person hands an email back, so the watcher sweeps at
+# Set from the email page when a person hands an email back, so the watcher sweeps at
 # the end of its current idle rather than at the end of its cycle. Only ever set, read
 # and cleared, never awaited, so it belongs to no particular event loop.
 _wake = asyncio.Event()
@@ -450,7 +471,7 @@ async def _import(
     before = await _on_file(message.id)
 
     if before is not None and before.outcome == IngestOutcome.IGNORED:
-        # Decided on the Problems page; taking the flag off is what was left to do.
+        # Decided on the email page; taking the flag off is what was left to do.
         log.debug("%s was ignored; taking its flag off", message.id)
         await mailbox.clear_mark(marked)
         await _settle_ignored(message.id)

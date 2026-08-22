@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
-from flighter import prefs, web
+from flighter import notices, prefs, web
 from flighter.aeroapi import BREAKER_KEY, BudgetExceeded, BudgetStatus
 from flighter.caldav import CalendarUnavailable, Collection
 from flighter.config import Settings
@@ -290,7 +290,7 @@ def looks_up(
 def test_every_page_says_when_it_was_rendered(client: TestClient) -> None:
     """The page's script turns this into "Loaded 12m ago" once the page is old, whether
     it was left open or served from the cache with no network."""
-    for path in ("/", "/f/new", "/problems", "/settings"):
+    for path in ("/", "/f/new", "/mail", "/settings"):
         found = re.search(r'<meta name="rendered-at" content="([^"]+)">', client.get(path).text)
         assert found, path
         rendered = datetime.fromisoformat(found.group(1))
@@ -374,14 +374,14 @@ def test_raising_the_limit_also_lets_polling_start_again(client: TestClient) -> 
     assert client.session.deleted == [latch]  # type: ignore[attr-defined]
 
 
-def test_the_problems_page_says_which_email_was_set_aside_and_why(client: TestClient) -> None:
+def test_the_email_page_says_which_email_was_set_aside_and_why(client: TestClient) -> None:
     client.session.rows["IngestLog"] = [set_aside_row()]  # type: ignore[attr-defined]
 
-    body = client.get("/problems").text
+    body = client.get("/mail").text
 
-    assert "<strong>Email could not be imported</strong>" in body
-    assert "Subject: Your booking is confirmed" in body
-    assert "RuntimeError: the model timed out. It is still flagged in Mail." in body
+    assert ">Needs attention</span>" in body
+    assert "Your booking is confirmed" in body
+    assert "RuntimeError: the model timed out." in body
     assert "Try again" in body
     assert "Ignore" in body
     # The email itself, in Mail, is where the other half of the decision is made.
@@ -390,16 +390,27 @@ def test_the_problems_page_says_which_email_was_set_aside_and_why(client: TestCl
 
 def test_the_page_and_the_push_say_the_same_thing(client: TestClient, settings: Settings) -> None:
     """One email, one wording: a person who read the push and then opened the page is
-    not told two different stories about it."""
+    not told two different stories about it.
+
+    The push names the email in a line of its own because a lock screen has nothing else
+    to name it with, and says where it still is because it can offer nothing to do about
+    it; the page has the subject at the top of the card and the buttons under it, so what
+    has to match word for word is the reason in the middle.
+    """
     row = set_aside_row()
     client.session.rows["IngestLog"] = [row]
 
     sent = asyncio.run(_push_about(row, settings))
-    body = client.get("/problems").text
+    body = client.get("/mail").text
 
-    assert sent["title"] in body
-    for line in sent["message"].split("\n"):
-        assert line in body
+    subject, said = sent["message"].split("\n")
+    assert subject == f"Subject: {row.subject}"
+    assert row.subject in body
+    assert said == f"{notices.sentence(row.error)} {notices.STILL_FLAGGED}"
+    # Where the email is, is the one thing the page does not have to say: the buttons
+    # that do something about it are right there under the words.
+    assert notices.sentence(row.error) in body
+    assert notices.STILL_FLAGGED not in body
 
 
 async def _push_about(row: IngestLog, settings: Settings) -> dict[str, str]:
@@ -425,19 +436,70 @@ def test_a_set_aside_email_is_kept_off_the_board(client: TestClient) -> None:
     assert "Your booking is confirmed" not in board
 
 
-def test_the_problems_tab_is_marked_only_while_something_is_waiting(client: TestClient) -> None:
+def test_the_email_tab_is_marked_only_while_something_is_waiting(client: TestClient) -> None:
     quiet = client.get("/").text
-    assert 'href="/problems"' in quiet
+    assert 'href="/mail"' in quiet
     assert "waiting:" not in quiet
 
     client.session.rows["IngestLog"] = [set_aside_row()]  # type: ignore[attr-defined]
     # On every page, not only the board: the mark is how you learn there is anything.
-    for path in ("/", "/settings", "/problems"):
+    for path in ("/", "/settings", "/mail"):
         assert "1 waiting:" in client.get(path).text
 
 
-def test_the_problems_page_says_when_there_is_nothing(client: TestClient) -> None:
-    assert "Nothing needs attention" in client.get("/problems").text
+def test_the_email_page_lists_what_became_of_every_email(client: TestClient) -> None:
+    """The page is the history of the mailbox, not only the part of it that went wrong."""
+    client.session.rows["IngestLog"] = [  # type: ignore[attr-defined]
+        imported_row(),
+        log_row(message_id="<dupe@icloud.invalid>", outcome="duplicate", subject="Same trip again"),
+        log_row(message_id="<none@icloud.invalid>", outcome="no_flight", subject="Your receipt"),
+        log_row(
+            message_id="<soon@icloud.invalid>",
+            outcome="error",
+            subject="Trip to London",
+            error="the model timed out",
+            retry_at=NOW + timedelta(minutes=2),
+        ),
+    ]
+    client.session.rows["Booking"] = [  # type: ignore[attr-defined]
+        booking(source="email", source_message_id="<yes@icloud.invalid>")
+    ]
+
+    body = client.get("/mail").text
+
+    for subject in ("Your booking is confirmed", "Same trip again", "Your receipt", "Trip"):
+        assert subject in body
+    for label in ("Imported", "Already added", "Ignored", "Retrying"):
+        assert f">{label}</span>" in body
+    # An imported email points at what it put on the board.
+    assert 'href="/f/1"' in body
+    assert "AC871" in body
+    # A retry is the service still working, so it is history and not a decision to make.
+    assert "Needs attention" not in body
+
+
+def test_a_message_still_being_retried_is_not_asked_about(client: TestClient) -> None:
+    """Only an email nothing more will happen to on its own is put in front of a person."""
+    client.session.rows["IngestLog"] = [  # type: ignore[attr-defined]
+        log_row(
+            message_id="<soon@icloud.invalid>",
+            outcome="error",
+            subject="Trip to London",
+            error="the model timed out",
+            retry_at=NOW + timedelta(minutes=2),
+        )
+    ]
+
+    body = client.get("/mail").text
+
+    assert ">Retrying</span>" in body
+    # The reason all the same: a wait is easier to sit through when it says what for.
+    assert "The model timed out." in body
+    assert "Try again" not in body
+
+
+def test_the_email_page_says_when_nothing_has_been_read(client: TestClient) -> None:
+    assert "No email read yet" in client.get("/mail").text
 
 
 def test_trying_a_set_aside_message_again_puts_it_back_in_the_queue(
@@ -458,7 +520,7 @@ def test_trying_a_set_aside_message_again_puts_it_back_in_the_queue(
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/problems"
+    assert response.headers["location"] == "/mail"
     # The email never lost its flag, so clearing the give-up and waking the watcher is
     # all it takes.
     assert row.attempts == 0
@@ -477,7 +539,7 @@ def test_ignoring_a_set_aside_message_lets_the_next_sweep_unflag_it(
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/problems"
+    assert response.headers["location"] == "/mail"
     assert row.outcome == "ignored"
     assert row.retry_at is None
 
@@ -485,6 +547,19 @@ def test_ignoring_a_set_aside_message_lets_the_next_sweep_unflag_it(
 def test_a_message_that_is_not_set_aside_is_a_404(client: TestClient) -> None:
     for path in ("/mail/retry", "/mail/ignore"):
         assert client.post(path, data={"message_id": "<nope@icloud.invalid>"}).status_code == 404
+
+
+def log_row(**kwargs: Any) -> IngestLog:
+    defaults: dict[str, Any] = {"processed_at": NOW, "subject": "", "attempts": 0, "retry_at": None}
+    return IngestLog(**(defaults | kwargs))
+
+
+def imported_row() -> IngestLog:
+    return log_row(
+        message_id="<yes@icloud.invalid>",
+        outcome="created",
+        subject="Your booking is confirmed",
+    )
 
 
 def set_aside_row() -> IngestLog:

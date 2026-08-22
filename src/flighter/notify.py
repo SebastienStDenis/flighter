@@ -199,7 +199,7 @@ class Notifier:
         """Nothing came of an email that was marked.
 
         Priority 0 as well: an import that did not happen costs nobody a flight. The link
-        opens the Problems page, which is where the email can be tried again, written off,
+        opens the email page, which is where the email can be tried again, written off,
         or opened in Mail. Best effort, for the same reason as above.
 
         The words come from `notices` so that the push and that page say the same thing.
@@ -210,7 +210,7 @@ class Notifier:
                 title=notice.headline,
                 message=notice.body,
                 priority=PRIORITY_NORMAL,
-                url=f"{prefs.public_base_url()}/problems",
+                url=f"{prefs.public_base_url()}/mail",
                 url_title=OPEN_APP,
             )
         except PushFailed:

@@ -21,7 +21,8 @@ from . import notices
 from .airports import get_airport
 from .cadence import ABANDON_AFTER
 from .caldav import calendar_link
-from .models import Airport, Booking, BookingStatus, FlightSnapshot, IngestLog
+from .ingest import set_aside
+from .models import Airport, Booking, BookingStatus, FlightSnapshot, IngestLog, IngestOutcome
 from .phase import (
     AIRBORNE,
     ARRIVAL_DELAY_THRESHOLD,
@@ -605,13 +606,91 @@ def zone(instant: datetime | None, tz: str) -> str:
     return to_local(instant, tz).strftime("%Z")
 
 
-def problem_notice(row: IngestLog) -> notices.Notice:
-    """What the Problems page says about one email the service gave up on.
+# Where an email that came to something stands, as a word and the tone it is drawn in.
+# A failure is not in here: what to say about one is decided by `import_status` from the
+# retry state, which is the difference between a wait and a decision to make.
+_SETTLED: dict[str, Status] = {
+    IngestOutcome.CREATED: Status("Imported", "ok"),
+    IngestOutcome.DUPLICATE: Status("Already added", "quiet"),
+    IngestOutcome.IGNORED: Status("Ignored", "quiet"),
+    IngestOutcome.NO_FLIGHT: Status("Ignored", "quiet"),
+}
 
-    The same words the phone was sent when it gave up, from the same place, so that a
-    person who read the push and then opened the page is not told two different stories.
+# The line under the subject, for the outcomes that are the same sentence every time. A
+# failure says what went wrong instead, in its own words. Plainly, and about the email
+# rather than about the service: a person reading these has flagged something and wants
+# to know where it got to, not to be told what the importer did with its afternoon.
+_ACCOUNT: dict[str, str] = {
+    IngestOutcome.DUPLICATE: "Every flight in this email was already on the board.",
+    IngestOutcome.IGNORED: "Marked as holding no flight. The email flag will be unset shortly.",
+    IngestOutcome.NO_FLIGHT: "Marked as holding no flight.",
+}
+
+UNTITLED = "(no subject)"
+
+
+def import_status(row: IngestLog) -> Status:
+    """Where one email stands with the importer.
+
+    A failure is two different things to a person: one the service will have another go
+    at on its own, and one that is waiting on them. The retry state is what tells them
+    apart, so it is what the pill is read from.
     """
-    return notices.import_failed(subject=row.subject, reason=row.error)
+    if row.outcome == IngestOutcome.ERROR:
+        return Status("Needs attention", "stop") if set_aside(row) else Status("Retrying", "warn")
+    return _SETTLED.get(row.outcome, Status("Read", "quiet"))
+
+
+@dataclass(frozen=True)
+class MailImport:
+    """One email the service has looked at, as the email page shows it."""
+
+    row: IngestLog
+    flights: tuple[Booking, ...] = ()
+
+    @property
+    def status(self) -> Status:
+        return import_status(self.row)
+
+    @property
+    def waiting(self) -> bool:
+        """Whether this one has stopped being history and is asking for a decision."""
+        return set_aside(self.row)
+
+    @property
+    def subject(self) -> str:
+        """An email names itself, or it is named by the only other thing we know: nothing."""
+        return self.row.subject.strip() or UNTITLED
+
+    @property
+    def when(self) -> str:
+        return ago(self.row.processed_at, datetime.now(UTC))
+
+    @property
+    def account(self) -> str | None:
+        """The sentence under the subject, where there is one worth reading.
+
+        An import says nothing here: the flights it added are shown underneath, and they
+        say it better than a sentence about them would.
+        """
+        if self.row.outcome == IngestOutcome.ERROR:
+            return notices.sentence(self.row.error)
+        return _ACCOUNT.get(self.row.outcome)
+
+
+def ago(then: datetime, now: datetime) -> str:
+    """`4m ago`, `3d ago`: how long since something last happened."""
+    elapsed = now - then
+    if elapsed >= timedelta(days=1):
+        return f"{elapsed.days}d ago"
+    return f"{duration(elapsed)} ago"
+
+
+async def build_mail_imports(session: AsyncSession, rows: Iterable[IngestLog]) -> list[MailImport]:
+    """Attach to each email the flights of its that are still on the board."""
+    log_rows = list(rows)
+    flights = await booking_repo.from_messages(session, [row.message_id for row in log_rows])
+    return [MailImport(row, tuple(flights.get(row.message_id, ()))) for row in log_rows]
 
 
 def dash(value: object) -> str:
