@@ -588,14 +588,21 @@ def test_the_card_counts_to_one_milestone_at_a_time(
     assert '<time class="countdown' not in body
 
 
-def struck(was: datetime, tz: str, *, with_date: bool = False, arrival: bool = False) -> str:
+def struck(was: datetime, tz: str, *, arrival: bool = False) -> str:
     """The time a flight was booked for, as it is drawn once that time has moved: small,
     between the time that replaced it and the zone, and with no zone of its own because
     it is read at the same airport."""
     local = to_local(was, tz)
-    shown = local.strftime("%a %-d %b %H:%M" if with_date else "%H:%M")
     side = "mr-1.5" if arrival else "ml-1.5"
-    return f'<s class="{side} text-xs font-normal text-muted-foreground">{shown}</s>'
+    return f'<s class="{side} text-xs font-normal text-muted-foreground">{local:%H:%M}</s>'
+
+
+def struck_day(was: datetime, tz: str, *, arrival: bool = False) -> str:
+    """The day a flight was booked for, struck beside the day it moved to: after the
+    departure's day and before the arrival's, the way the struck time sits."""
+    local = to_local(was, tz)
+    side = "mr-1.5" if arrival else "ml-1.5"
+    return f'<s class="{side}">{local:%a %-d %b}</s>'
 
 
 def big_time(
@@ -605,13 +612,12 @@ def big_time(
     *,
     arrival: bool = False,
     was: datetime | None = None,
-    was_with_date: bool = False,
 ) -> str:
     """The card's large time: the clock in its tone, the zone small and grey on its
     outer side, which is after a departure and before an arrival, and what the time was
     between the two when it moved."""
     local = to_local(instant, tz)
-    gone = struck(was, tz, with_date=was_with_date, arrival=arrival) if was else ""
+    gone = struck(was, tz, arrival=arrival) if was else ""
     if arrival:
         return (
             f'{tone}"><span class="mr-1 text-[0.6875rem] font-medium text-muted-foreground">'
@@ -659,10 +665,13 @@ def test_each_end_of_a_red_eye_names_its_own_day(
         assert "Sun 13 Sep" in body
 
 
-def test_a_delay_past_midnight_keeps_the_day_it_was_booked_for(
+def test_a_delay_past_midnight_strikes_the_day_it_was_booked_for(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """23:50 struck next to 00:30 reads as earlier, unless the struck time says Saturday."""
+    """23:50 struck next to 00:30 reads as earlier, unless the day row says Saturday is
+    gone: the struck day sits after the new day for a departure, and the card's heading
+    names only the day it now leaves."""
+    tz = "America/Toronto"
     booked = datetime(2026, 9, 13, 3, 50, tzinfo=UTC)
     slipped = datetime(2026, 9, 13, 4, 30, tzinfo=UTC)
     show(
@@ -672,10 +681,38 @@ def test_a_delay_past_midnight_keeps_the_day_it_was_booked_for(
     )
 
     body = client.get("/f/1").text
-    assert big_time(slipped, "America/Toronto", "text-stop", was=booked, was_with_date=True) in body
-    assert "Sat 12 Sep 23:50" in body
+    assert big_time(slipped, tz, "text-stop", was=booked) in body
+    assert day_of(slipped, tz) + struck_day(booked, tz) in body
+    assert "Sat 12 Sep 23:50" not in body
     assert "23:50 EDT" not in body
-    assert "Sun 13 Sep" in body
+    heading = body[body.index("<h2") : body.index("</h2>")]
+    assert day_of(slipped, tz) in heading and day_of(booked, tz) not in heading
+
+
+def test_an_arrival_past_midnight_strikes_its_old_day_before_the_new_one(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tz = "Europe/London"
+    booked = datetime(2026, 9, 13, 22, 40, tzinfo=UTC)
+    slipped = datetime(2026, 9, 13, 23, 30, tzinfo=UTC)
+    show(
+        monkeypatch,
+        booking(scheduled_arrival_utc=booked),
+        replace_snapshot(scheduled_in=booked, estimated_in=slipped),
+    )
+
+    body = client.get("/f/1").text
+    assert big_time(slipped, tz, "text-stop", arrival=True, was=booked) in body
+    assert struck_day(booked, tz, arrival=True) + day_of(slipped, tz) in body
+
+
+def test_a_delay_inside_its_day_strikes_no_day(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    late = DEPARTURE + timedelta(minutes=40)
+    show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=late))
+    body = client.get("/f/1").text
+    assert struck_day(DEPARTURE, "America/Toronto") not in body
 
 
 def top_card(body: str) -> str:
