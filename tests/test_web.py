@@ -1415,7 +1415,8 @@ def test_a_flight_on_the_calendar_uses_the_scheme_macos_registers(
         },
     ).text
 
-    assert 'href="ical://"' in body
+    departure_day = to_local(DEPARTURE, "America/Toronto").strftime("%Y-%m-%d")
+    assert f'href="ical://date/{departure_day}_12-00-00?method=show"' in body
     assert "calshow:" not in body
 
 
@@ -1435,7 +1436,7 @@ def test_an_ipad_in_desktop_mode_keeps_the_date_targeted_calendar_link(
     ).text
 
     assert "calshow:" in body
-    assert 'href="ical://"' not in body
+    assert "ical://date/" not in body
 
 
 def test_a_flight_that_is_not_on_the_calendar_offers_no_link(
