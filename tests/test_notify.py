@@ -140,6 +140,27 @@ async def test_a_missing_credential_means_no_request(settings: Settings) -> None
     assert recorder.requests == []
 
 
+async def test_friend_notifications_follow_the_preference(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    friend = booking()
+    friend.friend_name = "Sam"
+    changed = event(EventKind.GATE_ASSIGNED, new="B22")
+    recorder = Recorder()
+    notifier = Notifier(settings, transport=recorder.transport)
+
+    await notifier.flight_event(friend, changed, origin_tz=ORIGIN_TZ, dest_tz=DEST_TZ)
+    assert recorder.requests == []
+
+    monkeypatch.setattr(
+        prefs,
+        "_current",
+        prefs.current().model_copy(update={"notify_for_friend_flights": True}),
+    )
+    await notifier.flight_event(friend, changed, origin_tz=ORIGIN_TZ, dest_tz=DEST_TZ)
+    assert recorder.only["message"] == "Gate B22"
+
+
 async def test_an_unreachable_pushover_is_a_failure_the_caller_hears_about(
     settings: Settings,
 ) -> None:

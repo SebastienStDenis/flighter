@@ -170,6 +170,18 @@
   .badge[data-variant='warn']  { --tone: var(--warn); }
   .badge[data-variant='stop']  { --tone: var(--stop); }
 
+  .friend-avatar {
+    background-color: hsl(var(--friend-hue) 55% 50% / 12%);
+    color: hsl(var(--friend-hue) 35% 38%);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .friend-avatar {
+      background-color: hsl(var(--friend-hue) 45% 65% / 16%);
+      color: hsl(var(--friend-hue) 42% 78%);
+    }
+  }
+
   /* The route: two airports, one rule between them, and the aircraft at the fraction of
      the way it has actually flown. Dashed ahead of the mark, solid behind it. */
   .route {

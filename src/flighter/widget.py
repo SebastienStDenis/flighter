@@ -234,8 +234,13 @@ async def load_flight_rows(session: AsyncSession, now: datetime) -> list[FlightR
     still here while someone is walking off it, and one the feed lost goes when the
     board files it rather than hours later.
     """
+    include_friends = prefs.current().show_friend_flights_in_widget
     bookings = await booking_repo.list_bookings(session, statuses=[BookingStatus.ACTIVE])
-    bookings += await booking_repo.list_recently_flown(session, MAX_FLIGHTS)
+    if not include_friends:
+        bookings = [booking for booking in bookings if booking.friend_name is None]
+    bookings += await booking_repo.list_recently_flown(
+        session, MAX_FLIGHTS, include_friends=include_friends
+    )
     if not bookings:
         return []
 

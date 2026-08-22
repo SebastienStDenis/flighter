@@ -20,6 +20,7 @@ from flighter.bookings import (
     latest_snapshots,
     on_board_from_message,
     operated_note,
+    queue_friend_calendar_updates,
     to_booking_times,
     update_ticket,
 )
@@ -142,14 +143,24 @@ async def test_an_unknown_airport_is_refused_not_guessed(seeded: None) -> None:
     assert raised.value.iata == "ZZZ"
 
 
-async def test_the_ticket_is_the_only_thing_an_edit_touches(seeded: None) -> None:
+async def test_the_ticket_and_friend_name_are_the_only_things_an_edit_touches(seeded: None) -> None:
     async with session_scope() as session:
         booking = await book(session, datetime(2026, 9, 12, 9, 0))
         changed = await update_ticket(
-            session, booking.id, confirmation_code="X7QW2P", seat="14A", notes=None
+            session,
+            booking.id,
+            confirmation_code="X7QW2P",
+            seat="14A",
+            notes=None,
+            friend_name="  Sam  ",
         )
         assert changed is not None
-        assert (changed.confirmation_code, changed.seat, changed.notes) == ("X7QW2P", "14A", None)
+        assert (changed.confirmation_code, changed.seat, changed.notes, changed.friend_name) == (
+            "X7QW2P",
+            "14A",
+            None,
+            "Sam",
+        )
         assert changed.scheduled_departure_utc == booking.scheduled_departure_utc
         assert changed.departure_local_date == date(2026, 9, 12)
 
@@ -180,9 +191,30 @@ async def test_a_ticket_edit_restates_the_flight_only_when_the_calendar_shows_it
 ) -> None:
     async with session_scope() as session:
         booking = await book(session, datetime(2026, 9, 12, 9, 0))
-        await update_ticket(session, booking.id, confirmation_code=None, seat="12A", notes=None)
-        await update_ticket(session, booking.id, confirmation_code=None, seat="12A", notes=None)
-        await update_ticket(session, booking.id, confirmation_code=None, seat="12A", notes="aisle")
+        await update_ticket(
+            session,
+            booking.id,
+            confirmation_code=None,
+            seat="12A",
+            notes=None,
+            friend_name=None,
+        )
+        await update_ticket(
+            session,
+            booking.id,
+            confirmation_code=None,
+            seat="12A",
+            notes=None,
+            friend_name=None,
+        )
+        await update_ticket(
+            session,
+            booking.id,
+            confirmation_code=None,
+            seat="12A",
+            notes="aisle",
+            friend_name=None,
+        )
         assert await events_for(session, booking.id) == [
             EventKind.BOOKING_ADDED,
             EventKind.BOOKING_EDITED,
@@ -191,8 +223,62 @@ async def test_a_ticket_edit_restates_the_flight_only_when_the_calendar_shows_it
 
 async def test_a_ticket_for_a_flight_that_is_not_there_is_none(seeded: None) -> None:
     async with session_scope() as session:
-        missing = await update_ticket(session, 99, confirmation_code=None, seat=None, notes=None)
+        missing = await update_ticket(
+            session, 99, confirmation_code=None, seat=None, notes=None, friend_name=None
+        )
         assert missing is None
+
+
+async def test_an_owner_is_explicit_and_changing_it_restates_the_calendar(seeded: None) -> None:
+    async with session_scope() as session:
+        booking = await book(session, datetime(2026, 9, 12, 9, 0))
+        changed = await update_ticket(
+            session,
+            booking.id,
+            confirmation_code=None,
+            seat=None,
+            notes=None,
+            friend_name="  Sam  ",
+        )
+        assert changed is not None and changed.friend_name == "Sam"
+        await update_ticket(
+            session,
+            booking.id,
+            confirmation_code=None,
+            seat=None,
+            notes=None,
+            friend_name="Sam",
+        )
+        await update_ticket(
+            session,
+            booking.id,
+            confirmation_code=None,
+            seat=None,
+            notes=None,
+            friend_name=None,
+        )
+        assert booking.friend_name is None
+        assert await events_for(session, booking.id) == [
+            EventKind.BOOKING_ADDED,
+            EventKind.BOOKING_EDITED,
+            EventKind.BOOKING_EDITED,
+        ]
+
+
+async def test_friend_calendar_updates_cover_active_and_flown_flights(seeded: None) -> None:
+    async with session_scope() as session:
+        active = await book(session, datetime(2026, 9, 12, 9, 0), friend_name="Sam")
+        flown = await book(
+            session,
+            datetime(2026, 9, 13, 9, 0),
+            marketing_number="5678",
+            friend_name="Lee",
+            status="completed",
+        )
+        await book(session, datetime(2026, 9, 14, 9, 0), marketing_number="9012")
+        queued = await queue_friend_calendar_updates(session)
+        assert [booking.id for booking in queued] == [active.id, flown.id]
+        assert (await events_for(session, flown.id)) == [EventKind.BOOKING_EDITED]
 
 
 async def test_the_same_flight_resent_with_a_corrected_time_is_a_duplicate(seeded: None) -> None:

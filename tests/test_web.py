@@ -304,6 +304,65 @@ def test_the_board_says_what_to_do_when_there_are_no_flights(client: TestClient)
     assert "/f/new" in page.text
 
 
+def test_the_board_separates_mine_friends_and_all_flown_flights(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mine = booking(id=1)
+    friend = booking(id=2, friend_name="Sam")
+    mine_flown = booking(
+        id=3,
+        scheduled_departure_utc=NOW - timedelta(days=3),
+        scheduled_arrival_utc=NOW - timedelta(days=3) + timedelta(hours=7),
+    )
+    friend_flown = booking(
+        id=4,
+        friend_name="Lee",
+        scheduled_departure_utc=NOW - timedelta(days=2),
+        scheduled_arrival_utc=NOW - timedelta(days=2) + timedelta(hours=7),
+    )
+    show_board(
+        monkeypatch, [(mine, None), (friend, None), (mine_flown, None), (friend_flown, None)]
+    )
+
+    body = client.get("/").text
+    first = body.index('id="flight-tabs-panel-1"')
+    second = body.index('id="flight-tabs-panel-2"')
+    third = body.index('id="flight-tabs-panel-3"')
+    assert first < body.index('href="/f/1?from=mine"') < second
+    assert second < body.index('href="/f/2?from=friends"') < third
+    assert body.index('href="/f/3?from=flown"') > third
+    assert body.index('href="/f/4?from=flown"') > third
+    assert rows(body) == ["4", "3"]
+
+    friend_card = board_card(body, 2)
+    assert 'class="friend-avatar' in friend_card
+    assert "--friend-hue:" in friend_card
+    assert 'class="-mb-2 flex items-center gap-2 px-6"' in friend_card
+    assert friend_card.index("friend-avatar") < friend_card.index("<header>")
+    assert ">S</span>" in friend_card and "Sam" in friend_card
+    assert logo("AC") in friend_card
+
+    friend_row = board_card(body, 4)
+    assert 'class="friend-avatar' in friend_row and ">L</span>" in friend_row
+    assert "Lee" not in friend_row
+
+
+def test_the_selected_board_tab_survives_a_trip_to_flight_details(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    show(monkeypatch, booking(friend_name="Sam"), None)
+
+    board = client.get("/?tab=friends").text
+    assert re.search(
+        r'id="flight-tabs-tab-2"\s+aria-controls="[^"]+"\s+aria-selected="true"', board
+    )
+    assert 'href="/f/1?from=friends"' in board
+
+    detail = client.get("/f/1?from=friends").text
+    assert 'href="/?tab=friends"' in detail
+    assert 'name="return_tab" value="friends"' in detail
+
+
 def test_a_codeshare_is_shown_under_the_number_booked_with_a_note_on_who_flies_it(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -913,17 +972,17 @@ def test_the_board_card_colours_a_time_that_slipped_and_leaves_one_that_held(
 
 def cards(body: str) -> list[str]:
     """The flights the board draws as full cards, in order, by the id each links to."""
-    return re.findall(r'<a class="card[^"]*" href="/f/(\d+)"', body)
+    return re.findall(r'<a class="card[^"]*" href="/f/(\d+)(?:\?[^\"]*)?"', body)
 
 
 def rows(body: str) -> list[str]:
     """The flights the board draws as one-line rows, in order, by the id each links to."""
-    return re.findall(r'<a class="item"[^>]*href="/f/(\d+)"', body)
+    return re.findall(r'<a class="item"[^>]*href="/f/(\d+)(?:\?[^\"]*)?"', body)
 
 
 def board_card(body: str, booking_id: int) -> str:
     """One flight's card on the board, from its link to its closing tag."""
-    start = body.index(f'href="/f/{booking_id}"')
+    start = body.index(f'href="/f/{booking_id}')
     return body[start : body.index("</a>", start)]
 
 
@@ -1348,7 +1407,7 @@ def test_a_flight_that_is_not_on_the_calendar_offers_no_link(
     assert "calshow:" not in client.get("/f/1").text
 
 
-def test_the_ticket_is_the_only_thing_the_page_lets_you_change(
+def test_the_ticket_and_owner_are_what_the_page_lets_you_change(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     show(monkeypatch, booking(confirmation_code="X7QW2P", seat="14A"), empty_snapshot())
@@ -1356,12 +1415,31 @@ def test_the_ticket_is_the_only_thing_the_page_lets_you_change(
     body = client.get("/f/1").text
 
     assert 'action="/f/1/ticket"' in body
-    for box in ("confirmation_code", "seat", "notes"):
+    assert 'action="/f/1/owner"' not in body
+    for box in ("confirmation_code", "seat", "notes", "friend_name"):
         assert f'name="{box}"' in body
+    assert re.search(r'name="owner" value="me"[^>]+ checked', body)
+    assert 'name="owner" value="friend"' in body
+    assert 'id="friend-name-field" role="group" class="field" hidden' in body
+    assert re.search(r'name="friend_name"[^>]+ disabled', body)
+    assert ">Me</aside>" in body
     assert 'value="X7QW2P"' in body and 'value="14A"' in body
     # The flight itself is the airline's statement, so nothing on the page edits it.
     for never in ("/f/1/edit", 'name="origin_iata"', 'type="datetime-local"', "Looks right"):
         assert never not in body
+
+
+def test_the_friend_owner_is_selected_in_the_ticket_editor(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    show(monkeypatch, booking(friend_name="Sam"), empty_snapshot())
+    body = client.get("/f/1").text
+    assert "Owner" in body and "Sam" in body
+    assert 'name="friend_name"' in body and 'value="Sam"' in body
+    assert re.search(r'name="owner" value="friend"[^>]+ checked', body)
+    assert 'id="friend-name-field" role="group" class="field" hidden' not in body
+    assert not re.search(r'name="friend_name"[^>]+ disabled', body)
+    assert "Friend's name" not in body and "My flight" not in body
 
 
 def test_saving_the_ticket_hands_the_booking_layer_what_was_written(
@@ -1379,14 +1457,26 @@ def test_saving_the_ticket_hands_the_booking_layer_what_was_written(
 
     response = client.post(
         "/f/1/ticket",
-        data={"confirmation_code": " X7QW2P ", "seat": "14A", "notes": ""},
+        data={
+            "confirmation_code": " X7QW2P ",
+            "seat": "14A",
+            "notes": "",
+            "friend_name": "  Sam  ",
+            "return_tab": "friends",
+        },
         follow_redirects=False,
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/f/1"
+    assert response.headers["location"] == "/f/1?from=friends"
     # A blank box is nothing on the ticket, not an empty string in the database.
-    assert written == {"id": 1, "confirmation_code": "X7QW2P", "seat": "14A", "notes": None}
+    assert written == {
+        "id": 1,
+        "confirmation_code": "X7QW2P",
+        "seat": "14A",
+        "notes": None,
+        "friend_name": "Sam",
+    }
 
 
 def test_saving_a_ticket_for_a_flight_that_is_not_there_is_a_404(client: TestClient) -> None:
@@ -1610,6 +1700,55 @@ def test_saving_a_preference_redirects_and_takes_effect(client: TestClient) -> N
     assert response.status_code == 200
     assert response.url.path == "/settings"
     assert prefs.current().log_level == "DEBUG"
+
+
+def test_friend_integration_settings_are_visible_and_saved(client: TestClient) -> None:
+    body = client.get("/settings").text
+    names = (
+        "sync_friend_flights_to_calendar",
+        "notify_for_friend_flights",
+        "show_friend_flights_in_widget",
+    )
+    assert all(f'name="{name}"' in body for name in names)
+
+    client.post(
+        "/settings",
+        data={name: "true" for name in names} | {"tab": "preferences"},
+    )
+    current = prefs.current()
+    assert current.sync_friend_flights_to_calendar
+    assert current.notify_for_friend_flights
+    assert current.show_friend_flights_in_widget
+
+
+def test_disabling_friend_calendar_sync_removes_existing_events(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    friend = booking(friend_name="Sam", calendar_event_uid="flighter-1@flighter.invalid")
+    client.session.rows["Booking"] = [friend]  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        prefs,
+        "_current",
+        prefs.current().model_copy(update={"sync_friend_flights_to_calendar": True}),
+    )
+    deleted: list[int] = []
+
+    async def delete(_calendar: Any, row: Booking) -> bool:
+        deleted.append(row.id)
+        return True
+
+    monkeypatch.setattr(web.CalendarClient, "delete", delete)
+
+    response = client.post(
+        "/settings",
+        data={"sync_friend_flights_to_calendar": "false", "tab": "preferences"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert deleted == [1]
+    assert friend.calendar_event_uid is None
+    assert not prefs.current().sync_friend_flights_to_calendar
 
 
 def test_a_save_comes_back_to_the_tab_it_was_made_on(client: TestClient) -> None:
@@ -1906,7 +2045,8 @@ def test_a_flight_just_at_the_gate_stays_on_the_board_a_while(
         parked,
     )
     body = client.get("/").text
-    assert 'class="card' in body and "Flown" not in body
+    assert 'class="card' in body
+    assert rows(body) == []
     assert "Arrived" in body and belt("7") in body
 
 
@@ -1924,5 +2064,5 @@ def test_a_flight_long_at_the_gate_is_filed_under_flown(
     )
     body = client.get("/").text
     assert "Flown" in body and 'class="card' not in body
-    # Folded away under a heading like the board's own, not boxed in a card of its own.
-    assert "<details" in body and "accordion" not in body
+    assert rows(body) == ["1"]
+    assert 'id="flight-tabs-panel-3"' in body

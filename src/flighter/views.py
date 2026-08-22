@@ -123,6 +123,11 @@ class FlightView:
         return f"{self.booking.marketing_carrier}{self.booking.marketing_number}"
 
     @property
+    def friend_hue(self) -> int:
+        name = self.booking.friend_name or ""
+        return sum(index * ord(character) for index, character in enumerate(name, 1)) % 360
+
+    @property
     def operated(self) -> str | None:
         return booking_repo.operated_note(
             self.booking.operating_carrier, self.booking.operating_number

@@ -186,6 +186,7 @@ class Booking(Base):
     confirmation_code: Mapped[str | None] = mapped_column(Text)
     seat: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
+    friend_name: Mapped[str | None] = mapped_column(Text)
 
     status: Mapped[str] = mapped_column(Text, nullable=False, default=BookingStatus.ACTIVE)
     extraction_confidence: Mapped[float | None] = mapped_column(Float)

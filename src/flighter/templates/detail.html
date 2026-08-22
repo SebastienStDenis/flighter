@@ -11,7 +11,8 @@
 {# One level down from the board, and the installed app has no browser chrome to get
    back up with. Pulled left by the button's own padding so the word starts on the same
    line as everything under it. #}
-<a class="btn -ml-2.5 mb-2 self-start" data-size="sm" data-variant="ghost" href="/">
+<a class="btn -ml-2.5 mb-2 self-start" data-size="sm" data-variant="ghost"
+   href="/?tab={{ return_tab }}">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="m15 18-6-6 6-6"/>
@@ -59,6 +60,7 @@
       {{ m.editable("Confirmation", dash(v.booking.confirmation_code), "confirmation_code", mono=true) }}
       {{ m.editable("Seat", dash(v.booking.seat), "seat", mono=true) }}
       {{ m.editable("Notes", dash(v.booking.notes), "notes") }}
+      {{ m.editable("Owner", v.booking.friend_name or "Me", "owner") }}
       {% if s and s.aircraft_type %}
       {{ m.detail("Aircraft", s.aircraft_type, mono=true) }}
       {% endif %}
@@ -108,6 +110,7 @@
      footer=ticket_footer,
      close_button=false) %}
 <form id="ticket-form" method="post" action="/f/{{ id }}/ticket">
+  <input type="hidden" name="return_tab" value="{{ return_tab }}">
   <fieldset class="fieldset gap-4">
     <div class="grid grid-cols-2 gap-3">
       <div role="group" class="field">
@@ -127,6 +130,29 @@
       <label for="notes">Notes</label>
       <textarea id="notes" name="notes" rows="3">{{ v.booking.notes or '' }}</textarea>
     </div>
+    <div role="group" class="field">
+      <label>Owner</label>
+      <div class="grid grid-cols-2 rounded-lg bg-muted p-1" role="radiogroup"
+           aria-label="Owner">
+        <label class="flex cursor-pointer justify-center rounded-md px-3 py-1.5 text-sm text-muted-foreground has-checked:bg-background has-checked:text-foreground has-checked:shadow-sm">
+          <input class="sr-only" type="radio" name="owner" value="me"
+                 onchange="setOwner(this.value)" {{- ' checked' if not v.booking.friend_name }}>
+          Me
+        </label>
+        <label class="flex cursor-pointer justify-center rounded-md px-3 py-1.5 text-sm text-muted-foreground has-checked:bg-background has-checked:text-foreground has-checked:shadow-sm">
+          <input class="sr-only" type="radio" name="owner" value="friend"
+                 onchange="setOwner(this.value)" {{- ' checked' if v.booking.friend_name }}>
+          Friend
+        </label>
+      </div>
+    </div>
+    <div id="friend-name-field" role="group" class="field"
+         {{- ' hidden' if not v.booking.friend_name }}>
+      <label for="friend_name">Name</label>
+      <input type="text" id="friend_name" name="friend_name" maxlength="80" required
+             autocomplete="name" value="{{ v.booking.friend_name or '' }}"
+             {{- ' disabled' if not v.booking.friend_name }}>
+    </div>
   </fieldset>
 </form>
 {% endcall %}
@@ -134,7 +160,18 @@
   function editTicket(name) {
     var dialog = document.getElementById("ticket");
     dialog.showModal();
-    dialog.querySelector("[name=" + name + "]").focus();
+    var control = dialog.querySelector("[name=" + name + "]:checked") ||
+      dialog.querySelector("[name=" + name + "]");
+    control.focus();
+  }
+
+  function setOwner(owner) {
+    var field = document.getElementById("friend-name-field");
+    var input = document.getElementById("friend_name");
+    var isFriend = owner === "friend";
+    field.hidden = !isFriend;
+    input.disabled = !isFriend;
+    if (isFriend) input.focus();
   }
 </script>
 

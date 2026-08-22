@@ -79,6 +79,7 @@ async def create_booking(
     confirmation_code: str | None = None,
     seat: str | None = None,
     notes: str | None = None,
+    friend_name: str | None = None,
     status: str = BookingStatus.ACTIVE,
     extraction_confidence: float | None = None,
     operating_carrier: str | None = None,
@@ -112,6 +113,7 @@ async def create_booking(
         confirmation_code=confirmation_code,
         seat=seat,
         notes=notes,
+        friend_name=_friend_name(friend_name),
         status=status,
         extraction_confidence=extraction_confidence,
         next_poll_at=first_poll_at(now, departure_utc) if status == BookingStatus.ACTIVE else None,
@@ -146,6 +148,7 @@ async def update_ticket(
     confirmation_code: str | None,
     seat: str | None,
     notes: str | None,
+    friend_name: str | None,
 ) -> Booking | None:
     """Change what is written on the ticket, which is all a person is allowed to change.
 
@@ -155,15 +158,37 @@ async def update_ticket(
     booking = await session.get(Booking, booking_id)
     if booking is None:
         return None
-    shown = (booking.confirmation_code, booking.seat)
+    shown = (booking.confirmation_code, booking.seat, booking.friend_name)
     booking.confirmation_code = confirmation_code
     booking.seat = seat
     booking.notes = notes
+    booking.friend_name = _friend_name(friend_name)
     # The calendar entry carries the code and the seat; notes never leave the app.
-    if booking.status == BookingStatus.ACTIVE and (confirmation_code, seat) != shown:
+    if (
+        booking.status != BookingStatus.ARCHIVED
+        and (
+            confirmation_code,
+            seat,
+            booking.friend_name,
+        )
+        != shown
+    ):
         _record(session, booking, EventKind.BOOKING_EDITED)
     await session.flush()
     return booking
+
+
+async def queue_friend_calendar_updates(session: AsyncSession) -> list[Booking]:
+    result = await session.execute(
+        select(Booking).where(
+            Booking.friend_name.is_not(None), Booking.status != BookingStatus.ARCHIVED
+        )
+    )
+    bookings = list(result.scalars())
+    for booking in bookings:
+        _record(session, booking, EventKind.BOOKING_EDITED)
+    await session.flush()
+    return bookings
 
 
 async def delete_booking(session: AsyncSession, booking_id: int) -> Booking | None:
@@ -209,13 +234,15 @@ async def list_bookings(
     return list(result.scalars().all())
 
 
-async def list_recently_flown(session: AsyncSession, limit: int) -> list[Booking]:
+async def list_recently_flown(
+    session: AsyncSession, limit: int, *, include_friends: bool = True
+) -> list[Booking]:
     """The last few flights that have been taken, newest first and never more."""
+    stmt = select(Booking).where(Booking.status == BookingStatus.COMPLETED)
+    if not include_friends:
+        stmt = stmt.where(Booking.friend_name.is_(None))
     result = await session.execute(
-        select(Booking)
-        .where(Booking.status == BookingStatus.COMPLETED)
-        .order_by(Booking.scheduled_departure_utc.desc())
-        .limit(limit)
+        stmt.order_by(Booking.scheduled_departure_utc.desc()).limit(limit)
     )
     return list(result.scalars())
 
@@ -351,3 +378,9 @@ def _number(number: str) -> str:
     cannot tell AA0100 from AA100 unless both are stored the same way."""
     stripped = number.strip()
     return stripped.lstrip("0") or stripped
+
+
+def _friend_name(name: str | None) -> str | None:
+    if name is None:
+        return None
+    return name.strip() or None
