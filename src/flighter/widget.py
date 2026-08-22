@@ -96,7 +96,8 @@ class WidgetFlight(BaseModel):
     status_label: str
     status_tone: str
     # The one line of the card that matters in this phase: the day it leaves while that
-    # is still days off, then the time, gate and seat, then the gate at the other end.
+    # is still days off, then the gate and seat, then once it has landed the gate at the
+    # other end.
     detail: str | None
     milestone_label: str | None
     # A milestone is either an instant the phone counts to, or a figure handed over
@@ -341,7 +342,14 @@ def _flight(
         route=f"{booking.origin_iata} → {views.destination_iata(booking, snapshot)}",
         status_label=pill.label,
         status_tone=pill.tone,
-        detail=_detail(phase, booking, snapshot, parked=parked, origin_tz=origin_tz),
+        detail=_detail(
+            phase,
+            booking,
+            snapshot,
+            parked=parked,
+            counting=target is not None,
+            origin_tz=origin_tz,
+        ),
         milestone_label=label,
         milestone_to=target,
         milestone_text=text,
@@ -355,16 +363,19 @@ def _detail(
     snapshot: FlightSnapshot | None,
     *,
     parked: bool,
+    counting: bool,
     origin_tz: str,
 ) -> str | None:
     """What the card says that matters most right now, on one line.
 
-    Days out, the day it leaves. On the day, the time it now leaves with the gate and
-    the seat to find. Once it has pushed back the origin is behind it, so the line turns
-    to the gate at the other end; parked, the belt has the milestone's place and only
-    the terminal is left to say.
+    Days out, the day it leaves. On the day, the gate and the seat to find; the time it
+    leaves is what the milestone is counting to, so it is only spelled out when there is
+    no count. From pushback to touchdown nothing at either end is worth a line: the
+    gate it left is behind it and the one it is going to is not yet anyone's concern.
+    Landed, the line turns to the gate at the other end; parked, the belt has the
+    milestone's place and only the terminal is left to say.
     """
-    if phase == CANCELLED:
+    if phase in (CANCELLED, TAXIING, AIRBORNE, DIVERTED):
         return None
     departure = departure_estimate(booking, snapshot)
     if phase == UPCOMING:
@@ -372,12 +383,13 @@ def _detail(
 
     parts: list[str] = []
     if phase == DAY_OF:
-        parts.append(views.clock(departure, origin_tz))
+        if not counting:
+            parts.append(views.clock(departure, origin_tz))
         if snapshot and snapshot.gate_origin:
             parts.append(f"Gate {snapshot.gate_origin}")
         if booking.seat:
             parts.append(f"Seat {booking.seat}")
-        return " · ".join(parts)
+        return " · ".join(parts) if parts else None
 
     if not parked and snapshot and snapshot.gate_destination:
         parts.append(f"Gate {snapshot.gate_destination}")
