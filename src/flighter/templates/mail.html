@@ -39,11 +39,22 @@
     {# Aligned to the top of the card rather than centred on it, so the badge sits on the
        same line as the subject however many lines the words under it run to. #}
     <section class="min-w-0 self-start">
-      <h3 class="max-w-full"><span class="truncate">{{ v.subject }}</span></h3>
+      <h3 class="max-w-full"><span class="truncate italic">{{ v.subject }}</span></h3>
       {% if v.account %}<p>{{ v.account }}</p>{% endif %}
     </section>
     <aside class="flex-col items-end gap-1 self-start">
-      {{ m.badge(v.status) }}
+      <div class="flex items-center gap-1">
+        {{ m.badge(v.status) }}
+        <a class="btn -mr-2" data-variant="ghost" data-size="icon-sm"
+           href="{{ email_url(v.row.message_id) }}"
+           title="Open in Mail" aria-label="Open in Mail">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect width="20" height="16" x="2" y="4" rx="2"/>
+            <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+          </svg>
+        </a>
+      </div>
       <span class="text-xs whitespace-nowrap text-muted-foreground">{{ v.when }}</span>
     </aside>
     {% if v.flights %}
@@ -69,8 +80,6 @@
         <input type="hidden" name="message_id" value="{{ v.row.message_id }}">
         <button class="btn" data-variant="ghost" data-size="sm" type="submit">Ignore</button>
       </form>
-      <a class="btn ml-auto" data-variant="link" data-size="sm"
-         href="{{ email_url(v.row.message_id) }}">Open in Mail</a>
     </footer>
     {% endif %}
   </div>
