@@ -49,8 +49,8 @@ does the same thing at once, and says so.
 | Family | What it shows |
 | --- | --- |
 | `accessoryRectangular` (Lock Screen) | Next flight only, three tight lines. **iOS 16 or later.** |
-| Small | Next flight: the number, the route under it, its status, the time that matters large with the word for it, and the gate and seat underneath |
-| Medium | Up to three flights, one row each, each row tappable |
+| Small | Next flight: the number, the route under it, its pill, and its line |
+| Medium | Up to three flights, two lines each, each row tappable |
 | Large | Same rows, with room to breathe |
 
 Tapping opens the flight's page on your server. On medium and large each row deep-links
@@ -59,23 +59,35 @@ restriction and not a choice made here.
 
 ## What it shows
 
-A list, one row per flight: the airline's mark, the flight number and route, and under
-them the status as a word in the web UI's tone ("On time", "Departure delayed",
-"Departed", "In the air", "Arriving late", "Landed", "Arrived" and so on) with the gate
-and seat after it on the day of the flight. On the right, the one time that matters,
-read on the clock at the airport it happens at, with the word that says which: "Departs"
-and the time it now leaves, or the day instead of the word while that day is not today
-("Tomorrow", "Fri 18 Sep"); "Lands" once it has pushed back; "At the gate" once it is on
-the ground; and "Baggage claim" with the belt once it is parked. A cancelled flight has
-no time to give. Every word and tone comes from the server; the script picks nothing on
-its own.
+A list. Each flight is two lines: the airline's mark with the flight number and route,
+and under them the board's status pill and one line beside it.
 
-The status is the board's, with two exceptions the board does not need. The board says
-"Taxiing" for the ten minutes between pushback and wheels up; a widget that is redrawn
-every quarter of an hour would show that word after the fact as often as not, so here it
-says "Departed", which stays true until the gate at the other end. And the board names
-the day in the pill for a flight the feed has not picked up yet; here the day is already
-under the time, so the status says "Scheduled".
+The line is the next thing worth knowing, and it always leads with a time, read on the
+clock at the airport where that thing happens and carrying that airport's zone:
+
+| While it is | The line reads |
+| --- | --- |
+| Days off | `Fri 18 Sep 18:00 EDT` |
+| Leaving tomorrow | `Tomorrow 02:00 EDT · Seat 14A` |
+| On the day | `14:40 EDT · Gate B22 · Seat 14A` |
+| Pushed back, or in the air | `Lands 15:15 PDT` |
+| On the ground | `At the gate 22:15 PDT` |
+| Parked | `Baggage claim 7` |
+| Cancelled, or lost by the feed | nothing; the pill has said it |
+
+The gate and the seat join the line only on the day of the flight, which is the one
+stretch where a person is on their way to use them. The day goes in front of the time
+whenever the time is not today's at that airport, because `02:00 EDT` on its own reads
+as today's and a flight leaving tomorrow morning would look hours overdue all evening.
+The time leads, so a row too narrow for the whole line loses the seat rather than the
+flight. Every word and tone comes from the server; the script picks nothing on its own.
+
+The pill is the board's, in the board's tones, with two exceptions the board does not
+need. The board says "Taxiing" for the ten minutes between pushback and wheels up; a
+widget redrawn every quarter of an hour would show that word after the fact as often as
+not, so here it says "Departed", which stays true until the gate at the other end. And
+the board names the day in the pill for a flight the feed has not picked up yet; here
+the day is already on the line, so the pill says "Scheduled".
 
 The widget lists the flights the board has on it, in the board's order, and lets each one
 go at the moment the board files it under Flown: two hours after it reached the gate, or
@@ -98,8 +110,8 @@ quarter-hourly in practice. That is why nothing on the widget is counted from th
 phone's clock. A countdown is wrong a minute after it is drawn and a quarter of an hour
 wrong by the next reload; a time at the airport is right until the estimate itself
 moves, and whoever reads it measures it against their own clock. For the same reason
-there is no "due" wording once a time has passed: "Lands 22:40" at 22:50 says so on its
-own. The script asks for a reload at the cadence the server names, which is the
+there is no "due" wording once a time has passed: `Lands 22:40` read at 22:50 says so on
+its own. The script asks for a reload at the cadence the server names, which is the
 server's own polling cadence for the closest flight on the list.
 
 The last good response is cached to the Scriptable documents folder. If the server is

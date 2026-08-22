@@ -4,13 +4,12 @@
 
 // Flight tracker widget.
 //
-// The server decides everything: which flights, in what order, what the status says and
-// in which tone, what time goes on the right and what word goes under it, and where the
-// airline's mark is to be fetched from. This file draws that and nothing else. Nothing
-// here is measured against the phone's clock: iOS reloads a widget when it feels like
-// it, about every quarter of an hour, and a figure counted from the clock is that far
-// wrong by the time it is drawn again. A time read at the airport is right until the
-// estimate itself moves.
+// The server decides everything: which flights, in what order, what the pill says and
+// in which tone, the one line under it, and where the airline's mark is to be fetched
+// from. This file draws that and nothing else. Nothing here is measured against the
+// phone's clock: iOS reloads a widget when it feels like it, about every quarter of an
+// hour, and a figure counted from the clock is that far wrong by the time it is drawn
+// again. A time read at the airport is right until the estimate itself moves.
 //
 // There is nothing to edit here. The server's address and the token arrive through the
 // Connect button on the settings page, which runs this script with both in the URL, and
@@ -26,12 +25,6 @@ const LOGO_PREFIX = "flighter-logo-";
 const REQUEST_TIMEOUT_SECONDS = 15;
 // iOS budgets reloads and ignores an eager request anyway, so do not ask for one.
 const MIN_REFRESH_SECONDS = 60;
-// The time column on the home screen rows. Fixed, because a row with a flexible spacer
-// in it hands each text an equal share of the width before the spacer takes the rest,
-// and the detail line is cut short with room to spare. With the column's width known,
-// the rest of the row is the flight's to fill.
-const TIME_COLUMN = 84;
-
 // The web UI's palette, each value as styles/app.css defines it for the light and the
 // dark scheme, rendered from oklch to sRGB. The phone's appearance picks the side, the
 // same way the page does.
@@ -39,7 +32,8 @@ const BACKGROUND = Color.dynamic(new Color("#ffffff"), new Color("#14171e"));
 const TEXT = Color.dynamic(new Color("#111720"), new Color("#e9edf2"));
 const MUTED = Color.dynamic(new Color("#5f656e"), new Color("#989fa9"));
 
-// The six tones a status can be drawn in, light then dark.
+// The six tones a status can be drawn in, light then dark. The pill's background is the
+// same colour let through at the strength the page mixes it into its card.
 const TONES = {
   quiet: ["#565b63", "#9fa5ae"],
   plan: ["#0c60a3", "#67b0f9"],
@@ -48,6 +42,8 @@ const TONES = {
   warn: ["#815200", "#eea743"],
   stop: ["#ae282b", "#ff7871"],
 };
+// What the pill lets through behind the word, as the page mixes it into its card.
+const TINT_ALPHA = 0.14;
 
 // The one repair for a missing or rejected token, and the same sentence for both.
 const RECONNECT_TEXT = "Open the settings page on this phone and tap Connect.";
@@ -314,32 +310,16 @@ function renderAccessory(widget, flight, result) {
   title.lineLimit = 1;
   title.minimumScaleFactor = 0.7;
 
-  const row = widget.addStack();
-  row.centerAlignContent();
-  row.spacing = 5;
-  if (flight.milestone_text) {
-    const label = row.addText(flight.milestone_label);
-    label.font = Font.systemFont(11);
-    label.textOpacity = 0.7;
-    label.lineLimit = 1;
-    const time = row.addText(flight.milestone_text);
-    time.font = Font.boldMonospacedSystemFont(17);
-    time.lineLimit = 1;
-  } else {
-    const state = row.addText(flight.status_label);
-    state.font = Font.semiboldSystemFont(15);
-    state.lineLimit = 1;
-  }
+  const state = widget.addText(flight.status_label);
+  state.font = Font.semiboldSystemFont(15);
+  state.lineLimit = 1;
 
-  // The third line is the status with the detail after it, unless the second line has
-  // already said the status because there was no time to give.
-  if (flight.milestone_text) {
-    const text = widget.addText(
-      flight.detail ? `${flight.status_label} · ${flight.detail}` : flight.status_label,
-    );
+  if (flight.detail) {
+    const text = widget.addText(flight.detail);
     text.font = Font.systemFont(11);
     text.textOpacity = 0.7;
     text.lineLimit = 1;
+    text.minimumScaleFactor = 0.8;
   }
 }
 
@@ -355,28 +335,17 @@ function renderSmall(widget, flight, logos) {
   route.textColor = MUTED;
   route.lineLimit = 1;
 
-  widget.addSpacer(4);
-  statusText(widget, flight, 11);
-
-  if (flight.milestone_text) {
-    widget.addSpacer(4);
-    const label = widget.addText(flight.milestone_label);
-    label.font = Font.systemFont(11);
-    label.textColor = MUTED;
-    label.lineLimit = 1;
-    const time = widget.addText(flight.milestone_text);
-    time.font = Font.boldMonospacedSystemFont(24);
-    time.textColor = TEXT;
-    time.lineLimit = 1;
-    time.minimumScaleFactor = 0.6;
-  }
+  widget.addSpacer(6);
+  pill(widget.addStack(), flight);
 
   if (flight.detail) {
-    widget.addSpacer(2);
+    widget.addSpacer(4);
+    // The width here is one column, so the line wraps rather than being cut: the
+    // gate and the seat are worth a second line when there is nothing else on screen.
     const detail = widget.addText(flight.detail);
-    detail.font = Font.systemFont(11);
-    detail.textColor = MUTED;
-    detail.lineLimit = 2;
+    detail.font = Font.systemFont(12);
+    detail.textColor = TEXT;
+    detail.lineLimit = 3;
     detail.minimumScaleFactor = 0.8;
   }
 }
@@ -390,56 +359,24 @@ function renderList(widget, flights, logos) {
     if (supportsRowLinks) {
       row.url = flight.detail_url;
     }
-    row.centerAlignContent();
-    row.spacing = 8;
+    row.layoutVertically();
 
-    const left = row.addStack();
-    left.layoutVertically();
+    titleRow(row, flight, logos, 14, true);
+    row.addSpacer(4);
 
-    titleRow(left, flight, logos, 14, true);
-    left.addSpacer(3);
-
-    const line = left.addStack();
+    const line = row.addStack();
     line.centerAlignContent();
-    line.spacing = 4;
-    statusText(line, flight, 11);
+    line.spacing = 6;
+    pill(line, flight);
     if (flight.detail) {
-      // No scale factor: a text that can shrink is sized before the status and handed
+      // No scale factor: a text that can shrink is sized before the pill and handed
       // half the line, and is cut short with room beside it. One that only truncates
-      // is sized after the status and gets everything the status left.
-      const detail = line.addText(`· ${flight.detail}`);
+      // is sized after the pill and gets everything the pill left. The time leads the
+      // line, so what a narrow row loses is the seat rather than the flight.
+      const detail = line.addText(flight.detail);
       detail.font = Font.systemFont(11);
-      detail.textColor = MUTED;
+      detail.textColor = TEXT;
       detail.lineLimit = 1;
-    }
-
-    // A line of nothing but a spacer is what stretches the column to every point the
-    // time column leaves, without sharing a line with any text.
-    const stretch = left.addStack();
-    stretch.addSpacer();
-    stretch.size = new Size(0, 1);
-
-    if (flight.milestone_text) {
-      const right = row.addStack();
-      right.layoutVertically();
-      right.spacing = 1;
-      right.size = new Size(TIME_COLUMN, 0);
-      // Each line sits behind a spacer of its own: that is what puts it against the
-      // right edge, since a text aligns only within its own width.
-      const labelLine = right.addStack();
-      labelLine.addSpacer();
-      const label = labelLine.addText(flight.milestone_label);
-      label.font = Font.systemFont(10);
-      label.textColor = MUTED;
-      label.lineLimit = 1;
-      label.minimumScaleFactor = 0.8;
-      const timeLine = right.addStack();
-      timeLine.addSpacer();
-      const time = timeLine.addText(flight.milestone_text);
-      time.font = Font.boldMonospacedSystemFont(21);
-      time.textColor = TEXT;
-      time.lineLimit = 1;
-      time.minimumScaleFactor = 0.6;
     }
   });
 }
@@ -471,14 +408,18 @@ function titleRow(container, flight, logos, size, withRoute) {
   return row;
 }
 
-// The status as a word in its tone. Not a badge: a badge reads as live, and this is as
-// old as the last reload.
-function statusText(container, flight, size) {
-  const text = container.addText(flight.status_label);
-  text.font = Font.semiboldSystemFont(size);
+// The board's badge: the word in its tone, on the same tone let through the card.
+function pill(container, flight) {
+  const badge = container.addStack();
+  badge.centerAlignContent();
+  badge.setPadding(2, 6, 2, 6);
+  badge.cornerRadius = 7;
+  badge.backgroundColor = toneColor(flight.status_tone, TINT_ALPHA);
+  const text = badge.addText(flight.status_label);
+  text.font = Font.semiboldSystemFont(10);
   text.textColor = toneColor(flight.status_tone);
   text.lineLimit = 1;
-  return text;
+  return badge;
 }
 
 function footer(widget, data, result) {
@@ -530,9 +471,9 @@ function scheduleRefresh(widget, data) {
 
 // --- text ------------------------------------------------------------------------------
 
-function toneColor(name) {
+function toneColor(name, alpha = 1) {
   const [light, dark] = TONES[name] || TONES.quiet;
-  return Color.dynamic(new Color(light), new Color(dark));
+  return Color.dynamic(new Color(light, alpha), new Color(dark, alpha));
 }
 
 function staleNote(result) {

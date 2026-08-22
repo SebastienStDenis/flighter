@@ -59,12 +59,14 @@ POLL_STALE_AFTER: Final = timedelta(minutes=45)
 
 PHASES_IMMINENT: Final = frozenset({DAY_OF, TAXIING, AIRBORNE, DIVERTED})
 
-# The word over the time on the right, by the rung the board counts to. The board
-# counts down; the widget names the time, so "Lands in" is "Lands" here.
-MILESTONE_WORDS: Final = {"Lands in": "Lands", "At the gate in": "At the gate"}
+# What the line calls the rung it names a time for. The board counts down to it; the
+# widget states it, so "Lands in" reads "Lands" here. A departure needs no word at all:
+# it is the first thing on the line and the time it leaves is what a row is about.
+ARRIVAL_WORDS: Final = {"Lands in": "Lands", "At the gate in": "At the gate"}
 
-# The board names the day for a flight the feed has not picked up yet. Here the day is
-# the word under the time, so the status has nothing to add but that it is booked.
+# The board names the day in the pill for a flight the feed has not picked up yet. Here
+# the day is on the line with the time, so the pill has nothing to add but that it is
+# booked.
 DAY_WORDS: Final = frozenset({"Today", "Tomorrow"})
 
 # The script is served from here rather than fetched from a repository, so the phone
@@ -92,15 +94,10 @@ class WidgetFlight(BaseModel):
     route: str
     status_label: str
     status_tone: str
-    # The one line of the card that matters in this phase: the gate and seat on the
-    # day, nothing before or after.
+    # The one line under the pill: the next time that matters, read at the airport it
+    # happens at, with what there is to find at that airport after it. Everything the
+    # row says beyond the flight itself is on this line.
     detail: str | None
-    # The right-hand column: the next time that matters, read at the airport it happens
-    # at, and the word that says which it is. The word is the day while the flight is
-    # still to leave and that day is not today, else the rung: Departs, Lands, At the
-    # gate. Parked, the belt takes the column instead.
-    milestone_label: str | None
-    milestone_text: str | None
 
 
 class WidgetPayload(BaseModel):
@@ -308,16 +305,6 @@ def _flight(
     phase = compute_phase(booking, snapshot, now)
     origin_tz = _zone(airports, booking.origin_iata)
     pill = _status(phase, booking, snapshot, now=now, origin_tz=origin_tz)
-    parked = views.at_the_gate(phase, booking, snapshot, now)
-    label, text = _milestone(
-        phase,
-        booking,
-        snapshot,
-        now=now,
-        parked=parked,
-        origin_tz=origin_tz,
-        destination_tz=_zone(airports, views.destination_iata(booking, snapshot)),
-    )
     return WidgetFlight(
         detail_url=f"{base_url}/f/{booking.id}",
         phase=phase,
@@ -326,9 +313,14 @@ def _flight(
         route=f"{booking.origin_iata} → {views.destination_iata(booking, snapshot)}",
         status_label=pill.label,
         status_tone=pill.tone,
-        detail=_detail(phase, booking, snapshot),
-        milestone_label=label,
-        milestone_text=text,
+        detail=_detail(
+            phase,
+            booking,
+            snapshot,
+            now=now,
+            origin_tz=origin_tz,
+            destination_tz=_zone(airports, views.destination_iata(booking, snapshot)),
+        ),
     )
 
 
@@ -361,57 +353,59 @@ def _status(
     return pill
 
 
-def _milestone(
+def _detail(
     phase: Phase,
     booking: Booking,
     snapshot: FlightSnapshot | None,
     *,
     now: datetime,
-    parked: bool,
     origin_tz: str,
     destination_tz: str,
-) -> tuple[str | None, str | None]:
-    """The right-hand column: the rung the board counts to, as the time it is due.
+) -> str | None:
+    """The line under the pill: the next time that matters, and what to find when it comes.
 
-    The departure is read at the origin and everything after it at the destination, the
-    way a ticket and an arrivals board each read their own clock. A departure's word is
-    the day when that is not today at the origin, since a time on its own reads as
-    today's and a flight booked for tomorrow morning would look overdue all evening.
+    The rung is the board's own, so the two never name different things. The departure
+    is read at the origin and everything after it at the destination, the way a ticket
+    and an arrivals board each read their own clock, and the time leads the line so that
+    a row too narrow for all of it loses the seat rather than the flight.
+
+    Parked there is no time left to give and the belt is the only thing anyone wants,
+    and a flight the feed lost, or called off, has nothing to say the pill has not said.
     """
-    if parked:
-        # The card's footer once the aircraft is parked: the belt, or the dash that
-        # says nobody has named one yet.
-        return "Baggage claim", views.dash(snapshot.baggage_claim if snapshot else None)
+    if views.at_the_gate(phase, booking, snapshot, now):
+        belt = snapshot.baggage_claim if snapshot else None
+        return f"Baggage claim {belt}" if belt else None
     next_up = views.milestone(phase, booking, snapshot, now=now)
     if next_up is None:
-        return None, None
-    if next_up.label in MILESTONE_WORDS:
-        return MILESTONE_WORDS[next_up.label], views.clock(next_up.target, destination_tz)
-    day = views.day_word(next_up.target, now, origin_tz)
-    if day == "Today":
-        label = "Departs"
-    elif day is not None:
-        label = day
-    else:
-        label = views.day(next_up.target, origin_tz)
-    return label, views.clock(next_up.target, origin_tz)
-
-
-def _detail(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> str | None:
-    """What the card says that matters most right now, on one line.
-
-    On the day, the gate and the seat to find. Days out there is nothing to find yet,
-    and once it has pushed back nothing left to: the gate it left is behind it, and the
-    other end is the right-hand column's to time and the belt's to name.
-    """
-    if phase != DAY_OF:
         return None
-    parts: list[str] = []
-    if snapshot and snapshot.gate_origin:
-        parts.append(f"Gate {snapshot.gate_origin}")
-    if booking.seat:
-        parts.append(f"Seat {booking.seat}")
-    return " · ".join(parts) if parts else None
+    if next_up.label in ARRIVAL_WORDS:
+        word = ARRIVAL_WORDS[next_up.label]
+        return f"{word} {_when(next_up.target, now, destination_tz)}"
+
+    parts = [_when(next_up.target, now, origin_tz)]
+    if phase == DAY_OF:
+        # The gate and the seat are worth the width only once there is a chance they
+        # are filled in and a person is on their way to use them.
+        if snapshot and snapshot.gate_origin:
+            parts.append(f"Gate {snapshot.gate_origin}")
+        if booking.seat:
+            parts.append(f"Seat {booking.seat}")
+    return " · ".join(parts)
+
+
+def _when(instant: datetime, now: datetime, tz: str) -> str:
+    """A time at an airport, with the day in front of it when it is not today's.
+
+    `18:40 EDT` on its own reads as today's, so a flight leaving tomorrow morning would
+    look hours overdue all evening. The zone is never dropped: it is the difference
+    between a time and a missed flight, which is why every time in the app carries it.
+    """
+    day = views.day_word(instant, now, tz)
+    if day == "Today":
+        return views.at(instant, tz)
+    if day is not None:
+        return f"{day} {views.at(instant, tz)}"
+    return views.at(instant, tz, with_date=True)
 
 
 def _refresh_seconds(flights: Sequence[WidgetFlight]) -> int:
