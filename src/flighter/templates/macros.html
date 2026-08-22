@@ -39,10 +39,10 @@
 <div class="ends">
   {% for side in sides %}
   {% if side.line.moved %}
-  <div class="replaced {{ tone(side.line) }} {{ 'justify-self-end' if side.right else 'justify-self-start' }}"
+  <div class="replaced {{ 'justify-self-end' if side.right else 'justify-self-start' }}"
        role="button" tabindex="0" aria-expanded="false"
        aria-label="Show the time this was booked for">
-    <div class="replaced-now">{{ end(side, side.line.best) }}</div>
+    <div class="replaced-now">{{ end(side, side.line.best, mark=tone(side.line)) }}</div>
     <div class="replaced-was"><div>{{ end(side, side.line.scheduled, held=side.line.best) }}</div></div>
   </div>
   {% else %}
@@ -52,22 +52,32 @@
 </div>
 {% endmacro %}
 
-{# One end's two lines. The zone sits on the outside of the time, so the two clocks
-   read from the edges of the card the way the codes above them do. An end that moved
+{# One end's two lines. The zone sits beside the time on the inner side, so the two
+   clocks read from the edges of the card the way the codes above them do, and `mark`
+   puts the dot for a move past it, hard against the card's own edge. An end that moved
    is drawn twice, the second time from what was booked, and then `held` is what the
    card is showing instead: every line the two disagree on is struck through, and every
    line the move left alone is drawn as it stands. #}
-{% macro end(side, instant, held=none) %}
+{% macro end(side, instant, held=none, mark="") %}
 {% set abbr = zone(instant, side.tz) %}
 <div class="font-mono text-xl leading-tight font-bold">
+  {%- if mark and not side.right %}{{ dot(mark) }}{% endif -%}
   {%- if abbr and side.right %}<span class="mr-1 text-[0.6875rem] font-medium text-muted-foreground">{{ struck(abbr, held and abbr != zone(held, side.tz)) }}</span>{% endif -%}
   {{- struck(clock(instant, side.tz), held and clock(instant, side.tz) != clock(held, side.tz)) -}}
   {%- if abbr and not side.right %}<span class="ml-1 text-[0.6875rem] font-medium text-muted-foreground">{{ struck(abbr, held and abbr != zone(held, side.tz)) }}</span>{% endif -%}
+  {%- if mark and side.right %}{{ dot(mark, right=true) }}{% endif -%}
 </div>
 <div class="mt-0.5 font-mono text-xs text-muted-foreground">
   {%- if instant is not none %}{{ struck(day(instant, side.tz), held and day(instant, side.tz) != day(held, side.tz)) }}{% endif -%}
 </div>
 {% endmacro %}
+
+{# What a value that moved is marked with: a dot in the tone the move earns, on the
+   outer side of the figure. The figure itself is left the colour every other figure on
+   the card is, so a card with three moves on it is still a card of times. #}
+{% macro dot(tone, right=false) -%}
+<span class="dot {{ tone }} {{ 'ml-2' if right else 'mr-2' }}" aria-hidden="true"></span>
+{%- endmacro %}
 
 {# One line of an end drawn as it was booked, ruled through when the move changed it. #}
 {% macro struck(shown, changed) -%}
@@ -83,10 +93,10 @@
 {% set sides = [
   {"right": false, "places": [
     ("Term", s.terminal_origin if s else none, ""),
-    ("Gate", s.gate_origin if s else none, "text-plan font-semibold"),
+    ("Gate", s.gate_origin if s else none, "font-semibold"),
   ]},
   {"right": true, "places": [
-    ("Gate", s.gate_destination if s else none, "text-plan font-semibold"),
+    ("Gate", s.gate_destination if s else none, "font-semibold"),
     ("Term", s.terminal_destination if s else none, ""),
   ]},
 ] %}
@@ -149,15 +159,15 @@
         <div class="font-mono text-2xl font-bold tracking-tight">{{ v.booking.origin_iata }}</div>
       </div>
       <div class="mt-8">{{ route_line(v) }}</div>
-      {# A diverted flight's new airport stands where the code goes, in red, and the tap
-         on it shows the one it was booked for. #}
+      {# A diverted flight's new airport stands where the code goes, marked like a time
+         that moved, and the tap on it shows the one it was booked for. #}
       <div class="text-right">
         <div class="flex w-0 min-w-full justify-end text-xs whitespace-nowrap text-muted-foreground">{{ v.destination.city if v.destination }}</div>
         {% set code = "font-mono text-2xl font-bold tracking-tight" %}
         {% if v.diverted_to %}
-        <div class="replaced text-stop-soft" role="button" tabindex="0" aria-expanded="false"
+        <div class="replaced" role="button" tabindex="0" aria-expanded="false"
              aria-label="Show the airport this was booked for">
-          <div class="replaced-now {{ code }}">{{ v.destination_iata }}</div>
+          <div class="replaced-now {{ code }}">{{ v.destination_iata }}{{ dot("text-stop-soft", right=true) }}</div>
           <div class="replaced-was"><div class="{{ code }}"><s>{{ v.booking.dest_iata }}</s></div></div>
         </div>
         {% else %}
