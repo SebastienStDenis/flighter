@@ -6,6 +6,9 @@
 
 const SHELL = "shell-v6";
 const PAGES = "pages-v1";
+const AIRLINE_LOGOS = "airline-logos-v1";
+const AIRLINE_LOGO_ORIGIN = "https://www.gstatic.com";
+const AIRLINE_LOGO_PATH = "/flights/airline_logos/70px/";
 const ASSETS = [
   "/static/flighter.css",
   "/static/basecoat.min.js",
@@ -45,7 +48,11 @@ self.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((keys) =>
-        Promise.all(keys.filter((key) => key !== SHELL && key !== PAGES).map((key) => caches.delete(key)))
+        Promise.all(
+          keys
+            .filter((key) => key !== SHELL && key !== PAGES && key !== AIRLINE_LOGOS)
+            .map((key) => caches.delete(key))
+        )
       )
       .then(() => self.clients.claim())
   );
@@ -56,6 +63,11 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
 
   const url = new URL(request.url);
+  if (url.origin === AIRLINE_LOGO_ORIGIN && url.pathname.startsWith(AIRLINE_LOGO_PATH)) {
+    event.respondWith(airlineLogoOrNetwork(request));
+    return;
+  }
+
   if (url.origin !== self.location.origin) return;
 
   if (url.pathname.startsWith("/static/")) {
@@ -86,6 +98,23 @@ self.addEventListener("fetch", (event) => {
   // Anything else is a feed, and a feed is never served stale.
   event.respondWith(fetch(request, { cache: "no-store" }).catch(() => Response.error()));
 });
+
+async function airlineLogoOrNetwork(request) {
+  let cache;
+  try {
+    cache = await caches.open(AIRLINE_LOGOS);
+    const hit = await cache.match(request);
+    if (hit) return hit;
+  } catch {}
+
+  const response = await fetch(request);
+  if (cache && (response.type === "opaque" || response.ok)) {
+    try {
+      await cache.put(request, response.clone());
+    } catch {}
+  }
+  return response;
+}
 
 async function pageOrLastCopy(request) {
   const cache = await caches.open(PAGES);
