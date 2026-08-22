@@ -622,9 +622,7 @@ _SETTLED: dict[str, Status] = {
 # to know where it got to, not to be told what the importer did with its afternoon.
 _ACCOUNT: dict[str, str] = {
     IngestOutcome.DUPLICATE: "Every flight in this email was already on the board.",
-    IngestOutcome.IGNORED: (
-        "Marked as holding no flight. The flag will come off the email shortly."
-    ),
+    IngestOutcome.IGNORED: "Marked as holding no flight. The email flag will be unset shortly.",
     IngestOutcome.NO_FLIGHT: "Marked as holding no flight.",
 }
 
