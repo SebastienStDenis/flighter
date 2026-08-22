@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
-import shutil
-import subprocess
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -21,7 +18,6 @@ from flighter.aeroapi import BREAKER_KEY, month_key
 from flighter.config import Settings, get_settings
 from flighter.db import get_session
 from flighter.models import KV, Airport, Booking, BookingStatus, FlightSnapshot
-from flighter.views import until
 from flighter.widget import (
     FlightRow,
     authorize,
@@ -85,9 +81,9 @@ AIRPORTS = {
 }
 
 
-def carded(body: dict[str, Any]) -> list[tuple[int, bool]]:
-    """Each flight on the widget, in order, and whether it is the one with the card."""
-    return [(_id(flight), flight["card"] is not None) for flight in body["flights"]]
+def detail(flight: dict[str, Any]) -> Any:
+    """The one line under the pill, which is everything the row says beyond the flight."""
+    return flight["detail"]
 
 
 # --- payload shaping ------------------------------------------------------------------
@@ -96,9 +92,8 @@ def carded(body: dict[str, Any]) -> list[tuple[int, bool]]:
 def test_upcoming_flight(settings: Settings) -> None:
     far = booking(scheduled_departure_utc=NOW + timedelta(days=6))
     flight = payload([(far, None)], settings)["flights"][0]
-    # Days out there is nothing to count to, as on the card: the day it leaves is the
-    # one fact worth a line, and the right-hand side is left empty rather than saying
-    # Scheduled twice.
+    # Days out the day and time it leaves is the whole story: there is no gate to find
+    # yet, and the pill says only that it is booked.
     assert flight == {
         "detail_url": "https://flights.example.com/f/42",
         "phase": "upcoming",
@@ -108,78 +103,87 @@ def test_upcoming_flight(settings: Settings) -> None:
         "status_label": "Scheduled",
         "status_tone": "quiet",
         "detail": "Fri 18 Sep 18:00 UTC",
-        "milestone_label": None,
-        "milestone_to": None,
-        "milestone_text": None,
-        "milestone_due": None,
-        "card": None,
     }
 
 
 def test_the_day_it_leaves_is_read_at_the_origin(settings: Settings) -> None:
     far = booking(origin_iata="HND", scheduled_departure_utc=NOW + timedelta(days=6))
     flight = payload([(far, None)], settings, airports=AIRPORTS)["flights"][0]
-    assert flight["detail"] == "Sat 19 Sep 03:00 JST"
+    assert detail(flight) == "Sat 19 Sep 03:00 JST"
 
 
-def test_a_flight_without_a_feed_is_named_by_the_day_at_its_origin(settings: Settings) -> None:
-    """NOW is 18:00 UTC on the 12th: 14:00 in New York, 03:00 the next day in Tokyo."""
+def test_a_departure_not_today_carries_its_day(settings: Settings) -> None:
+    """NOW is 18:00 UTC on the 12th: 14:00 in New York, 03:00 the next day in Tokyo.
+
+    A time on its own reads as today's, so a flight leaving tomorrow morning would look
+    hours overdue all evening without the day in front of it. The board names the day in
+    the pill when the feed has not picked the flight up; here the line does, and the
+    pill says only that it is booked.
+    """
     early = booking(origin_iata="HND", scheduled_departure_utc=NOW + timedelta(hours=8))
+    flight = payload([(early, None)], settings, airports=AIRPORTS)["flights"][0]
+    assert detail(flight) == "11:00 JST"
+    assert flight["status_label"] == "Scheduled"
+    assert flight["status_tone"] == "quiet"
 
-    assert (
-        payload([(early, None)], settings, airports=AIRPORTS)["flights"][0]["status_label"]
-        == "Today"
-    )
     late = booking(scheduled_departure_utc=NOW + timedelta(hours=12))
-    assert (
-        payload([(late, None)], settings, airports=AIRPORTS)["flights"][0]["status_label"]
-        == "Tomorrow"
-    )
+    flight = payload([(late, None)], settings, airports=AIRPORTS)["flights"][0]
+    assert detail(flight) == "Tomorrow 02:00 EDT"
+    assert flight["status_label"] == "Scheduled"
+
     # With no airport on file the day is read off UTC rather than left blank.
-    assert payload([(late, None)], settings)["flights"][0]["status_label"] == "Tomorrow"
-    assert payload([(early, None)], settings)["flights"][0]["status_label"] == "Tomorrow"
+    assert detail(payload([(late, None)], settings)["flights"][0]) == "Tomorrow 06:00 UTC"
+    assert detail(payload([(early, None)], settings)["flights"][0]) == "Tomorrow 02:00 UTC"
 
 
-def test_day_of_shows_the_gate_and_the_seat(settings: Settings) -> None:
-    """The time it leaves is what the milestone counts to, so the line does not repeat it."""
+def test_a_feed_that_says_on_time_keeps_the_day_under_the_time(settings: Settings) -> None:
+    tomorrow = NOW + timedelta(hours=12)
+    flight = payload([(booking(), snapshot(scheduled_out=tomorrow))], settings, airports=AIRPORTS)[
+        "flights"
+    ][0]
+    assert flight["status_label"] == "On time"
+    assert detail(flight) == "Tomorrow 02:00 EDT"
+
+
+def test_day_of_shows_the_time_the_gate_and_the_seat(settings: Settings) -> None:
+    """Everything a person on their way to the airport is looking for, in reading order."""
     gated = snapshot(scheduled_out=DEPARTURE, gate_origin="B22", terminal_origin="4")
-    flight = payload([(booking(seat="14A"), gated)], settings)["flights"][0]
+    flight = payload([(booking(seat="14A"), gated)], settings, airports=AIRPORTS)["flights"][0]
     assert flight["phase"] == "day_of"
-    assert flight["detail"] == "Gate B22 · Seat 14A"
+    assert detail(flight) == "14:40 EDT · Gate B22 · Seat 14A"
     assert flight["status_label"] == "On time"
     assert flight["status_tone"] == "ok"
-    assert flight["milestone_label"] == "Departs in"
-    assert flight["milestone_to"] == "2026-09-12T18:40:00Z"
-    assert flight["milestone_due"] == "Due to depart"
 
 
-def test_day_of_with_nothing_assigned_yet_has_no_detail(settings: Settings) -> None:
+def test_day_of_with_nothing_assigned_yet_is_the_time_alone(settings: Settings) -> None:
     flight = payload([(booking(), snapshot())], settings)["flights"][0]
-    assert flight["milestone_label"] == "Departs in"
-    assert flight["detail"] is None
+    assert detail(flight) == "18:40 UTC"
 
 
-def test_a_delayed_departure_leaves_the_new_time_to_the_count(settings: Settings) -> None:
+def test_a_delayed_departure_names_the_time_it_now_leaves(settings: Settings) -> None:
     held = snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=30))
     flight = payload([(booking(seat="14A"), held)], settings)["flights"][0]
-    assert flight["milestone_to"] == "2026-09-12T19:10:00Z"
-    assert flight["detail"] == "Seat 14A"
+    assert flight["status_label"] == "Departure delayed"
+    assert flight["status_tone"] == "warn"
+    # Delayed to when is the whole question the pill leaves open.
+    assert detail(flight) == "19:10 UTC · Seat 14A"
 
 
-def test_the_run_up_to_departure_keeps_counting(settings: Settings) -> None:
-    """The half hour before departure is when the number matters most, so it must not be
+def test_the_run_up_to_departure_keeps_the_time(settings: Settings) -> None:
+    """The half hour before departure is when the time matters most, so it must not be
     traded for a word about boarding that no feed reports."""
     imminent = snapshot(scheduled_out=NOW + timedelta(minutes=20), gate_origin="B22")
     flight = payload([(booking(), imminent)], settings)["flights"][0]
     assert flight["phase"] == "day_of"
-    assert flight["milestone_label"] == "Departs in"
-    assert flight["milestone_to"] == "2026-09-12T18:20:00Z"
+    assert detail(flight) == "18:20 UTC · Gate B22"
 
 
-def test_taxiing_counts_to_the_landing_and_names_no_gate_at_either_end(
+def test_taxiing_says_departed_and_names_the_landing_at_the_other_end(
     settings: Settings,
 ) -> None:
-    """Nothing upstream estimates wheels up, so the next rung with a time is the landing."""
+    """Taxiing is ten minutes the widget is as likely as not to miss, and Departed stays
+    true until the gate. Nothing upstream estimates wheels up, so the next rung with a
+    time is the landing, read on the clock where it lands."""
     taxiing = snapshot(
         scheduled_out=NOW - timedelta(minutes=5),
         actual_out=NOW - timedelta(minutes=2),
@@ -187,16 +191,14 @@ def test_taxiing_counts_to_the_landing_and_names_no_gate_at_either_end(
         gate_destination="12",
         terminal_destination="B",
     )
-    flight = payload([(booking(), taxiing)], settings)["flights"][0]
+    flight = payload([(booking(), taxiing)], settings, airports=AIRPORTS)["flights"][0]
     assert flight["phase"] == "taxiing"
-    assert flight["status_label"] == "Taxiing"
+    assert flight["status_label"] == "Departed"
     assert flight["status_tone"] == "live"
-    assert flight["milestone_label"] == "Lands in"
-    assert flight["milestone_to"] == "2026-09-12T22:15:00Z"
-    assert flight["detail"] is None
+    assert detail(flight) == "Lands 15:15 PDT"
 
 
-def test_airborne_counts_down_to_landing(settings: Settings) -> None:
+def test_airborne_names_the_landing(settings: Settings) -> None:
     flying = snapshot(
         scheduled_out=DEPARTURE - timedelta(hours=2),
         actual_out=DEPARTURE - timedelta(hours=2),
@@ -209,16 +211,13 @@ def test_airborne_counts_down_to_landing(settings: Settings) -> None:
     )
     flight = payload([(booking(), flying)], settings)["flights"][0]
     assert flight["phase"] == "airborne"
-    assert flight["milestone_label"] == "Lands in"
-    assert flight["milestone_to"] == "2026-09-12T22:40:00Z"
-    assert flight["milestone_due"] == "Due to land"
-    # The gate at the other end waits until the flight is on the ground.
-    assert flight["detail"] is None
+    # The gate at the other end is not worth the width from seat 32A; when it lands is.
+    assert detail(flight) == "Lands 22:40 UTC"
     assert flight["status_label"] == "Arriving late"
     assert flight["status_tone"] == "warn"
 
 
-def test_landed_counts_to_the_gate_without_naming_it(settings: Settings) -> None:
+def test_landed_names_the_time_at_the_gate(settings: Settings) -> None:
     landed = snapshot(
         actual_off=DEPARTURE,
         actual_on=ARRIVAL - timedelta(minutes=10),
@@ -233,14 +232,10 @@ def test_landed_counts_to_the_gate_without_naming_it(settings: Settings) -> None
     assert flight["phase"] == "landed"
     assert flight["status_label"] == "Landed"
     assert flight["status_tone"] == "ok"
-    assert flight["detail"] is None
-    assert flight["milestone_label"] == "At the gate in"
-    assert flight["milestone_to"] == "2026-09-12T22:15:00Z"
-    assert flight["milestone_due"] == "Due at the gate"
-    assert flight["milestone_text"] is None
+    assert detail(flight) == "At the gate 22:15 UTC"
 
 
-def test_at_the_gate_the_belt_takes_the_milestones_place(settings: Settings) -> None:
+def test_at_the_gate_the_belt_takes_the_column(settings: Settings) -> None:
     done = snapshot(
         actual_off=DEPARTURE,
         actual_on=ARRIVAL,
@@ -251,19 +246,15 @@ def test_at_the_gate_the_belt_takes_the_milestones_place(settings: Settings) -> 
     )
     flight = payload([(booking(), done)], settings)["flights"][0]
     assert flight["status_label"] == "Arrived"
-    assert flight["detail"] is None
-    assert flight["milestone_label"] == "Baggage claim"
-    assert flight["milestone_text"] == "7"
-    assert flight["milestone_to"] is None
-    assert flight["milestone_due"] is None
+    assert detail(flight) == "Baggage claim 7"
 
 
-def test_a_belt_nobody_has_named_is_the_dash_the_card_shows(settings: Settings) -> None:
+def test_a_belt_nobody_has_named_leaves_the_line_empty(settings: Settings) -> None:
+    """The card has a labelled cell to put a dash in; a line has nothing to say."""
     done = snapshot(actual_off=DEPARTURE, actual_on=ARRIVAL, actual_in=ARRIVAL)
     flight = payload([(booking(), done)], settings)["flights"][0]
-    assert flight["milestone_label"] == "Baggage claim"
-    assert flight["milestone_text"] == "-"
-    assert flight["detail"] is None
+    assert flight["status_label"] == "Arrived"
+    assert detail(flight) is None
 
 
 def test_a_landed_flight_past_its_gate_time_is_sent_to_the_belt(settings: Settings) -> None:
@@ -283,41 +274,55 @@ def test_a_landed_flight_past_its_gate_time_is_sent_to_the_belt(settings: Settin
     )
     flight = late.model_dump(mode="json")["flights"][0]
     assert flight["status_label"] == "Landed"
-    assert flight["milestone_label"] == "Baggage claim"
-    assert flight["milestone_text"] == "7"
-    assert flight["detail"] is None
+    assert detail(flight) == "Baggage claim 7"
 
 
-def test_cancelled_has_nothing_to_count_to(settings: Settings) -> None:
+def test_a_time_that_has_passed_stays_the_time(settings: Settings) -> None:
+    """Wheels down is published minutes after the fact. The board says "due" meanwhile;
+    here the time stands, and the phone's own clock says it is overdue."""
+    overdue = snapshot(
+        actual_off=DEPARTURE, estimated_on=ARRIVAL - timedelta(minutes=10), estimated_in=ARRIVAL
+    )
+    later = build_payload(
+        [(booking(), overdue)],
+        settings=settings,
+        now=ARRIVAL - timedelta(minutes=4),
+        base_url="https://flights.example.com",
+    )
+    flight = later.model_dump(mode="json")["flights"][0]
+    assert detail(flight) == "Lands 22:05 UTC"
+
+
+def test_cancelled_has_no_time_to_give(settings: Settings) -> None:
     flight = payload([(booking(), snapshot(cancelled=True))], settings)["flights"][0]
     assert flight["phase"] == "cancelled"
     assert flight["status_label"] == "Cancelled"
     assert flight["status_tone"] == "stop"
-    assert flight["detail"] is None
-    assert flight["milestone_label"] is None
-    assert flight["milestone_to"] is None
+    assert detail(flight) is None
 
 
-def test_diverted_still_lands_somewhere(settings: Settings) -> None:
+def test_a_booking_the_poller_closed_in_the_air_has_no_time_to_give(
+    settings: Settings,
+) -> None:
+    """The feed lost it. A landing hours in the past is no time to name."""
+    lost = snapshot(actual_off=NOW - timedelta(hours=9), estimated_in=NOW - timedelta(hours=3))
+    closed = booking(status=BookingStatus.COMPLETED)
+    flight = payload([(closed, lost)], settings)["flights"][0]
+    assert flight["status_label"] == "Flown"
+    assert detail(flight) is None
+
+
+def test_a_diversion_renames_the_destination_and_reads_its_clock(settings: Settings) -> None:
     diverted = snapshot(
-        diverted=True, actual_off=DEPARTURE, estimated_in=ARRIVAL, gate_destination="12"
+        diverted=True, destination_iata="YOW", actual_off=DEPARTURE, estimated_in=ARRIVAL
     )
-    flight = payload([(booking(), diverted)], settings)["flights"][0]
+    flight = payload([(booking(), diverted)], settings, airports=AIRPORTS)["flights"][0]
     assert flight["phase"] == "diverted"
+    assert flight["route"] == "JFK → YOW"
     assert flight["status_label"] == "Diverted"
-    # The pill says Diverted and the route names where to; nothing else repeats it.
-    assert flight["detail"] is None
-    assert flight["milestone_label"] == "Lands in"
-    assert flight["milestone_to"] == "2026-09-12T22:15:00Z"
-
-
-def test_a_late_departure_is_the_pill_the_board_shows(settings: Settings) -> None:
-    waiting = snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=30))
-    flight = payload([(booking(), waiting)], settings)["flights"][0]
-    assert flight["status_label"] == "Departure delayed"
-    assert flight["status_tone"] == "warn"
-    assert flight["milestone_label"] == "Departs in"
-    assert flight["milestone_to"] == "2026-09-12T19:10:00Z"
+    # The route names where it is bound; the line says when it gets there, read on that
+    # airport's clock rather than the one it was booked for.
+    assert detail(flight) == "Lands 18:15 EDT"
 
 
 def test_a_minute_late_is_still_on_time(settings: Settings) -> None:
@@ -325,6 +330,121 @@ def test_a_minute_late_is_still_on_time(settings: Settings) -> None:
     flight = payload([(booking(), jitter)], settings)["flights"][0]
     assert flight["status_label"] == "On time"
     assert flight["status_tone"] == "ok"
+
+
+def test_airborne_time_is_touchdown_not_the_gate(settings: Settings) -> None:
+    """The time someone reads from seat 32A is wheels down.
+
+    Taxiing to a stand is ten minutes nobody counts, so a time aimed at the gate is
+    wrong for the whole stretch of the flight anyone is watching it.
+    """
+    touchdown = ARRIVAL - timedelta(minutes=11)
+    flying = snapshot(
+        actual_out=DEPARTURE - timedelta(hours=2),
+        actual_off=DEPARTURE - timedelta(hours=2),
+        scheduled_on=touchdown,
+        estimated_on=touchdown,
+        scheduled_in=ARRIVAL,
+        estimated_in=ARRIVAL,
+        progress_percent=70,
+    )
+    flight = payload([(booking(), flying)], settings)["flights"][0]
+    assert detail(flight) == "Lands 22:04 UTC"
+
+
+def test_a_late_pushback_is_history_once_the_flight_is_off_the_ground(
+    settings: Settings,
+) -> None:
+    """A flight that left the gate late but is landing on time is not delayed, and saying
+    so for the rest of the cruise makes the status mean nothing."""
+    recovered = snapshot(
+        scheduled_out=DEPARTURE,
+        actual_out=DEPARTURE + timedelta(minutes=40),
+        actual_off=DEPARTURE + timedelta(minutes=52),
+        scheduled_in=ARRIVAL,
+        estimated_in=ARRIVAL,
+    )
+    flight = payload([(booking(), recovered)], settings)["flights"][0]
+    assert flight["status_label"] == "In the air"
+    assert flight["status_tone"] == "live"
+
+
+# --- the phone's own clock --------------------------------------------------------------
+
+
+HOME = "America/Toronto"
+
+
+def test_the_times_are_the_ones_on_the_phones_clock(settings: Settings) -> None:
+    """A time four zones away is arithmetic, not information.
+
+    Watching from Ottawa, a flight landing at 15:15 in Los Angeles is 18:15 on the
+    watch of the person reading it, and that is the figure the line leads with. The
+    airport's own clock follows, because on the ground at the other end it is the one
+    that matters.
+    """
+    flying = snapshot(actual_off=DEPARTURE - timedelta(hours=2), estimated_in=ARRIVAL)
+    flight = payload([(booking(), flying)], settings, airports=AIRPORTS, viewer_tz=HOME)["flights"][
+        0
+    ]
+    assert detail(flight) == "Lands 18:15 EDT · 15:15 PDT"
+
+
+def test_one_clock_where_the_phone_is_already_on_the_airports(settings: Settings) -> None:
+    """The everyday case, and the one a departure is almost always in: no second time,
+    because there is no second reading."""
+    gated = snapshot(scheduled_out=DEPARTURE, gate_origin="B22")
+    flight = payload([(booking(seat="14A"), gated)], settings, airports=AIRPORTS, viewer_tz=HOME)[
+        "flights"
+    ][0]
+    assert detail(flight) == "14:40 EDT · Gate B22 · Seat 14A"
+
+
+def test_the_day_in_front_is_the_phones_day(settings: Settings) -> None:
+    """The day belongs to the clock the line leads with, or it contradicts it.
+
+    NOW is the 12th in Toronto and already the 13th in Tokyo, so a departure on the
+    13th is tomorrow to the person reading it and today at the airport. The line leads
+    with their clock, so it is their day that goes in front.
+    """
+    tokyo = booking(origin_iata="HND", scheduled_departure_utc=NOW + timedelta(hours=20))
+    flight = payload([(tokyo, None)], settings, airports=AIRPORTS, viewer_tz=HOME)["flights"][0]
+    assert detail(flight) == "Tomorrow 10:00 EDT · 23:00 JST"
+
+
+def test_a_phone_that_says_nothing_gets_the_airports_clock(settings: Settings) -> None:
+    """What every copy drew before the zone was sent, and still right, just harder work."""
+    flying = snapshot(actual_off=DEPARTURE - timedelta(hours=2), estimated_in=ARRIVAL)
+    rows: list[FlightRow] = [(booking(), flying)]
+    assert detail(payload(rows, settings, airports=AIRPORTS)["flights"][0]) == "Lands 15:15 PDT"
+    blank = payload(rows, settings, airports=AIRPORTS, viewer_tz="")["flights"][0]
+    assert detail(blank) == "Lands 15:15 PDT"
+
+
+def test_a_zone_the_phone_made_up_does_not_break_the_widget(settings: Settings) -> None:
+    """`zone()` falls back to UTC on a name it does not know, and a widget that draws
+    the wrong clock is still better than one that draws an error."""
+    flying = snapshot(actual_off=DEPARTURE - timedelta(hours=2), estimated_in=ARRIVAL)
+    flight = payload(
+        [(booking(), flying)], settings, airports=AIRPORTS, viewer_tz="Mars/Olympus_Mons"
+    )["flights"][0]
+    assert detail(flight) == "Lands 22:15 UTC · 15:15 PDT"
+
+
+def test_the_phones_zone_reaches_the_payload_from_the_query(client: TestClient) -> None:
+    """The one thing the server cannot work out for itself."""
+    response = client.get(
+        "/api/widget?tz=Asia/Tokyo", headers={"Authorization": "Bearer test-token"}
+    )
+    assert response.status_code == 200
+    # The fixture's flight leaves JFK at 18:40 UTC, which is 03:40 the next day in Tokyo.
+    assert "03:40 JST" in response.json()["flights"][0]["detail"]
+
+
+def test_the_script_tells_the_server_where_the_phone_is() -> None:
+    source = script_source()
+    assert "tz=${encodeURIComponent(timeZone())}" in source
+    assert "resolvedOptions().timeZone" in source
 
 
 # --- instants -------------------------------------------------------------------------
@@ -341,26 +461,22 @@ def _instants(value: Any) -> Iterator[str]:
         yield value
 
 
-def test_every_instant_is_utc_with_a_z(settings: Settings) -> None:
-    """The phone renders these relative to its own clock; a missing zone shifts it."""
+def test_nothing_in_the_payload_is_an_instant(settings: Settings) -> None:
+    """The phone draws at reload and iOS reloads when it likes; anything it measured
+    against its own clock would be a quarter of an hour wrong by the next one."""
     rows: list[FlightRow] = [
         (booking(id=1), snapshot(scheduled_out=NOW + timedelta(minutes=20))),
         (booking(id=2), snapshot(actual_off=DEPARTURE, estimated_in=ARRIVAL)),
         (booking(id=3, scheduled_departure_utc=NOW + timedelta(days=4)), None),
     ]
-    body = payload(rows, settings)
-    found = list(_instants(body))
-    # One milestone per flight inside its day, and the airborne one's card carries the
-    # span the phone moves the aircraft along.
-    assert len(found) == 4
-    assert all(instant.endswith("Z") for instant in found)
+    assert list(_instants(payload(rows, settings))) == []
 
 
-def test_instants_survive_a_non_utc_input(settings: Settings) -> None:
-    """AeroAPI states offsets; whatever arrives must leave as Z."""
+def test_a_non_utc_input_is_read_at_the_origins_clock(settings: Settings) -> None:
+    """AeroAPI states offsets; whatever arrives is a clock at the airport on the way out."""
     tokyo = datetime(2026, 9, 12, 18, 40, tzinfo=UTC).astimezone()
     flight = payload([(booking(scheduled_departure_utc=tokyo), None)], settings)["flights"][0]
-    assert flight["milestone_to"] == "2026-09-12T18:40:00Z"
+    assert detail(flight) == "18:40 UTC"
 
 
 # --- ordering and cadence -------------------------------------------------------------
@@ -627,54 +743,19 @@ def test_the_bundle_leaves_the_header_to_scriptable() -> None:
     assert "icon-glyph" not in body
 
 
-def test_airborne_milestone_is_touchdown_not_the_gate(settings: Settings) -> None:
-    """The number someone reads from seat 32A is time to wheels down.
-
-    Taxiing to a stand is ten minutes nobody counts, so a countdown aimed at the gate
-    is wrong for the whole stretch of the flight anyone is watching it.
-    """
-    touchdown = ARRIVAL - timedelta(minutes=11)
-    flying = snapshot(
-        actual_out=DEPARTURE - timedelta(hours=2),
-        actual_off=DEPARTURE - timedelta(hours=2),
-        scheduled_on=touchdown,
-        estimated_on=touchdown,
-        scheduled_in=ARRIVAL,
-        estimated_in=ARRIVAL,
-        progress_percent=70,
-    )
-    flight = payload([(booking(), flying)], settings)["flights"][0]
-    assert flight["milestone_label"] == "Lands in"
-    assert flight["milestone_to"] == "2026-09-12T22:04:00Z"
-
-
-def test_a_late_pushback_is_history_once_the_flight_is_off_the_ground(
-    settings: Settings,
-) -> None:
-    """A flight that left the gate late but is landing on time is not delayed, and saying
-    so for the rest of the cruise makes the pill mean nothing."""
-    recovered = snapshot(
-        scheduled_out=DEPARTURE,
-        actual_out=DEPARTURE + timedelta(minutes=40),
-        actual_off=DEPARTURE + timedelta(minutes=52),
-        scheduled_in=ARRIVAL,
-        estimated_in=ARRIVAL,
-    )
-    flight = payload([(booking(), recovered)], settings)["flights"][0]
-    assert flight["status_label"] == "In the air"
-    assert flight["status_tone"] == "live"
-
-
 # --- the script -----------------------------------------------------------------------
 
 
 def test_the_script_draws_what_it_is_told() -> None:
-    """Every word and colour is the server's. The phase is for the server's own ranking,
-    and a timer element would count seconds, which nothing on any screen shows."""
+    """Every word and colour is the server's. The phase is for the server's own cadence,
+    a timer element would count seconds, and nothing the server sends is a date for the
+    phone to measure against its own clock."""
     source = script_source()
     assert ".phase" not in source
     assert "applyTimerStyle" not in source
     assert "applyRelativeStyle" not in source
+    assert "new Date(flight" not in source
+    assert "milestone" not in source
 
 
 def test_a_widget_reload_takes_the_servers_newer_script_quietly() -> None:
@@ -684,75 +765,6 @@ def test_a_widget_reload_takes_the_servers_newer_script_quietly() -> None:
     widget_run = source[source.index("if (config.runsInWidget)") : source.index("} else {")]
     assert "updateScript(" in widget_run
     assert "notify(" not in widget_run
-
-
-FIGURES = [
-    timedelta(days=3, hours=5),
-    timedelta(hours=24, minutes=1),
-    timedelta(hours=23, minutes=59, seconds=30),
-    timedelta(hours=1, minutes=5, seconds=30),
-    timedelta(minutes=12, seconds=30),
-    timedelta(seconds=40),
-    timedelta(minutes=-20, seconds=-30),
-    timedelta(seconds=-20),
-]
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the widget script")
-def test_the_script_builds_the_same_figure_as_the_page() -> None:
-    """The board and the lock screen must never disagree about how far off a flight is."""
-    source = script_source()
-    start = source.index("function figure(ms)")
-    end = source.index("function staleNote(", start)
-    offsets = [int(ahead.total_seconds() * 1000) for ahead in FIGURES]
-    program = (
-        f"{source[start:end]} console.log(JSON.stringify({json.dumps(offsets)}.map("
-        "function (ms) { return until(new Date(Date.now() + ms)); })));"
-    )
-    rendered = subprocess.run(
-        ["node", "-e", program], capture_output=True, text=True, check=True
-    ).stdout
-    now = datetime.now(UTC)
-    assert json.loads(rendered) == [until(now + ahead) for ahead in FIGURES]
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the widget script")
-def test_the_script_turns_the_label_into_due_once_the_instant_has_passed() -> None:
-    """Between reloads the phone's clock moves on; the words must move with it."""
-    source = script_source()
-    start = source.index("function figure(ms)")
-    end = source.index("function staleNote(", start)
-    stamp = "%Y-%m-%dT%H:%M:%SZ"
-    flights = [
-        {
-            "milestone_label": "Lands in",
-            "milestone_due": "Due to land",
-            "milestone_to": (datetime.now(UTC) + timedelta(hours=1, minutes=1)).strftime(stamp),
-        },
-        {
-            "milestone_label": "Lands in",
-            "milestone_due": "Due to land",
-            "milestone_to": (datetime.now(UTC) - timedelta(minutes=5, seconds=10)).strftime(stamp),
-        },
-        {
-            "milestone_label": "Baggage claim",
-            "milestone_due": None,
-            "milestone_to": None,
-            "milestone_text": "7",
-        },
-    ]
-    program = (
-        f"{source[start:end]} console.log(JSON.stringify({json.dumps(flights)}.map("
-        "function (f) { return [milestoneLabel(f), milestoneFigure(f)]; })));"
-    )
-    rendered = subprocess.run(
-        ["node", "-e", program], capture_output=True, text=True, check=True
-    ).stdout
-    assert json.loads(rendered) == [
-        ["Lands in", "1h 00m"],
-        ["Due to land", "5m ago"],
-        ["Baggage claim", "7"],
-    ]
 
 
 # --- the query ------------------------------------------------------------------------
@@ -872,246 +884,10 @@ async def test_a_cancelled_flight_keeps_its_day_like_the_card_does(
     assert [(row.id, snap.cancelled if snap else None) for row, snap in rows] == [(1, True)]
 
 
-def test_a_diversion_renames_the_destination(settings: Settings) -> None:
-    diverted = snapshot(
-        diverted=True, destination_iata="YOW", actual_off=DEPARTURE, estimated_in=ARRIVAL
-    )
-    flight = payload([(booking(), diverted)], settings)["flights"][0]
-    assert flight["route"] == "JFK → YOW"
-    assert flight["detail"] is None
-    assert flight["status_label"] == "Diverted"
-
-
-def test_at_the_gate_the_pill_says_arrived(settings: Settings) -> None:
+def test_at_the_gate_the_status_says_arrived(settings: Settings) -> None:
     parked = snapshot(
         actual_off=DEPARTURE, actual_on=ARRIVAL - timedelta(minutes=10), actual_in=ARRIVAL
     )
     flight = payload([(booking(), parked)], settings)["flights"][0]
     assert flight["status_label"] == "Arrived"
-    assert flight["milestone_to"] is None
-
-
-# --- the card -------------------------------------------------------------------------
-
-
-def test_a_flight_in_the_air_opens_out_into_its_card(settings: Settings) -> None:
-    """The card's facts as the page draws them: each end's clock in its tone, read at its
-    own airport; the terminal and gate; and the aircraft's place on the rule, with the
-    span the phone moves it along between reloads."""
-    off = DEPARTURE - timedelta(hours=2)
-    flying = snapshot(
-        scheduled_out=off - timedelta(minutes=20),
-        actual_out=off,
-        actual_off=off,
-        scheduled_in=ARRIVAL,
-        estimated_on=ARRIVAL + timedelta(minutes=10),
-        estimated_in=ARRIVAL + timedelta(minutes=25),
-        gate_origin="B22",
-        terminal_origin="4",
-        gate_destination="12",
-        terminal_destination="B",
-        progress_percent=30,
-    )
-    flight = payload([(booking(), flying)], settings, airports=AIRPORTS)["flights"][0]
-    card = flight["card"]
-    assert card["origin"] == {
-        "iata": "JFK",
-        "time": "12:40",
-        "zone": "EDT",
-        "day": "Sat 12 Sep",
-        "tone": "stop",
-        "terminal": "4",
-        "gate": "B22",
-    }
-    assert card["destination"] == {
-        "iata": "LAX",
-        "time": "15:40",
-        "zone": "PDT",
-        "day": "Sat 12 Sep",
-        "tone": "stop",
-        "terminal": "B",
-        "gate": "12",
-    }
-    assert card["booked_destination"] is None
-    assert card["block_time"] is None
-    # 80 minutes into a 345-minute flight by the clock, not the 30 the feed last said.
-    assert card["progress"] == 23
-    assert card["airborne_off"] == "2026-09-12T16:40:00Z"
-    assert card["airborne_on"] == "2026-09-12T22:25:00Z"
-
-
-def test_a_flight_about_to_leave_has_its_card_with_the_hop_on_the_rule(
-    settings: Settings,
-) -> None:
-    """Inside the poller's close window the card opens, with nothing on the rule yet but
-    how long the hop is; further out the widget's row says all there is to say."""
-    soon = snapshot(scheduled_out=DEPARTURE, scheduled_in=ARRIVAL, gate_origin="B22")
-    card = payload([(booking(), soon)], settings)["flights"][0]["card"]
-    assert card["block_time"] == "3h 35m"
-    assert card["progress"] is None
-    assert card["airborne_off"] is None and card["airborne_on"] is None
-    assert card["origin"]["tone"] is None and card["origin"]["gate"] == "B22"
-
-    at_the_edge = booking(scheduled_departure_utc=NOW + timedelta(hours=3))
-    assert payload([(at_the_edge, None)], settings)["flights"][0]["card"] is not None
-    beyond = booking(scheduled_departure_utc=NOW + timedelta(hours=3, minutes=1))
-    assert payload([(beyond, None)], settings)["flights"][0]["card"] is None
-
-
-def test_a_flight_days_off_or_called_off_has_no_card(settings: Settings) -> None:
-    far = booking(scheduled_departure_utc=NOW + timedelta(days=3))
-    assert payload([(far, None)], settings)["flights"][0]["card"] is None
-    called_off = snapshot(cancelled=True, scheduled_out=NOW + timedelta(minutes=30))
-    assert payload([(booking(), called_off)], settings)["flights"][0]["card"] is None
-
-
-def test_a_landed_flight_is_all_the_way_along_the_rule(settings: Settings) -> None:
-    """Whatever the feed last said: its figure stops at the last poll."""
-    landed = snapshot(
-        actual_off=NOW - timedelta(hours=4),
-        actual_on=NOW - timedelta(minutes=5),
-        estimated_in=NOW + timedelta(minutes=10),
-        progress_percent=91,
-    )
-    card = payload([(booking(), landed)], settings)["flights"][0]["card"]
-    assert card["progress"] == 100
-    assert card["airborne_off"] is None
-
-
-def test_a_diverted_flight_names_where_it_is_bound_and_what_it_was_booked_for(
-    settings: Settings,
-) -> None:
-    diverted = snapshot(
-        diverted=True,
-        destination_iata="YOW",
-        actual_off=NOW - timedelta(hours=1),
-        estimated_in=NOW + timedelta(minutes=40),
-    )
-    card = payload([(booking(), diverted)], settings, airports=AIRPORTS)["flights"][0]["card"]
-    assert card["destination"]["iata"] == "YOW"
-    assert card["destination"]["zone"] == "EDT"
-    assert card["booked_destination"] == "LAX"
-
-
-def test_the_card_passes_to_the_next_leg_once_the_first_is_at_the_gate(
-    settings: Settings,
-) -> None:
-    """The layover. The leg just flown has only the belt left to say, so the leg about to
-    leave takes the card the moment the first is parked, and not a minute before; and
-    the first keeps it while the next leg is still hours off."""
-    first = booking(
-        id=1,
-        scheduled_departure_utc=NOW - timedelta(hours=5),
-        scheduled_arrival_utc=NOW - timedelta(minutes=10),
-    )
-    parked = snapshot(
-        booking_id=1,
-        actual_off=NOW - timedelta(hours=5),
-        actual_on=NOW - timedelta(minutes=20),
-        actual_in=NOW - timedelta(minutes=5),
-        baggage_claim="7",
-    )
-    taxiing_in = snapshot(
-        booking_id=1,
-        actual_off=NOW - timedelta(hours=5),
-        actual_on=NOW - timedelta(minutes=5),
-        estimated_in=NOW + timedelta(minutes=10),
-    )
-    second = booking(
-        id=2,
-        origin_iata="LAX",
-        dest_iata="SFO",
-        scheduled_departure_utc=NOW + timedelta(hours=1, minutes=30),
-        scheduled_arrival_utc=NOW + timedelta(hours=3),
-    )
-    later = booking(
-        id=2,
-        origin_iata="LAX",
-        dest_iata="SFO",
-        scheduled_departure_utc=NOW + timedelta(hours=12),
-        scheduled_arrival_utc=NOW + timedelta(hours=13, minutes=30),
-    )
-
-    assert carded(payload([(first, parked), (second, None)], settings)) == [
-        (1, False),
-        (2, True),
-    ]
-    assert carded(payload([(first, taxiing_in), (second, None)], settings)) == [
-        (1, True),
-        (2, False),
-    ]
-    assert carded(payload([(first, parked), (later, None)], settings)) == [
-        (1, True),
-        (2, False),
-    ]
-
-
-def test_an_aircraft_in_the_air_outranks_one_about_to_leave(settings: Settings) -> None:
-    flying = (
-        booking(id=1, scheduled_departure_utc=NOW - timedelta(hours=1)),
-        snapshot(
-            booking_id=1,
-            actual_off=NOW - timedelta(hours=1),
-            estimated_in=NOW + timedelta(hours=2),
-        ),
-    )
-    leaving = (booking(id=2, scheduled_departure_utc=NOW + timedelta(minutes=30)), None)
-    assert carded(payload([leaving, flying], settings)) == [(1, True), (2, False)]
-
-
-def test_a_booking_the_poller_closed_in_the_air_has_no_card(settings: Settings) -> None:
-    """The feed lost it. An aircraft pinned mid-route for good is no card."""
-    lost = snapshot(actual_off=NOW - timedelta(hours=9), estimated_in=NOW - timedelta(hours=3))
-    closed = booking(status=BookingStatus.COMPLETED)
-    assert payload([(closed, lost)], settings)["flights"][0]["card"] is None
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the widget script")
-def test_the_script_moves_the_aircraft_by_its_own_clock() -> None:
-    """Between reloads the aircraft keeps going, as it does on the page between loads.
-    The feed's figure stands only when there is no span to measure against."""
-    source = script_source()
-    start = source.index("function ruleProgress(card)")
-    end = source.index("function timeOfDay(", start)
-    stamp = "%Y-%m-%dT%H:%M:%SZ"
-    now = datetime.now(UTC)
-    cards = [
-        {
-            "airborne_off": (now - timedelta(hours=1)).strftime(stamp),
-            "airborne_on": (now + timedelta(hours=3)).strftime(stamp),
-            "progress": 10,
-        },
-        {
-            "airborne_off": (now - timedelta(hours=5)).strftime(stamp),
-            "airborne_on": (now - timedelta(hours=1)).strftime(stamp),
-            "progress": 80,
-        },
-        {"airborne_off": None, "airborne_on": None, "progress": 64},
-        {"airborne_off": None, "airborne_on": None, "progress": None},
-    ]
-    program = (
-        f"{source[start:end]} console.log(JSON.stringify({json.dumps(cards)}.map(ruleProgress)));"
-    )
-    rendered = subprocess.run(
-        ["node", "-e", program], capture_output=True, text=True, check=True
-    ).stdout
-    quarter, *rest = json.loads(rendered)
-    assert abs(quarter - 0.25) < 0.001
-    assert rest == [1, 0.64, None]
-
-
-def test_a_milestone_whose_time_has_passed_is_due_not_ago(settings: Settings) -> None:
-    """Wheels down is published minutes after the fact; until then the flight is due."""
-    overdue = snapshot(
-        actual_off=DEPARTURE, estimated_on=ARRIVAL - timedelta(minutes=10), estimated_in=ARRIVAL
-    )
-    later = build_payload(
-        [(booking(), overdue)],
-        settings=settings,
-        now=ARRIVAL - timedelta(minutes=4),
-        base_url="https://flights.example.com",
-    )
-    flight = later.model_dump(mode="json")["flights"][0]
-    assert flight["milestone_label"] == "Due to land"
-    assert flight["milestone_due"] == "Due to land"
-    assert flight["milestone_to"] == "2026-09-12T22:05:00Z"
+    assert detail(flight) is None

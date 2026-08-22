@@ -177,6 +177,27 @@
     tick();
   })();
 
+  // A value that replaced another shows what it replaced when it is tapped, and hides
+  // it again on the next tap. The card around it is usually a link onto the flight, so
+  // the tap has to stop here rather than open it.
+  document.addEventListener("click", function (event) {
+    var replaced = event.target.closest(".replaced");
+    if (!replaced) return;
+    event.preventDefault();
+    event.stopPropagation();
+    var shown = replaced.getAttribute("aria-expanded") === "true";
+    replaced.setAttribute("aria-expanded", shown ? "false" : "true");
+  });
+
+  // The same from the keyboard, where the box is a button rather than something to tap.
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    var replaced = event.target.closest(".replaced");
+    if (!replaced) return;
+    event.preventDefault();
+    replaced.click();
+  });
+
   // The shell is cached so the app opens from the home screen with no network, and the
   // last copy of each page is kept for when the server cannot be reached; see sw.js.
   if ("serviceWorker" in navigator) {

@@ -673,37 +673,33 @@ def test_the_card_counts_to_one_milestone_at_a_time(
     assert '<time class="countdown' not in body
 
 
-def struck(was: datetime, tz: str, *, arrival: bool = False) -> str:
-    """The time a flight was booked for, as it is drawn once that time has moved: small,
-    between the time that replaced it and the zone, and with no zone of its own because
-    it is read at the same airport."""
-    local = to_local(was, tz)
-    side = "mr-1.5" if arrival else "ml-1.5"
-    return f'<s class="{side} text-xs font-normal text-muted-foreground">{local:%H:%M}</s>'
+def struck(shown: str) -> str:
+    """A line the move changed, as the end behind the tap draws it. The end is drawn
+    again whole there, so the lines the move left alone carry no rule."""
+    return f"<s>{shown}</s>"
 
 
-def big_time(
-    instant: datetime,
-    tz: str,
-    tone: str = "",
-    *,
-    arrival: bool = False,
-    was: datetime | None = None,
-) -> str:
-    """The card's large time: the clock in its tone, the zone small and grey on its
-    outer side, which is after a departure and before an arrival, and what the time was
-    between the two when it moved."""
+def clock_of(instant: datetime, tz: str) -> str:
+    return f"{to_local(instant, tz):%H:%M}"
+
+
+def tap_for_was(tone: str, *, arrival: bool = False) -> str:
+    """The box a value that moved sits in: the whole end, drawn in its tone, as the one
+    tap that shows what it was."""
+    side = "justify-self-end" if arrival else "justify-self-start"
+    return f'<div class="replaced {tone} {side}"'
+
+
+def big_time(instant: datetime, tz: str, *, arrival: bool = False) -> str:
+    """The card's large time: the clock, with the zone small and grey on its outer side,
+    which is after a departure and before an arrival."""
     local = to_local(instant, tz)
-    gone = struck(was, tz, arrival=arrival) if was else ""
-    if arrival:
-        return (
-            f'{tone}"><span class="mr-1 text-[0.6875rem] font-medium text-muted-foreground">'
-            f"{local:%Z}</span>{gone}{local:%H:%M}"
-        )
-    return (
-        f'{tone}">{local:%H:%M}{gone}'
-        f'<span class="ml-1 text-[0.6875rem] font-medium text-muted-foreground">{local:%Z}</span>'
+    abbr = (
+        f'<span class="m{"r" if arrival else "l"}-1 text-[0.6875rem] font-medium '
+        f'text-muted-foreground">{local:%Z}</span>'
     )
+    shown = f"{abbr}{local:%H:%M}" if arrival else f"{local:%H:%M}{abbr}"
+    return f'<div class="font-mono text-xl leading-tight font-bold">{shown}</div>'
 
 
 def test_a_delay_is_shown_against_what_was_booked(
@@ -712,9 +708,26 @@ def test_a_delay_is_shown_against_what_was_booked(
     late = DEPARTURE + timedelta(minutes=40)
     show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=late))
     body = client.get("/f/1").text
-    assert big_time(late, "America/Toronto", "text-stop", was=DEPARTURE) in body
-    # The struck time and the colour say it; no words repeat it.
+    assert big_time(late, "America/Toronto") in body
+    assert tap_for_was("text-stop-soft") in body
+    assert struck(clock_of(DEPARTURE, "America/Toronto")) in body
+    # The colour says it, and the tap holds the rest; no words repeat it.
     assert "late " not in body and "early " not in body
+
+
+def test_the_card_keeps_only_the_time_that_holds_now(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One time per end, whatever has happened to it. What it replaced is in the page
+    for the tap to show, and nowhere else on the card. The day it leaves did not move,
+    so the end behind the tap repeats it with no rule through it."""
+    late = DEPARTURE + timedelta(minutes=40)
+    tz = "America/Toronto"
+    show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=late))
+    card = top_card(client.get("/f/1").text)
+    assert struck(clock_of(DEPARTURE, tz)) in card
+    assert card.count(clock_of(DEPARTURE, tz)) == 1
+    assert struck(day_of(DEPARTURE, tz)) not in card
 
 
 def test_a_time_brought_forward_is_green(
@@ -723,7 +736,9 @@ def test_a_time_brought_forward_is_green(
     earlier = DEPARTURE - timedelta(minutes=20)
     show(monkeypatch, booking(), replace_snapshot(scheduled_out=DEPARTURE, estimated_out=earlier))
     body = client.get("/f/1").text
-    assert big_time(earlier, "America/Toronto", "text-ok", was=DEPARTURE) in body
+    assert big_time(earlier, "America/Toronto") in body
+    assert tap_for_was("text-ok-soft") in body
+    assert struck(clock_of(DEPARTURE, "America/Toronto")) in body
 
 
 def test_each_end_of_a_red_eye_names_its_own_day(
@@ -745,8 +760,8 @@ def test_each_end_of_a_red_eye_names_its_own_day(
 def test_a_delay_past_midnight_names_only_the_day_it_now_leaves(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """23:50 struck next to 00:30 carries no day of its own, and the day row and the
-    heading name Sunday alone: a struck Saturday beside it would not fit a phone."""
+    """A move over midnight changed the day as well as the time, so the end behind the
+    tap strikes both. The card in the open, and the heading over it, name Sunday alone."""
     tz = "America/Toronto"
     booked = datetime(2026, 9, 13, 3, 50, tzinfo=UTC)
     slipped = datetime(2026, 9, 13, 4, 30, tzinfo=UTC)
@@ -757,9 +772,12 @@ def test_a_delay_past_midnight_names_only_the_day_it_now_leaves(
     )
 
     body = client.get("/f/1").text
-    assert big_time(slipped, tz, "text-stop", was=booked) in body
-    assert day_of(slipped, tz) in body and day_of(booked, tz) not in body
-    assert "23:50 EDT" not in body
+    assert big_time(slipped, tz) in body
+    assert struck(clock_of(booked, tz)) in body
+    assert struck(day_of(booked, tz)) in body
+    # The day it was booked for is behind the tap and nowhere else on the page.
+    assert body.count(day_of(booked, tz)) == 1
+    assert day_of(slipped, tz) in body
     heading = body[body.index("<h2") : body.index("</h2>")]
     assert day_of(slipped, tz) in heading
 
@@ -777,8 +795,12 @@ def test_an_arrival_past_midnight_names_only_the_day_it_now_lands(
     )
 
     body = client.get("/f/1").text
-    assert big_time(slipped, tz, "text-stop", arrival=True, was=booked) in body
-    assert day_of(slipped, tz) in body and day_of(booked, tz) not in body
+    assert big_time(slipped, tz, arrival=True) in body
+    assert tap_for_was("text-stop-soft", arrival=True) in body
+    assert struck(clock_of(booked, tz)) in body
+    assert struck(day_of(booked, tz)) in body
+    assert body.count(day_of(booked, tz)) == 1
+    assert day_of(slipped, tz) in body
 
 
 def top_card(body: str) -> str:
@@ -805,19 +827,19 @@ def test_the_card_leads_with_the_city_over_the_code_and_the_time_over_the_day(
     assert ends.index(departs) < ends.index(day_of(DEPARTURE, "America/Toronto"))
 
 
-def test_terminal_and_gate_share_a_line_and_the_gate_keeps_its_colour(
+def test_terminal_and_gate_share_a_line_and_read_as_one_pair(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     show(monkeypatch, booking(), full_snapshot())
     card = top_card(client.get("/f/1").text)
     # Each is a small word over its value, so the two line up across the card.
     assert card.count(">Term</div>") == 2 and card.count(">Gate</div>") == 2
-    assert place("Term", "3") in card and place("Gate", "B27", "text-plan font-semibold") in card
-    assert place("Term", "2") in card and place("Gate", "A14", "text-plan font-semibold") in card
+    assert place("Term", "3") in card and place("Gate", "B27", "font-semibold") in card
+    assert place("Term", "2") in card and place("Gate", "A14", "font-semibold") in card
     assert "Terminal" not in card
     # The arrival side mirrors the departure side: the terminal on the outside, the
     # gate beside it.
-    gate = "text-plan font-semibold"
+    gate = "font-semibold"
     assert card.index(place("Term", "3")) < card.index(place("Gate", "B27", gate))
     assert card.index(place("Gate", "A14", gate)) < card.index(place("Term", "2"))
     # The belt is not a box: it is the footer's number once the aircraft is parked.
@@ -844,7 +866,7 @@ def test_a_place_not_yet_known_keeps_its_box_with_a_dash(
     show(monkeypatch, today, replace_snapshot(terminal_origin="3", gate_destination="A14"))
     card = top_card(client.get("/f/1").text)
     assert place("Term", "3") in card and place("Gate", "-") in card
-    assert place("Term", "-") in card and place("Gate", "A14", "text-plan font-semibold") in card
+    assert place("Term", "-") in card and place("Gate", "A14", "font-semibold") in card
 
     show(monkeypatch, today, empty_snapshot())
     card = top_card(client.get("/f/1").text)
@@ -867,17 +889,21 @@ def test_the_rule_says_how_long_the_hop_is_until_there_is_something_to_measure(
         assert 'class="route-mark rounded-full' in body
 
 
-def test_the_board_card_strikes_a_time_that_slipped_and_leaves_one_that_held(
+def test_the_board_card_colours_a_time_that_slipped_and_leaves_one_that_held(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Late is red next to what was planned; ten minutes on arrival is not worth a mark."""
+    """Late is red and carries what was planned; ten minutes on arrival is not worth a
+    mark, so that end is drawn plainly and has nothing behind it."""
     show(monkeypatch, booking(), full_snapshot())
 
     body = client.get("/").text
     late = DEPARTURE + timedelta(minutes=25)
-    assert big_time(late, "America/Toronto", "text-stop", was=DEPARTURE) in body
+    assert big_time(late, "America/Toronto") in body
+    assert tap_for_was("text-stop-soft") in body
+    assert struck(clock_of(DEPARTURE, "America/Toronto")) in body
     assert big_time(ARRIVAL + timedelta(minutes=10), "Europe/London", arrival=True) in body
-    assert struck(ARRIVAL, "Europe/London", arrival=True) not in body
+    assert tap_for_was("text-stop-soft", arrival=True) not in body
+    assert struck(clock_of(ARRIVAL, "Europe/London")) not in body
 
 
 def cards(body: str) -> list[str]:
@@ -1670,11 +1696,12 @@ def test_a_diverted_flight_names_where_it_is_going_instead(
     assert "<title>AC871 YUL to MAN</title>" in body
     card = top_card(body)
     assert "Manchester" in card
-    # The new airport stands where the code goes, with the booked one struck beside it.
-    assert (
-        'tracking-tight text-stop">MAN'
-        '<s class="ml-1.5 text-sm font-normal text-muted-foreground">LHR</s></div>'
-    ) in card
+    # The new airport stands where the code goes, and the booked one is behind a tap on
+    # it rather than struck beside it.
+    assert '<div class="replaced text-stop-soft"' in card
+    assert 'class="replaced-now font-mono text-2xl font-bold tracking-tight">MAN</div>' in card
+    assert struck("LHR") in card
+    assert card.count("LHR") == 1
     assert "Diverted to" not in card
     assert "Lands in" in body
     # The board row follows the aircraft too.
