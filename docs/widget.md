@@ -65,10 +65,10 @@ route, the same status pill the web UI shows ("On time", "Departure delayed", "I
 right the same milestone the card's footer carries: "Departs in", "Lands in" or "At the
 gate in" with a time against it, and "Bags" with the belt once the aircraft is parked. A
 flight still days away has no milestone, on the card or here. The detail line is what
-matters in that phase: the day and time it leaves while it is days off; the time it now
-leaves, the gate and the seat on the day; the gate and terminal at the other end once it
-has pushed back. Every word and tone comes from the server; the script picks nothing on
-its own.
+matters in that phase: the day and time it leaves while it is days off; the gate and
+the seat on the day; nothing once it has pushed back, since the milestone and the belt
+say what is left. Every word and tone comes from the server; the script picks nothing
+on its own.
 
 The widget lists the flights the board has on it, in the board's order, and lets each one
 go at the moment the board files it under Flown: two hours after it reached the gate, or

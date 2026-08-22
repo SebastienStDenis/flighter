@@ -39,7 +39,6 @@ from .db import get_session
 from .models import KV, Booking, BookingStatus, FlightSnapshot
 from .phase import (
     AIRBORNE,
-    CANCELLED,
     DAY_OF,
     DIVERTED,
     TAXIING,
@@ -96,7 +95,7 @@ class WidgetFlight(BaseModel):
     status_label: str
     status_tone: str
     # The one line of the card that matters in this phase: the day it leaves while that
-    # is still days off, then the time, gate and seat, then the gate at the other end.
+    # is still days off, then the gate and seat on the day, then nothing.
     detail: str | None
     milestone_label: str | None
     # A milestone is either an instant the phone counts to, or a figure handed over
@@ -341,7 +340,7 @@ def _flight(
         route=f"{booking.origin_iata} → {views.destination_iata(booking, snapshot)}",
         status_label=pill.label,
         status_tone=pill.tone,
-        detail=_detail(phase, booking, snapshot, parked=parked, origin_tz=origin_tz),
+        detail=_detail(phase, booking, snapshot, origin_tz=origin_tz),
         milestone_label=label,
         milestone_to=target,
         milestone_text=text,
@@ -354,35 +353,24 @@ def _detail(
     booking: Booking,
     snapshot: FlightSnapshot | None,
     *,
-    parked: bool,
     origin_tz: str,
 ) -> str | None:
     """What the card says that matters most right now, on one line.
 
-    Days out, the day it leaves. On the day, the time it now leaves with the gate and
-    the seat to find. Once it has pushed back the origin is behind it, so the line turns
-    to the gate at the other end; parked, the belt has the milestone's place and only
-    the terminal is left to say.
+    Days out, the day it leaves. On the day, the gate and the seat to find; the time it
+    leaves is what the milestone is counting to, so the line does not repeat it. Once
+    it has pushed back there is nothing left to find: the gate it left is behind it,
+    and the other end is the milestone's to count to and the belt's to name.
     """
-    if phase == CANCELLED:
-        return None
-    departure = departure_estimate(booking, snapshot)
     if phase == UPCOMING:
-        return views.at(departure, origin_tz, with_date=True)
-
+        return views.at(departure_estimate(booking, snapshot), origin_tz, with_date=True)
+    if phase != DAY_OF:
+        return None
     parts: list[str] = []
-    if phase == DAY_OF:
-        parts.append(views.clock(departure, origin_tz))
-        if snapshot and snapshot.gate_origin:
-            parts.append(f"Gate {snapshot.gate_origin}")
-        if booking.seat:
-            parts.append(f"Seat {booking.seat}")
-        return " · ".join(parts)
-
-    if not parked and snapshot and snapshot.gate_destination:
-        parts.append(f"Gate {snapshot.gate_destination}")
-    if snapshot and snapshot.terminal_destination:
-        parts.append(f"Terminal {snapshot.terminal_destination}")
+    if snapshot and snapshot.gate_origin:
+        parts.append(f"Gate {snapshot.gate_origin}")
+    if booking.seat:
+        parts.append(f"Seat {booking.seat}")
     return " · ".join(parts) if parts else None
 
 

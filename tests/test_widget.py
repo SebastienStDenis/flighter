@@ -120,11 +120,12 @@ def test_a_flight_without_a_feed_is_named_by_the_day_at_its_origin(settings: Set
     assert payload([(early, None)], settings)["flights"][0]["status_label"] == "Tomorrow"
 
 
-def test_day_of_shows_the_time_the_gate_and_the_seat(settings: Settings) -> None:
+def test_day_of_shows_the_gate_and_the_seat(settings: Settings) -> None:
+    """The time it leaves is what the milestone counts to, so the line does not repeat it."""
     gated = snapshot(scheduled_out=DEPARTURE, gate_origin="B22", terminal_origin="4")
     flight = payload([(booking(seat="14A"), gated)], settings)["flights"][0]
     assert flight["phase"] == "day_of"
-    assert flight["detail"] == "18:40 · Gate B22 · Seat 14A"
+    assert flight["detail"] == "Gate B22 · Seat 14A"
     assert flight["status_label"] == "On time"
     assert flight["status_tone"] == "ok"
     assert flight["milestone_label"] == "Departs in"
@@ -132,16 +133,17 @@ def test_day_of_shows_the_time_the_gate_and_the_seat(settings: Settings) -> None
     assert flight["milestone_due"] == "Due to depart"
 
 
-def test_day_of_with_nothing_assigned_yet_is_the_time_alone(settings: Settings) -> None:
-    zones = {"JFK": "America/New_York"}
-    flight = payload([(booking(), snapshot())], settings, zones=zones)["flights"][0]
-    assert flight["detail"] == "14:40"
+def test_day_of_with_nothing_assigned_yet_has_no_detail(settings: Settings) -> None:
+    flight = payload([(booking(), snapshot())], settings)["flights"][0]
+    assert flight["milestone_label"] == "Departs in"
+    assert flight["detail"] is None
 
 
-def test_a_delayed_departure_names_the_time_it_now_leaves(settings: Settings) -> None:
+def test_a_delayed_departure_leaves_the_new_time_to_the_count(settings: Settings) -> None:
     held = snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=30))
     flight = payload([(booking(seat="14A"), held)], settings)["flights"][0]
-    assert flight["detail"] == "19:10 · Seat 14A"
+    assert flight["milestone_to"] == "2026-09-12T19:10:00Z"
+    assert flight["detail"] == "Seat 14A"
 
 
 def test_the_run_up_to_departure_keeps_counting(settings: Settings) -> None:
@@ -154,7 +156,7 @@ def test_the_run_up_to_departure_keeps_counting(settings: Settings) -> None:
     assert flight["milestone_to"] == "2026-09-12T18:20:00Z"
 
 
-def test_taxiing_counts_to_the_landing_and_does_not_name_the_gate_it_left(
+def test_taxiing_counts_to_the_landing_and_names_no_gate_at_either_end(
     settings: Settings,
 ) -> None:
     """Nothing upstream estimates wheels up, so the next rung with a time is the landing."""
@@ -162,6 +164,8 @@ def test_taxiing_counts_to_the_landing_and_does_not_name_the_gate_it_left(
         scheduled_out=NOW - timedelta(minutes=5),
         actual_out=NOW - timedelta(minutes=2),
         gate_origin="B22",
+        gate_destination="12",
+        terminal_destination="B",
     )
     flight = payload([(booking(), taxiing)], settings)["flights"][0]
     assert flight["phase"] == "taxiing"
@@ -188,12 +192,13 @@ def test_airborne_counts_down_to_landing(settings: Settings) -> None:
     assert flight["milestone_label"] == "Lands in"
     assert flight["milestone_to"] == "2026-09-12T22:40:00Z"
     assert flight["milestone_due"] == "Due to land"
-    assert flight["detail"] == "Gate 12 · Terminal B"
+    # The gate at the other end waits until the flight is on the ground.
+    assert flight["detail"] is None
     assert flight["status_label"] == "Arriving late"
     assert flight["status_tone"] == "warn"
 
 
-def test_landed_keeps_the_gate_while_it_counts_to_it(settings: Settings) -> None:
+def test_landed_counts_to_the_gate_without_naming_it(settings: Settings) -> None:
     landed = snapshot(
         actual_off=DEPARTURE,
         actual_on=ARRIVAL - timedelta(minutes=10),
@@ -208,7 +213,7 @@ def test_landed_keeps_the_gate_while_it_counts_to_it(settings: Settings) -> None
     assert flight["phase"] == "landed"
     assert flight["status_label"] == "Landed"
     assert flight["status_tone"] == "ok"
-    assert flight["detail"] == "Gate 12 · Terminal B"
+    assert flight["detail"] is None
     assert flight["milestone_label"] == "At the gate in"
     assert flight["milestone_to"] == "2026-09-12T22:15:00Z"
     assert flight["milestone_due"] == "Due at the gate"
@@ -226,7 +231,7 @@ def test_at_the_gate_the_belt_takes_the_milestones_place(settings: Settings) -> 
     )
     flight = payload([(booking(), done)], settings)["flights"][0]
     assert flight["status_label"] == "Arrived"
-    assert flight["detail"] == "Terminal B"
+    assert flight["detail"] is None
     assert flight["milestone_label"] == "Bags"
     assert flight["milestone_text"] == "7"
     assert flight["milestone_to"] is None
@@ -274,7 +279,9 @@ def test_cancelled_has_nothing_to_count_to(settings: Settings) -> None:
 
 
 def test_diverted_still_lands_somewhere(settings: Settings) -> None:
-    diverted = snapshot(diverted=True, actual_off=DEPARTURE, estimated_in=ARRIVAL)
+    diverted = snapshot(
+        diverted=True, actual_off=DEPARTURE, estimated_in=ARRIVAL, gate_destination="12"
+    )
     flight = payload([(booking(), diverted)], settings)["flights"][0]
     assert flight["phase"] == "diverted"
     assert flight["status_label"] == "Diverted"
