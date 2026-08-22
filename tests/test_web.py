@@ -931,6 +931,21 @@ def watched(card: str) -> bool:
     return ">Gate</div>" in card and "<footer" in card
 
 
+def test_a_flight_page_keeps_the_app_in_the_header_and_draws_its_own_way_back(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The header says which app this is on every page, so the way back up is in the
+    page: the installed app has no browser chrome to go back with, and losing the app's
+    own name to make room for that is a trade nothing asked for."""
+    show(monkeypatch, booking(), None)
+
+    header, content = client.get("/f/1").text.split("<main", 1)
+
+    assert "Flighter" in header
+    assert "Flights" not in header
+    assert "Flights" in content
+
+
 def test_the_board_card_is_the_flight_page_card_with_a_link_on_it(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

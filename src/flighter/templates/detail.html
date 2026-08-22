@@ -8,6 +8,17 @@
 
 <h1 class="sr-only">{{ v.flight_number }}, {{ v.booking.origin_iata }} to {{ v.destination_iata }}</h1>
 
+{# One level down from the board, and the installed app has no browser chrome to get
+   back up with. Pulled left by the button's own padding so the word starts on the same
+   line as everything under it. #}
+<a class="btn -ml-2.5 mb-2 self-start" data-size="sm" data-variant="ghost" href="/">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="m15 18-6-6 6-6"/>
+  </svg>
+  Flights
+</a>
+
 {{ m.flight_card(v) }}
 
 {# The one card a person can write on. Each ticket row opens the same dialog on its own
