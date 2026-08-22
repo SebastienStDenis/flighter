@@ -75,11 +75,13 @@
   --warn: oklch(0.48 0.14 72);
   --stop: oklch(0.495 0.17 25);
 
-  /* The same two tones with most of the colour taken out, for a value on the card that
-     replaced another. A card can carry three of those at once, and at the badge's
-     chroma three of them read as three alarms. Both still clear 4.5:1 on the card. */
-  --ok-soft: oklch(0.5 0.07 158);
-  --stop-soft: oklch(0.52 0.09 25);
+  /* The same two tones washed out, for a value on the card that replaced another. A
+     card can carry three of those at once, and at the badge's own chroma three of them
+     read as three alarms. These only ever paint the big bold figures - a time, an
+     airport code - so they are held to the 3:1 large text asks for rather than the
+     4.5:1 the badges clear, which is what buys them their lightness. */
+  --ok-soft: oklch(0.6 0.12 158);
+  --stop-soft: oklch(0.62 0.14 25);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -111,8 +113,8 @@
     --ok: oklch(0.74 0.13 158);
     --warn: oklch(0.78 0.14 72);
     --stop: oklch(0.73 0.17 25);
-    --ok-soft: oklch(0.76 0.07 158);
-    --stop-soft: oklch(0.75 0.09 25);
+    --ok-soft: oklch(0.82 0.1 158);
+    --stop-soft: oklch(0.82 0.1 25);
 
     /* Basecoat bakes the chevron's colour into a data URI, so the dark one is its own
        image rather than a variable it can inherit. */
