@@ -22,7 +22,7 @@
 </div>
 {% endif %}
 
-{% if not trips and not past %}
+{% if not flights and not past %}
 <section class="empty mt-8">
   <header>
     <figure>
@@ -43,15 +43,11 @@
 </section>
 {% else %}
 
-{# Each trip is a run of cards, and the gap between runs is what says where one
-   journey ends and the next begins: every card names its own day. #}
-{% for trip in trips %}
-<div class="item-group mt-8 first:mt-0 last:mb-6">
-  {% for v in trip %}
+<div class="item-group mb-6">
+  {% for v in flights %}
   {{ m.flight_card(v, link="/f/" ~ v.booking.id) }}
   {% endfor %}
 </div>
-{% endfor %}
 
 {% if past %}
 <details class="group mt-6 mb-6">

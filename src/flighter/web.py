@@ -217,7 +217,7 @@ def create_app(settings: Settings) -> FastAPI:
             request,
             "index.html",
             {
-                "trips": views.group_into_trips(upcoming),
+                "flights": upcoming,
                 "past": past[:FLOWN_LIMIT],
                 "budget": budget,
                 "raised_cap": budget.cap_usd + LIMIT_STEP,

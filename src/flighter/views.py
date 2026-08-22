@@ -9,7 +9,7 @@ which is what keeps the lock screen and the board saying the same thing about a 
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Final, NamedTuple
@@ -49,8 +49,6 @@ MISSING = "-"
 # Flights this far apart are two journeys, not two legs of one. A same-day connection
 # and a red-eye that lands tomorrow both fall inside a day; a return a week later does
 # not, which is the split a person means by "trip".
-TRIP_GAP = timedelta(hours=24)
-
 # How long after the gate a flight stays on the board. Long enough to collect bags and
 # get out of the building with the card still one tap away.
 LINGER: Final = timedelta(hours=2)
@@ -636,17 +634,6 @@ def change_value(value: str | None, tz: str) -> str:
     """
     instant = parse_instant(value)
     return at(instant, tz) if instant is not None else dash(value)
-
-
-def group_into_trips(views: Sequence[FlightView]) -> list[list[FlightView]]:
-    """Split departure-ordered flights into the runs that belong to one journey."""
-    trips: list[list[FlightView]] = []
-    for view in views:
-        if trips and view.departure - trips[-1][-1].ended <= TRIP_GAP:
-            trips[-1].append(view)
-        else:
-            trips.append([view])
-    return trips
 
 
 async def build_views(session: AsyncSession, rows: Iterable[Booking]) -> list[FlightView]:

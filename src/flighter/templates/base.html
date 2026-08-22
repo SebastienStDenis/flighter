@@ -22,10 +22,22 @@
 </head>
 <body class="flex min-h-dvh flex-col">
 {% set here = request.url.path %}
-{% set board = here == '/' or (here.startswith('/f') and here != '/f/new') %}
+{% set flight_page = here.startswith('/f/') and here != '/f/new' %}
+{% set board = here == '/' or flight_page %}
 <header class="sticky top-0 z-20 border-b bg-background/85 backdrop-blur"
         style="padding-top: env(safe-area-inset-top)">
   <nav class="mx-auto flex h-14 max-w-lg items-center gap-1 px-3" aria-label="Sections">
+    {# A flight's page is one level down from the board, and with no browser chrome in
+       the installed app the way back up has to be drawn. #}
+    {% if flight_page %}
+    <a class="btn -ml-1" data-size="sm" data-variant="ghost" href="/">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="m15 18-6-6 6-6"/>
+      </svg>
+      Flights
+    </a>
+    {% else %}
     <a class="btn" data-size="sm" href="/"
        data-variant="{{ 'secondary' if board else 'ghost' }}"
        {% if board %}aria-current="page"{% endif %}>
@@ -35,6 +47,7 @@
       </svg>
       Flighter
     </a>
+    {% endif %}
     {# The tab is always there, so it is always in the same place; the mark on it is what
        says whether there is anything behind it. #}
     {% set problems = request.state.problems|default(0) %}
