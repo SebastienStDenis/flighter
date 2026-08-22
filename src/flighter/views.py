@@ -617,13 +617,15 @@ _SETTLED: dict[str, Status] = {
 }
 
 # The line under the subject, for the outcomes that are the same sentence every time. A
-# failure says what went wrong instead, in its own words.
+# failure says what went wrong instead, in its own words. Plainly, and about the email
+# rather than about the service: a person reading these has flagged something and wants
+# to know where it got to, not to be told what the importer did with its afternoon.
 _ACCOUNT: dict[str, str] = {
-    IngestOutcome.DUPLICATE: "Every flight in it was already on the board.",
+    IngestOutcome.DUPLICATE: "Every flight in this email was already on the board.",
     IngestOutcome.IGNORED: (
-        "Written off as holding no flight; its flag comes off at the next sweep."
+        "Marked as holding no flight. The flag will come off the email shortly."
     ),
-    IngestOutcome.NO_FLIGHT: "Written off as holding no flight.",
+    IngestOutcome.NO_FLIGHT: "Marked as holding no flight.",
 }
 
 UNTITLED = "(no subject)"

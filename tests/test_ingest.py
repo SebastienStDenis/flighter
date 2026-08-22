@@ -345,7 +345,7 @@ async def test_an_airport_we_do_not_know_is_never_retried(
     assert result.settled
     logged = one_session.log["flight_jsonld.eml"]
     assert ingest.set_aside(logged)
-    assert logged.error is not None and "JFK is not an airport" in logged.error
+    assert logged.error is not None and "JFK is not a recognised" in logged.error
     assert recorder.created == []
 
 
@@ -800,7 +800,7 @@ async def test_a_flagged_email_naming_an_unknown_airport_is_set_aside_at_once(
 
     (_, _, reason) = notifier.failed[0]
     assert len(notifier.failed) == 1
-    assert reason == "JFK is not an airport we know."
+    assert reason == "JFK is not a recognised airport code."
     # The flag is still on, so the email is where the person left it.
     assert mailbox.cleared == []
 

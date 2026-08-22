@@ -16,19 +16,19 @@ HEADLINE = "Email could not be imported"
 
 # Said after whatever went wrong: the email has not moved, so it can still be found and
 # dealt with where the person left it.
-STILL_FLAGGED = "It is still flagged in Mail."
+STILL_FLAGGED = "The email is still flagged in Mail."
 
 # Stands in for a reason on a row old enough, or odd enough, to have been written without
 # one. Nothing the pipeline records today gets here.
-UNEXPLAINED = "It could not be read."
+UNEXPLAINED = "No reason was recorded."
 
 NO_FLIGHT = "No flight booking was found in this email."
-UNREADABLE = "It looks like a flight email, but no flight details could be read from it."
+UNREADABLE = "This looks like a flight email, but no flight details could be read from it."
 
 
 def unknown_airport(iata: str) -> str:
     """The one failure that names the thing to correct: a code that is not an airport."""
-    return f"{iata} is not an airport we know."
+    return f"{iata} is not a recognised airport code."
 
 
 class Notice(NamedTuple):

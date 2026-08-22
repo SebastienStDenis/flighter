@@ -222,7 +222,7 @@ async def test_a_failed_import_links_to_the_problems_page(settings: Settings) ->
     # The headline is the same for every failure, so the body names the email, says what
     # went wrong as a sentence, and says where the email is now.
     assert sent["message"] == (
-        "Subject: Your itinerary\nThe model timed out. It is still flagged in Mail."
+        "Subject: Your itinerary\nThe model timed out. The email is still flagged in Mail."
     )
 
 
