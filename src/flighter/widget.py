@@ -385,7 +385,7 @@ def _flight(
     if parked:
         # The card's footer once the aircraft is parked: the belt, or the dash that
         # says nobody has named one yet.
-        label, text = "Bags", views.dash(snapshot.baggage_claim if snapshot else None)
+        label, text = "Baggage claim", views.dash(snapshot.baggage_claim if snapshot else None)
     elif views.watched(phase):
         next_up = views.milestone(phase, booking, snapshot, now=now)
         if next_up is not None:
