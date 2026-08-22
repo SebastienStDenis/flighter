@@ -161,8 +161,10 @@ two boxes away under **Add a flight**.
 Something that fails for a passing reason - the model, iCloud, the network - is tried
 again after two minutes and again after ten. If it still fails, your phone is told once
 and the email is set aside: it keeps its flag, so it is still where you left it in Mail,
-and it waits on the **Problems** page with **Try again** and **Ignore** beside it; the tab
-in the nav wears a mark while anything is there, so the board itself stays about flights.
+and it waits at the top of the **Email** page with **Try again** and **Ignore** beside it;
+the tab in the nav wears a mark while anything is there, so the board itself stays about
+flights. That page is also the history of the mailbox: every email the service has looked
+at, what it made of each one, and the flights any of them put on the board.
 **Try again** hands it straight back to the watcher, which reads it again within half a
 minute - as long as it still carries the flag. Unflagging it in Mail drops it too. Two
 things skip the retries and are set aside at once, because reading them again reads them

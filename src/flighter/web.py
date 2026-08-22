@@ -68,7 +68,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 async def note_problems(request: Request) -> None:
-    """How many emails are waiting on a decision, for the marker on the Problems tab.
+    """How many emails are waiting on a decision, for the mark on the email tab.
 
     Resolved once per request, ahead of the route, so every page carries the number
     without every route having to ask for it. The widget's endpoint draws no nav and
@@ -103,14 +103,6 @@ async def note_origin(request: Request) -> None:
         return
     async with session_scope() as session:
         await prefs.remember_origin(session, origin)
-
-
-def ago(then: datetime, now: datetime) -> str:
-    """`4m ago`, `3d ago`: how long since a phone was last heard from."""
-    elapsed = now - then
-    if elapsed >= timedelta(days=1):
-        return f"{elapsed.days}d ago"
-    return f"{views.duration(elapsed)} ago"
 
 
 def _first_validation_message(exc: ValidationError) -> str:
@@ -156,7 +148,6 @@ def create_app(settings: Settings) -> FastAPI:
         email_url=message_url,
         logo_url=views.logo_url,
         missing=views.MISSING,
-        problem_notice=views.problem_notice,
         rendered_at=lambda: datetime.now(UTC).isoformat(timespec="seconds"),
         until=views.until,
         zone=views.zone,
@@ -243,15 +234,18 @@ def create_app(settings: Settings) -> FastAPI:
             },
         )
 
-    @app.get("/problems")
-    async def problems(request: Request, session: SessionDep) -> Response:
-        """What is waiting on a decision: the emails the service gave up reading.
+    @app.get("/mail")
+    async def mail(request: Request, session: SessionDep) -> Response:
+        """What the service has made of the mailbox: every email, and what came of it.
 
-        Its own page rather than a notice on the board, because the board is read in a
-        hurry for a gate number and an email that would not parse is not news about any
-        flight on it. The nav marks the tab while there is anything here.
+        Its own page rather than anything on the board, because the board is read in a
+        hurry for a gate number and how an email was read is not news about any flight
+        on it. Whatever is waiting on a decision is at the top, and the nav marks the
+        tab for as long as there is any.
         """
-        return page(request, "problems.html", {"set_aside": await ingest.list_set_aside(session)})
+        rows = await ingest.list_activity(session)
+        imports = await views.build_mail_imports(session, rows)
+        return page(request, "mail.html", {"imports": imports})
 
     @app.post("/limit")
     async def raise_limit(session: SessionDep) -> Response:
@@ -278,14 +272,14 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(status_code=404, detail="That email is not set aside.")
         await session.commit()
         ingest.wake()
-        return RedirectResponse("/problems", status_code=303)
+        return RedirectResponse("/mail", status_code=303)
 
     @app.post("/mail/ignore")
     async def ignore_message(session: SessionDep, message_id: Annotated[str, Form()]) -> Response:
         """Decide the email holds no flight, which is what takes its flag off in Mail."""
         if await ingest.dismiss(session, message_id) is None:
             raise HTTPException(status_code=404, detail="That email is not set aside.")
-        return RedirectResponse("/problems", status_code=303)
+        return RedirectResponse("/mail", status_code=303)
 
     # Declared before /f/{booking_id} so that "new" is never read as an id.
     @app.get("/f/new")
@@ -434,7 +428,7 @@ def create_app(settings: Settings) -> FastAPI:
             "widget_token": settings.widget_token,
             "widget_connect_url": connect_url(settings, address),
             "widget_script": script_source(),
-            "widget_last_seen": ago(seen, now) if seen else None,
+            "widget_last_seen": views.ago(seen, now) if seen else None,
             "widget_connected": seen is not None and now - seen < WIDGET_QUIET_AFTER,
             "log_levels": LOG_LEVELS,
             "flag_colours": tuple(FLAG_COLOURS),

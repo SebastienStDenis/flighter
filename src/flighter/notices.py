@@ -1,10 +1,11 @@
 """What the service says about a flagged email that came to nothing.
 
-The phone and the Problems page tell a person the same thing about the same email, so
-both take their words from here rather than each writing its own. The headline is the
-same sentence every time, because a person reading a lock screen wants to know what
-happened before they are told which email it happened to; which failure it was, and
-which email, are the lines underneath.
+The phone and the email page tell a person the same thing about the same email, so both
+take their words from here rather than each writing its own. The headline is the same
+sentence every time, because a person reading a lock screen wants to know what happened
+before they are told which email it happened to; which failure it was, and which email,
+are the lines underneath. The page has the subject at the top of the card already, so it
+asks for the reason on its own and lets the card say the rest.
 """
 
 from __future__ import annotations
@@ -15,19 +16,19 @@ HEADLINE = "Email could not be imported"
 
 # Said after whatever went wrong: the email has not moved, so it can still be found and
 # dealt with where the person left it.
-STILL_FLAGGED = "It is still flagged in Mail."
+STILL_FLAGGED = "The email is still flagged in Mail."
 
 # Stands in for a reason on a row old enough, or odd enough, to have been written without
 # one. Nothing the pipeline records today gets here.
-UNEXPLAINED = "It could not be read."
+UNEXPLAINED = "No reason was recorded."
 
 NO_FLIGHT = "No flight booking was found in this email."
-UNREADABLE = "It looks like a flight email, but no flight details could be read from it."
+UNREADABLE = "This looks like a flight email, but no flight details could be read from it."
 
 
 def unknown_airport(iata: str) -> str:
     """The one failure that names the thing to correct: a code that is not an airport."""
-    return f"{iata} is not an airport we know."
+    return f"{iata} is not a recognised airport code."
 
 
 class Notice(NamedTuple):
@@ -52,8 +53,19 @@ def import_failed(*, subject: str | None, reason: str | None) -> Notice:
     about one email among the several they flagged this morning.
     """
     named = f"Subject: {subject.strip()}" if subject and subject.strip() else None
-    said = f"{_sentence(reason) if reason else UNEXPLAINED} {STILL_FLAGGED}"
+    said = f"{sentence(reason)} {STILL_FLAGGED}"
     return Notice(HEADLINE, (named, said) if named else (said,))
+
+
+def sentence(reason: str | None) -> str:
+    """What went wrong, on its own.
+
+    The page shows this much and no more: the buttons beside it are the whole of what
+    to do about the email, so a sentence telling a person where to find it in Mail is
+    one they have already been given a shorter answer to. A push has no buttons, which
+    is why it adds one.
+    """
+    return _sentence(reason) if reason else UNEXPLAINED
 
 
 def _sentence(text: str) -> str:

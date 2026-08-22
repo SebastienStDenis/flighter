@@ -549,7 +549,7 @@ async def test_a_line_the_server_volunteers_before_idling_is_news_not_a_refusal(
 
 
 async def test_a_wake_ends_the_wait_before_it_idles(settings: Settings) -> None:
-    """The Problems page handing an email back is nothing the server would announce."""
+    """The email page handing an email back is nothing the server would announce."""
     server = FakeServer()
     mailbox = await connected(settings, server)
     wake = asyncio.Event()

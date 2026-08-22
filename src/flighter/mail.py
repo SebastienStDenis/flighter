@@ -307,7 +307,7 @@ class Mailbox:
         never announced to anybody, and the sweep this timeout paces is what finds it.
 
         `wake` is for what the server cannot announce: a message handed back on the
-        Problems page. It is looked at between idles rather than awaited, because the
+        email page. It is looked at between idles rather than awaited, because the
         idle runs on a thread that cannot be interrupted, so it is answered within one
         chunk of idling rather than at once.
         """

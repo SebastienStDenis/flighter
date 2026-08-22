@@ -1,19 +1,25 @@
-"""The pipeline, against a stand-in session: no database, no mailbox, no Anthropic."""
+"""The pipeline, against a stand-in session: no mailbox, no Anthropic.
+
+The one exception is at the bottom: what the email page reads is a query with an
+ordering and a limit in it, and neither is proven by a fake that hands back every row.
+"""
 
 from __future__ import annotations
 
 import contextlib
 import logging
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from flighter import ingest, notices
 from flighter.airports import UnknownAirport
 from flighter.config import Settings
+from flighter.db import session_scope
 from flighter.extract import Extraction, Segment
 from flighter.mail import Marked, Message, parse_message
 from flighter.models import IngestLog
@@ -292,7 +298,7 @@ async def test_a_failing_extraction_is_logged_and_swallowed(
     assert result.outcome == "error"
     assert not result.settled
     logged = one_session.log["flight_plain.eml"]
-    # The exception's words and not its class: this is what a push and the Problems page
+    # The exception's words and not its class: this is what a push and the email page
     # show, and "RuntimeError:" in front of it helps nobody standing in a terminal.
     assert logged.error == "model output did not match the extraction schema"
     assert recorder.created == []
@@ -339,7 +345,7 @@ async def test_an_airport_we_do_not_know_is_never_retried(
     assert result.settled
     logged = one_session.log["flight_jsonld.eml"]
     assert ingest.set_aside(logged)
-    assert logged.error is not None and "JFK is not an airport" in logged.error
+    assert logged.error is not None and "JFK is not a recognised" in logged.error
     assert recorder.created == []
 
 
@@ -794,6 +800,57 @@ async def test_a_flagged_email_naming_an_unknown_airport_is_set_aside_at_once(
 
     (_, _, reason) = notifier.failed[0]
     assert len(notifier.failed) == 1
-    assert reason == "JFK is not an airport we know."
+    assert reason == "JFK is not a recognised airport code."
     # The flag is still on, so the email is where the person left it.
     assert mailbox.cleared == []
+
+
+# --- Against the database ------------------------------------------------------------
+
+
+def logged(message_id: str, minutes_ago: int, outcome: str, **fields: Any) -> IngestLog:
+    return IngestLog(
+        message_id=message_id,
+        processed_at=datetime.now(UTC) - timedelta(minutes=minutes_ago),
+        outcome=outcome,
+        subject=message_id,
+        **fields,
+    )
+
+
+async def test_the_email_page_reads_the_mailbox_newest_first(
+    database: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_scope() as session:
+        session.add_all(
+            [
+                logged("<old@x>", 30, "created"),
+                logged("<new@x>", 1, "duplicate"),
+                logged("<mid@x>", 10, "no_flight"),
+            ]
+        )
+
+    async with session_scope() as session:
+        assert [row.message_id for row in await ingest.list_activity(session)] == [
+            "<new@x>",
+            "<mid@x>",
+            "<old@x>",
+        ]
+
+
+async def test_a_set_aside_email_is_listed_however_far_back_it_is(
+    database: async_sessionmaker[AsyncSession],
+) -> None:
+    """The nav counts it whatever its age, so a page that dropped it would mark a tab
+    over nothing."""
+    async with session_scope() as session:
+        session.add(logged("<stuck@x>", 500, "error", error="the model timed out"))
+        session.add_all(logged(f"<{n}@x>", n, "created") for n in range(1, 4))
+
+    async with session_scope() as session:
+        listed = await ingest.list_activity(session, limit=2)
+
+    assert [row.message_id for row in listed] == ["<1@x>", "<2@x>", "<stuck@x>"]
+    # And exactly once, when it is recent enough to be in the run as well.
+    async with session_scope() as session:
+        assert len(await ingest.list_activity(session, limit=50)) == 4
