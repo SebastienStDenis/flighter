@@ -43,14 +43,14 @@
 </section>
 {% else %}
 
-<div class="item-group mb-6">
+<div class="flex flex-col gap-3">
   {% for v in flights %}
   {{ m.flight_card(v, link="/f/" ~ v.booking.id) }}
   {% endfor %}
 </div>
 
 {% if past %}
-<details class="group mt-6 mb-6">
+<details class="group mt-6">
   <summary class="flex cursor-pointer list-none items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase [&::-webkit-details-marker]:hidden">
     Flown
     <span class="badge" data-variant="outline">{{ past|length }}</span>

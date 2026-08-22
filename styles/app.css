@@ -49,6 +49,10 @@
 :root {
   --radius: 0.75rem;
 
+  /* What every page keeps between its last card and the bottom of the screen, so
+     nothing ends against the home indicator. */
+  --page-end: calc(1.5rem + env(safe-area-inset-bottom));
+
   --background: oklch(0.975 0.004 258);
   --foreground: oklch(0.205 0.02 258);
   --card: oklch(1 0 0);
@@ -133,6 +137,10 @@
     /* A countdown that reflows every second is unreadable, so no digit is ever allowed
        to be a different width from another. */
     @apply font-sans tabular-nums antialiased;
+  }
+
+  main {
+    padding-bottom: var(--page-end);
   }
 }
 
@@ -247,10 +255,30 @@
   .swatch[data-colour='grey']   { --flag: #8e8e93; }
 
   /* The main action of every screen, inside the thumb's reach and clear of the home
-     indicator. */
+     indicator. It is the last thing on the page, so it takes the page's own end margin
+     back: the button sits at the bottom of the screen rather than above a gap. */
   .action-bar {
-    @apply sticky bottom-0 z-10 -mx-4 mt-auto border-t bg-background/85 px-4 pt-3 backdrop-blur;
+    @apply sticky bottom-0 z-10 -mx-4 mt-auto bg-background/85 px-4 pt-3 backdrop-blur;
+    margin-bottom: calc(-1 * var(--page-end));
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  /* A save is worth a word rather than a banner, so it is said just under the header,
+     where the eye already is, and then takes itself away. Basecoat drops its toasts at
+     the foot of the screen, which is where this app keeps the button that was pressed. */
+  .toaster {
+    @apply top-0 bottom-auto flex-col items-center;
+    padding-top: calc(3.5rem + env(safe-area-inset-top) + 0.75rem);
+  }
+
+  /* As wide as the word it carries. A confirmation that spans the screen is the banner
+     this is here instead of. */
+  .toaster .toast {
+    @apply w-auto;
+  }
+
+  .toast-content {
+    @apply rounded-lg border bg-popover text-popover-foreground shadow-lg;
   }
 
   /* iOS sizes a native date control to its own picker and lets it run past a narrow
