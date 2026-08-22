@@ -139,16 +139,6 @@ def test_day_of_with_nothing_assigned_yet_has_no_detail(settings: Settings) -> N
     assert flight["detail"] is None
 
 
-def test_day_of_with_nothing_counting_spells_out_the_time(settings: Settings) -> None:
-    """A flight the poller has closed has no count left, so the time takes its place."""
-    zones = {"JFK": "America/New_York"}
-    closed = booking(status="completed")
-    flight = payload([(closed, snapshot())], settings, zones=zones)["flights"][0]
-    assert flight["status_label"] == "Flown"
-    assert flight["milestone_label"] is None
-    assert flight["detail"] == "14:40"
-
-
 def test_a_delayed_departure_leaves_the_new_time_to_the_count(settings: Settings) -> None:
     held = snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=30))
     flight = payload([(booking(seat="14A"), held)], settings)["flights"][0]
@@ -208,7 +198,7 @@ def test_airborne_counts_down_to_landing(settings: Settings) -> None:
     assert flight["status_tone"] == "warn"
 
 
-def test_landed_keeps_the_gate_while_it_counts_to_it(settings: Settings) -> None:
+def test_landed_counts_to_the_gate_without_naming_it(settings: Settings) -> None:
     landed = snapshot(
         actual_off=DEPARTURE,
         actual_on=ARRIVAL - timedelta(minutes=10),
@@ -223,7 +213,7 @@ def test_landed_keeps_the_gate_while_it_counts_to_it(settings: Settings) -> None
     assert flight["phase"] == "landed"
     assert flight["status_label"] == "Landed"
     assert flight["status_tone"] == "ok"
-    assert flight["detail"] == "Gate 12 · Terminal B"
+    assert flight["detail"] is None
     assert flight["milestone_label"] == "At the gate in"
     assert flight["milestone_to"] == "2026-09-12T22:15:00Z"
     assert flight["milestone_due"] == "Due at the gate"
@@ -241,7 +231,7 @@ def test_at_the_gate_the_belt_takes_the_milestones_place(settings: Settings) -> 
     )
     flight = payload([(booking(), done)], settings)["flights"][0]
     assert flight["status_label"] == "Arrived"
-    assert flight["detail"] == "Terminal B"
+    assert flight["detail"] is None
     assert flight["milestone_label"] == "Bags"
     assert flight["milestone_text"] == "7"
     assert flight["milestone_to"] is None
