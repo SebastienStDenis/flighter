@@ -56,6 +56,10 @@ LIMIT_STEP = Decimal("2.00")
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
+# The settings page's tabs, in the order they are drawn. Every save comes back through a
+# redirect, and this is what carries the tab it was made on across it.
+SETTINGS_TABS = ("connections", "preferences", "widget")
+
 # iOS reloads a widget on its own schedule, and a phone left face down for an afternoon
 # is not a broken one. A day without a fetch is.
 WIDGET_QUIET_AFTER = timedelta(days=1)
@@ -114,6 +118,17 @@ def _first_validation_message(exc: ValidationError) -> str:
     error = exc.errors()[0]
     field = ".".join(str(part) for part in error["loc"]) or "value"
     return f"{field.replace('_', ' ')}: {error['msg']}"
+
+
+def _saved(tab: str) -> RedirectResponse:
+    """Back to the settings page, on the tab the form was on, with a save to announce.
+
+    A tab this does not know is the first one: the name is put straight into a Location
+    header, so what goes into it can only ever be one of ours.
+    """
+    if tab not in SETTINGS_TABS:
+        tab = SETTINGS_TABS[0]
+    return RedirectResponse(f"/settings?saved=1&tab={tab}", status_code=303)
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -462,6 +477,7 @@ def create_app(settings: Settings) -> FastAPI:
         aeroapi_monthly_cap_usd: Annotated[str | None, Form()] = None,
         imap_flag_colour: Annotated[str | None, Form()] = None,
         icloud_calendar_url: Annotated[str | None, Form()] = None,
+        tab: Annotated[str, Form()] = SETTINGS_TABS[0],
     ) -> Response:
         """Save whichever preferences were posted.
 
@@ -482,11 +498,12 @@ def create_app(settings: Settings) -> FastAPI:
             context = await settings_context(request, session)
             context["error"] = _first_validation_message(exc)
             context["posted"] = context["posted"] | posted
+            context["tab"] = tab
             return page(request, "settings.html", context, status_code=400)
         # Applied here rather than only at boot, so turning the logs up to find out what
         # is going wrong does not need the restart that would clear the evidence.
         logging.getLogger().setLevel(updated.log_level.upper())
-        return RedirectResponse("/settings?saved=1", status_code=303)
+        return _saved(tab)
 
     @app.post("/settings/credentials")
     async def save_credentials(
@@ -519,12 +536,12 @@ def create_app(settings: Settings) -> FastAPI:
         changed = _merged(found.fields, entered, forget=bool(forget))
         if changed:
             write_secrets(changed)
-        return RedirectResponse("/settings?saved=1", status_code=303)
+        return _saved("connections")
 
     @app.post("/settings/widget/token")
     async def rotate_widget_token() -> Response:
         mint_widget_token()
-        return RedirectResponse("/settings?saved=1&tab=widget", status_code=303)
+        return _saved("widget")
 
     @app.post("/settings/checks")
     async def run_checks_now(request: Request) -> Response:

@@ -1517,6 +1517,56 @@ def test_saving_a_preference_redirects_and_takes_effect(client: TestClient) -> N
     assert prefs.current().log_level == "DEBUG"
 
 
+def test_a_save_comes_back_to_the_tab_it_was_made_on(client: TestClient) -> None:
+    """The form says which tab it is on, so a save never moves the page out from under."""
+    response = client.post(
+        "/settings", data=SETTINGS_FORM | {"tab": "preferences"}, follow_redirects=False
+    )
+
+    assert response.headers["location"] == "/settings?saved=1&tab=preferences"
+    body = client.get("/settings?saved=1&tab=preferences").text
+    assert re.search(
+        r'id="settings-tabs-tab-2"\s+aria-controls="[^"]+"\s+aria-selected="true"', body
+    )
+
+
+def test_a_tab_nobody_drew_is_the_first_one(client: TestClient) -> None:
+    """The name goes straight into a Location header, so only ours may travel in it."""
+    response = client.post(
+        "/settings", data=SETTINGS_FORM | {"tab": "../evil"}, follow_redirects=False
+    )
+
+    assert response.headers["location"] == "/settings?saved=1&tab=connections"
+
+
+def test_a_credential_comes_back_to_the_connections_tab(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_secrets(monkeypatch)
+
+    response = client.post(
+        "/settings/credentials",
+        data={"service": "flightaware", "aeroapi_key": "k"},
+        follow_redirects=False,
+    )
+
+    assert response.headers["location"] == "/settings?saved=1&tab=connections"
+
+
+def test_a_refused_preference_stays_on_the_tab_it_was_typed_on(client: TestClient) -> None:
+    """An error is worth nothing on a tab that is not showing the box it is about."""
+    response = client.post(
+        "/settings",
+        data=SETTINGS_FORM | {"tab": "preferences", "aeroapi_monthly_cap_usd": "four"},
+    )
+
+    assert response.status_code == 400
+    assert re.search(
+        r'id="settings-tabs-tab-2"\s+aria-controls="[^"]+"\s+aria-selected="true"',
+        response.text,
+    )
+
+
 def test_a_card_that_posts_one_field_leaves_the_others_alone(client: TestClient) -> None:
     """Each card is its own form, so what arrives is a slice rather than the lot."""
     client.post("/settings", data=SETTINGS_FORM | {"log_level": "WARNING"})
