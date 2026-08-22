@@ -356,9 +356,7 @@ which is given to you below.
 
 marketing_carrier is the two-character IATA code on the ticket ("DL") and \
 marketing_number is the digits alone ("1234"). Fill operating_carrier and \
-operating_number only when the email names a different airline actually flying the leg. \
-Carrier fields contain codes, never airline names. Endeavor Air is operating carrier \
-"9E"; its Delta Connection operating number is the same digits as the DL flight number.
+operating_number only when the email names a different airline actually flying the leg.
 
 Use null for anything the email does not state. Never guess an airport code, a seat, or \
 a time. confidence is your certainty that these specific segments, with these specific \
