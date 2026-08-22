@@ -333,6 +333,16 @@ def test_ident_is_converted_to_icao_form() -> None:
     assert flight_ident(booking(operating_carrier=None, operating_number=None)) == "AAL6141"
 
 
+def test_endeavor_ident_is_converted_to_icao_form() -> None:
+    target = booking(
+        marketing_carrier="DL",
+        marketing_number="5449",
+        operating_carrier="9E",
+        operating_number="5449",
+    )
+    assert flight_ident(target) == "EDV5449"
+
+
 # --- Token bucket --------------------------------------------------------------------
 
 

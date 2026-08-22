@@ -127,6 +127,19 @@ async def book(session: AsyncSession, departure_local: datetime, **fields: objec
     return await create_booking(session, departure_local=departure_local, **(defaults | fields))  # type: ignore[arg-type]
 
 
+async def test_endeavor_name_becomes_its_operating_flight_ident(seeded: None) -> None:
+    async with session_scope() as session:
+        booking = await book(
+            session,
+            datetime(2026, 12, 28, 18, 50),
+            marketing_number="5449",
+            operating_carrier="ENDEAVOR AIR",
+        )
+
+        assert booking.operating_carrier == "9E"
+        assert booking.operating_number == "5449"
+
+
 async def test_a_booking_carries_its_local_date_and_a_first_poll(seeded: None) -> None:
     async with session_scope() as session:
         # 23:30 in New York is already the 13th in UTC; the dedupe day is the 12th.
