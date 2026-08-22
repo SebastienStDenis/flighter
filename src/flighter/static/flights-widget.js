@@ -41,10 +41,36 @@ const IMMINENT_MS = 60 * 60 * 1000;
 // known, the rest of the row is the card's to fill.
 const MILESTONE_COLUMN = 84;
 // The rule between the card's two airports, for the same reason: the aircraft's place
-// on it is a share of a width the script has to know. What the row has left over goes
-// either side of it.
-const RULE_WIDTH = { small: 52, medium: 168, large: 168 };
+// on it is a share of a width the script has to know, and it takes what the codes
+// leave of the row, so the widget's width has to be known too. Scriptable does not say
+// how big the widget is, so the screen does: the home screen's widget sizes by screen,
+// in points, as the side of the small size and the width of the medium. The small and
+// medium sizes are as tall as the small is wide, and the large is as wide as the
+// medium. A screen not listed gets the narrowest, which fits on every phone.
+const WIDGET_SIZES = {
+  "440x956": [170, 364],
+  "430x932": [170, 364],
+  "428x926": [170, 364],
+  "414x896": [169, 360],
+  "414x736": [159, 348],
+  "402x874": [158, 338],
+  "393x852": [158, 338],
+  "390x844": [158, 338],
+  "375x812": [155, 329],
+  "375x667": [148, 321],
+  "360x780": [155, 329],
+  "320x568": [141, 292],
+};
+const NARROWEST = [148, 321];
 const PLANE = 11;
+// Either side of the rule, past the row's spacing.
+const RULE_GUTTER = 4;
+// A monospaced glyph's advance as a share of the point size, a little over SF Mono's,
+// so a code measured before it is drawn is never short of room.
+const MONO_EM = 0.62;
+// The medium card's rows with nothing between them: the header, the codes, the times,
+// the places on their two lines, and the figure, each as tall as its type.
+const CARD_ROWS = 18 + 24 + 22 + 26 + 24;
 
 // The web UI's palette, each value as styles/app.css defines it for the light and the
 // dark scheme, rendered from oklch to sRGB. The phone's appearance picks the side, the
@@ -80,6 +106,18 @@ const isAccessory = family.startsWith("accessory");
 // Per-element tap targets exist only on medium and large. Everywhere else the whole
 // widget gets one URL.
 const supportsRowLinks = family === "medium" || family === "large";
+// The widget's margin. The small size is six lines tall once the route has its own
+// line, so it gives up a little of it to keep the last of them on screen.
+const INSET = family === "small" ? 12 : 14;
+// The room inside the margin: the width at this size, and the height of the sizes a
+// single flight has to itself.
+const CONTENT = contentSize();
+// The space between the card's rows on the large size, which has the board under the
+// card and so cannot spread them over the height the way the medium size does: the
+// points the medium size's rows are spread by on this phone, the height they leave
+// over shared out between the gaps, and never tighter than the rows would be on their
+// own.
+const LARGE_GAP = Math.max(8, Math.floor((CONTENT.height - CARD_ROWS - 4) / 3));
 
 const server = connect();
 const result = server ? await load(server) : null;
@@ -315,7 +353,11 @@ async function buildWidget(result) {
   } else {
     renderList(widget, flights, logos);
   }
-  widget.addSpacer();
+  // The card spreads itself over the sizes it has to itself; elsewhere the rows keep
+  // to the top and the footer goes to the bottom.
+  if (!featured.card || family === "large") {
+    widget.addSpacer();
+  }
   footer(widget, data, result);
   return widget;
 }
@@ -328,10 +370,7 @@ function newWidget() {
     widget.setPadding(2, 2, 2, 2);
   } else {
     widget.backgroundColor = BACKGROUND;
-    // The small size is six lines tall once the route has its own line, so it gives up
-    // a little margin to keep the last of them on screen.
-    const inset = family === "small" ? 12 : 14;
-    widget.setPadding(inset, inset, inset, inset);
+    widget.setPadding(INSET, INSET, INSET, INSET);
   }
   return widget;
 }
@@ -469,11 +508,11 @@ function renderList(widget, flights, logos) {
 
 // The board's card, a little tighter: the number and the pill; the two codes with the
 // rule between them and the aircraft on it; the time at each end in its tone, with its
-// zone on the outside the way the card sets it; the terminal and gate at each end; and
-// what it counts to, the label on the left and the figure on the right as in the card's
-// footer. The small size keeps every row and shrinks the type, and gives the pill a
-// line of its own, since it has no room beside the number for one that says
-// "Departure delayed".
+// zone on the outside the way the card sets it; the terminal and gate at each end, the
+// word over the value; and what it counts to, the label on the left and the figure on
+// the right as in the card's footer. The small size keeps every row and shrinks the
+// type, and gives the pill a line of its own, since it has no room beside the number
+// for one that says "Departure delayed".
 function renderCard(widget, flight, logos) {
   const card = flight.card;
   const compact = family === "small";
@@ -496,18 +535,19 @@ function renderCard(widget, flight, logos) {
     pill(header, flight);
   }
 
-  container.addSpacer(compact ? 4 : 8);
+  gap(container);
   routeRow(container, card, compact);
+  // The times stay close under the codes: each end's code and time read as one.
   container.addSpacer(compact ? 2 : 4);
   timesRow(container, card, compact);
   if (family === "large") {
     daysRow(container, card);
   }
-  container.addSpacer(compact ? 3 : 6);
+  gap(container);
   placesRow(container, card, compact);
 
   if (hasMilestone(flight)) {
-    container.addSpacer(compact ? 4 : 8);
+    gap(container);
     const line = container.addStack();
     line.bottomAlignContent();
     const label = line.addText(milestoneLabel(flight));
@@ -519,23 +559,53 @@ function renderCard(widget, flight, logos) {
   }
 }
 
+// The space between the card's rows: on the sizes the card has to itself, whatever
+// spreads the rows over the widget's height; on the large size, the points the medium
+// size's rows are spread by.
+function gap(container) {
+  if (family === "large") {
+    container.addSpacer(LARGE_GAP);
+  } else {
+    container.addSpacer();
+  }
+}
+
 function routeRow(container, card, compact) {
   const row = container.addStack();
   row.centerAlignContent();
-  row.spacing = compact ? 6 : 8;
-  code(row, card.origin.iata, compact, null);
+  row.spacing = compact ? 4 : 8;
+  const origin = codeWidth(card.origin.iata, compact, null);
+  const destination = codeWidth(card.destination.iata, compact, card.booked_destination);
+  code(row, card.origin.iata, compact, null, origin, false);
   row.addSpacer();
-  rule(row, card, RULE_WIDTH[family] || RULE_WIDTH.medium, compact);
+  // The rule takes what the codes and the row's spacing leave, bar a gutter either
+  // side; the spacers soak up the point or two of rounding.
+  rule(row, card, CONTENT.width - origin - destination - 4 * row.spacing - 2 * RULE_GUTTER, compact);
   row.addSpacer();
-  code(row, card.destination.iata, compact, card.booked_destination);
+  code(row, card.destination.iata, compact, card.booked_destination, destination, true);
+}
+
+// A code is given its width rather than left to find it: a text in a row with a spacer
+// in it is handed an equal share of the row before the spacer takes the rest, and a
+// code worth more than its share is cut short with room to spare. The width leaves a
+// little over so the code on the right can sit behind a spacer of its own, which is
+// what puts it against the right edge.
+function codeWidth(iata, compact, booked) {
+  const main = Math.ceil(iata.length * (compact ? 16 : 20) * MONO_EM);
+  const was = booked ? 3 + Math.ceil(booked.length * (compact ? 9 : 11) * MONO_EM) : 0;
+  return main + was + 5;
 }
 
 // A diverted flight's new airport stands where the code goes, in red, with the one it
 // was booked for small beside it.
-function code(row, iata, compact, booked) {
+function code(row, iata, compact, booked, width, right) {
   const group = row.addStack();
   group.bottomAlignContent();
   group.spacing = 3;
+  group.size = new Size(width, 0);
+  if (right) {
+    group.addSpacer();
+  }
   const text = group.addText(iata);
   text.font = Font.boldMonospacedSystemFont(compact ? 16 : 20);
   text.textColor = booked ? toneColor("stop") : TEXT;
@@ -611,10 +681,15 @@ function clock(row, end, compact, right) {
   };
   const zone = () => {
     if (!end.zone) return;
-    const text = group.addText(end.zone);
+    // Bottom-aligned, the zone's descender room is shallower than the time's, so its
+    // baseline lands below the time's; a spacer under it makes up the difference.
+    const lift = group.addStack();
+    lift.layoutVertically();
+    const text = lift.addText(end.zone);
     text.font = Font.mediumSystemFont(compact ? 8 : 9);
     text.textColor = MUTED;
     text.lineLimit = 1;
+    lift.addSpacer(2);
   };
   if (right) {
     zone();
@@ -638,7 +713,8 @@ function daysRow(container, card) {
 
 // Where in the building at each end: terminal then gate where it leaves from, gate then
 // terminal where it arrives, so the terminal sits on the outside at both ends and the
-// gate beside the rule, as on the card.
+// gate beside the rule, as on the card, and as on the card each word stands over its
+// value.
 function placesRow(container, card, compact) {
   const row = container.addStack();
   row.centerAlignContent();
@@ -649,12 +725,11 @@ function placesRow(container, card, compact) {
 
 function places(row, pairs, compact) {
   const group = row.addStack();
-  group.bottomAlignContent();
   group.spacing = compact ? 6 : 8;
   for (const [name, value, isGate] of pairs) {
     const cell = group.addStack();
-    cell.bottomAlignContent();
-    cell.spacing = 3;
+    cell.layoutVertically();
+    cell.spacing = 1;
     const label = cell.addText(name.toUpperCase());
     label.font = Font.mediumSystemFont(compact ? 7 : 8);
     label.textColor = MUTED;
@@ -833,6 +908,13 @@ function ruleProgress(card) {
     }
   }
   return typeof card.progress === "number" ? card.progress / 100 : null;
+}
+
+function contentSize() {
+  const screen = Device.screenSize();
+  const key = `${Math.min(screen.width, screen.height)}x${Math.max(screen.width, screen.height)}`;
+  const [side, medium] = WIDGET_SIZES[key] || NARROWEST;
+  return { width: (family === "small" ? side : medium) - 2 * INSET, height: side - 2 * INSET };
 }
 
 function timeOfDay(date) {
