@@ -260,6 +260,21 @@
         <p id="url-help">The address your phone opens, from calendar entries, pushes and
           the widget. It has to work when you are not at home.</p>
       </div>
+      {# Browsers refuse a service worker anywhere but https and localhost, and refuse it
+         silently, so an http address means the board never opens without a connection
+         and nothing anywhere says why. #}
+      <div class="alert mt-3" id="insecure" role="status" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/>
+        </svg>
+        <strong>The board will not open offline</strong>
+        <section>
+          <p>You opened this over <code>http://</code>, and browsers only run a service
+            worker on <code>https://</code>, so nothing is kept for when there is no
+            connection. Serve it over <code>https://</code> and it works on its own.</p>
+        </section>
+      </div>
     </section>
   </div>
 
@@ -465,6 +480,11 @@
      ]) }}
 
 <script>
+  // isSecureContext is the browser's own answer to the question the service worker asks,
+  // so it is right about localhost and about whatever the address is really being served
+  // through, in a way that reading the scheme is not.
+  if (!window.isSecureContext) document.getElementById("insecure").hidden = false;
+
   // The results are HTML the server already knows how to draw, so they are dropped in
   // as they arrive rather than rebuilt here.
   async function runChecks(button) {

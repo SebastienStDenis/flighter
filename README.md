@@ -339,6 +339,34 @@ To run a sweep on the spot instead of waiting:
 docker compose exec app flighter import
 ```
 
+### On the phone, and why it has to be HTTPS
+
+Added to the home screen, the app opens fullscreen with its own icon. A service worker
+caches the shell - the stylesheet, the fonts, the two scripts - so it paints without
+waiting on the network, and caches no flight data whatsoever: a gate number from an hour
+ago is worse than a page admitting it could not reach the server. Open it with no
+connection and that is the page you get, rather than the browser's.
+
+None of this happens over plain `http://`. A service worker only runs on a secure origin,
+so `http://<host>:8000` registers nothing at all, and does so silently: no cached shell,
+no offline page, and a refresh with no connection is the browser's own error screen.
+`localhost` is the single exception the browsers make, which is why the offline shell
+works from a checkout and never from the phone.
+
+If the host is on your tailnet, the shortest way to a real certificate is to let
+Tailscale terminate TLS in front of the container:
+
+```sh
+sudo tailscale serve --bg 8000
+```
+
+That needs **HTTPS Certificates** enabled for the tailnet once, on the
+[DNS page of the admin console](https://login.tailscale.com/admin/dns). The app is then
+at `https://<host>.<tailnet>.ts.net`, on 443, reachable from anywhere on the tailnet.
+That is a different origin from the one you had, so set it as the **public base URL** and
+add *that* to the home screen - an icon saved from the `http://` address still points
+there, and still has no service worker. `tailscale serve reset` undoes all of it.
+
 ### Running from a checkout
 
 ```sh
