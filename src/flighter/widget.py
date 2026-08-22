@@ -31,21 +31,24 @@ from pydantic import BaseModel, PlainSerializer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import bookings as booking_repo
-from . import prefs, views
+from . import cadence, prefs, views
 from .aeroapi import budget_status
 from .airports import get_airport
 from .config import Settings, get_settings
 from .db import get_session
-from .models import KV, Booking, BookingStatus, FlightSnapshot
+from .models import KV, Airport, Booking, BookingStatus, FlightSnapshot
 from .phase import (
     AIRBORNE,
     DAY_OF,
     DIVERTED,
+    LANDED,
     TAXIING,
     UPCOMING,
     Phase,
+    airborne_window,
     compute_phase,
     departure_estimate,
+    progress_estimate,
 )
 from .timezones import FALLBACK_TZ
 
@@ -66,6 +69,18 @@ POLL_STALE_AFTER: Final = timedelta(minutes=45)
 
 PHASES_IMMINENT: Final = frozenset({DAY_OF, TAXIING, AIRBORNE, DIVERTED})
 
+# Which flight the widget opens out into its card, when more than one could have it.
+# An aircraft still moving, taxiing in included, comes first: nothing on the screen
+# matters more than where it is. Then one about to leave, inside the poller's close
+# window, which is as near as the server itself calls a departure imminent. A flight
+# already parked comes last, because its card has nothing left to say but the belt: on a
+# layover the leg just flown hands the screen to the leg about to be, the moment it is at
+# the gate and not before, and keeps it while the next leg is still hours off. Ties go to
+# the board's order.
+UNDER_WAY: Final = 0
+LEAVING_SOON: Final = 1
+PARKED: Final = 2
+
 # The script is served from here rather than fetched from a repository, so the phone
 # always runs the version that matches the server answering it.
 SCRIPT_FILE: Final = Path(__file__).parent / "static" / "flights-widget.js"
@@ -82,6 +97,39 @@ def _iso_z(value: datetime) -> str:
 
 
 UtcInstant = Annotated[datetime, PlainSerializer(_iso_z, return_type=str)]
+
+
+class WidgetEnd(BaseModel):
+    """One end of the card: the airport, the clock read there, and where in the building."""
+
+    iata: str
+    # The time it now leaves or arrives, in the tone the card draws it: stop once it
+    # slipped later than booked, ok when it came forward, none while it is what was
+    # booked. The day is the one that time falls on at this airport.
+    time: str
+    zone: str
+    day: str | None
+    tone: str | None
+    terminal: str | None
+    gate: str | None
+
+
+class WidgetCard(BaseModel):
+    """The flight's card opened out, for the one flight that is the widget's whole screen
+    while it is under way. Every string is the card's own."""
+
+    origin: WidgetEnd
+    destination: WidgetEnd
+    # The airport a diverted flight was booked for, beside the one it is now bound for.
+    booked_destination: str | None
+    # The aircraft's place on the rule between the two. Wheels-up and the landing
+    # estimate let the phone move it between reloads by its own clock, the way the page
+    # moves it between loads; without them the figure stands where the feed last put it.
+    # Before wheels-up the rule says how long the hop is instead.
+    progress: int | None
+    airborne_off: UtcInstant | None
+    airborne_on: UtcInstant | None
+    block_time: str | None
 
 
 class WidgetFlight(BaseModel):
@@ -105,6 +153,8 @@ class WidgetFlight(BaseModel):
     # What the label becomes once `milestone_to` has gone by, so the phone can turn
     # "Lands in" into "Due to land" between reloads the way the page does.
     milestone_due: str | None
+    # The card, on at most one flight: the one the widget gives its whole screen to.
+    card: WidgetCard | None
 
 
 class WidgetPayload(BaseModel):
@@ -133,7 +183,7 @@ async def read_widget(
         rows,
         settings=settings,
         now=now,
-        zones=await load_zones(session, rows),
+        airports=await load_airports(session, rows),
         # The phone reached this address to ask, so the links it is handed back work
         # from wherever it is, saved address or not.
         base_url=prefs.public_base_url(str(request.base_url).rstrip("/")),
@@ -245,14 +295,18 @@ async def load_flight_rows(session: AsyncSession, now: datetime) -> list[FlightR
     return [(booking, snap) for booking, snap in rows if views.off_board_at(booking, snap) >= now]
 
 
-async def load_zones(session: AsyncSession, rows: Sequence[FlightRow]) -> dict[str, str]:
-    """The zone at each flight's origin, for the day and the time it leaves."""
-    zones: dict[str, str] = {}
-    for booking, _ in rows:
-        if booking.origin_iata not in zones:
-            airport = await get_airport(session, booking.origin_iata)
-            zones[booking.origin_iata] = airport.tz if airport else FALLBACK_TZ
-    return zones
+async def load_airports(
+    session: AsyncSession, rows: Sequence[FlightRow]
+) -> dict[str, Airport | None]:
+    """Both ends of every flight, and where a diverted one is bound, for the zone each
+    clock is read in."""
+    airports: dict[str, Airport | None] = {}
+    for booking, snapshot in rows:
+        bound_for = views.destination_iata(booking, snapshot)
+        for iata in (booking.origin_iata, booking.dest_iata, bound_for):
+            if iata not in airports:
+                airports[iata] = await get_airport(session, iata)
+    return airports
 
 
 async def read_degraded(session: AsyncSession) -> str | None:
@@ -273,11 +327,11 @@ def build_payload(
     settings: Settings,
     now: datetime,
     base_url: str,
-    zones: Mapping[str, str] | None = None,
+    airports: Mapping[str, Airport | None] | None = None,
     degraded_reason: str | None = None,
 ) -> WidgetPayload:
-    origins = zones or {}
-    ordered: list[tuple[datetime, WidgetFlight]] = []
+    known = airports or {}
+    ordered: list[tuple[datetime, FlightRow, WidgetFlight]] = []
     observed: list[datetime] = []
     for booking, snapshot in rows:
         flight = _flight(
@@ -286,14 +340,21 @@ def build_payload(
             settings=settings,
             now=now,
             base_url=base_url,
-            origin_tz=origins.get(booking.origin_iata, FALLBACK_TZ),
+            origin_tz=_zone(known, booking.origin_iata),
         )
-        ordered.append((departure_estimate(booking, snapshot), flight))
+        ordered.append((departure_estimate(booking, snapshot), (booking, snapshot), flight))
         if flight.phase in PHASES_IMMINENT and snapshot is not None and snapshot.observed_at:
             observed.append(snapshot.observed_at)
     # The board's order: by the time each is now leaving, landed or not.
     ordered.sort(key=lambda row: row[0])
-    flights = [flight for _, flight in ordered[:MAX_FLIGHTS]]
+    shown = ordered[:MAX_FLIGHTS]
+    flights = [flight for _, _, flight in shown]
+
+    featured = _featured([(row, flight.phase) for _, row, flight in shown], now)
+    if featured is not None:
+        booking, snapshot = shown[featured][1]
+        card = _card(booking, snapshot, phase=flights[featured].phase, now=now, airports=known)
+        flights[featured] = flights[featured].model_copy(update={"card": card})
 
     reason = degraded_reason or _stale_reason(min(observed, default=None), now)
     return WidgetPayload(
@@ -345,6 +406,105 @@ def _flight(
         milestone_to=target,
         milestone_text=text,
         milestone_due=due,
+        card=None,
+    )
+
+
+def _zone(airports: Mapping[str, Airport | None], iata: str) -> str:
+    airport = airports.get(iata)
+    return airport.tz if airport else FALLBACK_TZ
+
+
+def _featured(shown: Sequence[tuple[FlightRow, Phase]], now: datetime) -> int | None:
+    """Which of the flights on the widget gets the card, by the order set out above."""
+    ranked = [
+        (rank, index)
+        for index, ((booking, snapshot), phase) in enumerate(shown)
+        if (rank := _rank(phase, booking, snapshot, now)) is not None
+    ]
+    return min(ranked)[1] if ranked else None
+
+
+def _rank(
+    phase: Phase, booking: Booking, snapshot: FlightSnapshot | None, now: datetime
+) -> int | None:
+    if phase in (TAXIING, AIRBORNE, DIVERTED):
+        # A booking the poller closed while the feed still said airborne was lost, not
+        # flown: its card would show an aircraft pinned mid-route for good.
+        return None if views.flown(booking) else UNDER_WAY
+    if phase == LANDED:
+        return PARKED if views.at_the_gate(phase, booking, snapshot, now) else UNDER_WAY
+    if phase == DAY_OF and departure_estimate(booking, snapshot) - now <= cadence.FINAL_HORIZON:
+        return LEAVING_SOON
+    return None
+
+
+def _card(
+    booking: Booking,
+    snapshot: FlightSnapshot | None,
+    *,
+    phase: Phase,
+    now: datetime,
+    airports: Mapping[str, Airport | None],
+) -> WidgetCard:
+    """The card's facts, read the way the page reads them so the two cannot differ."""
+    view = views.FlightView(
+        booking=booking,
+        snapshot=snapshot,
+        origin=airports.get(booking.origin_iata),
+        dest=airports.get(booking.dest_iata),
+        diversion=airports.get(views.destination_iata(booking, snapshot)),
+    )
+    window = airborne_window(booking, snapshot, now)
+    if phase == LANDED:
+        # All the way there whatever the feed last said: its figure stops at the last
+        # poll, which may have been well short of the runway.
+        progress: int | None = 100
+    else:
+        progress = progress_estimate(booking, snapshot, now)
+    block_time: str | None = None
+    if phase == DAY_OF and view.arrival is not None and view.arrival > view.departure:
+        block_time = views.duration(view.arrival - view.departure)
+    return WidgetCard(
+        origin=_end(
+            booking.origin_iata,
+            view.origin,
+            view.departs,
+            terminal=snapshot.terminal_origin if snapshot else None,
+            gate=snapshot.gate_origin if snapshot else None,
+        ),
+        destination=_end(
+            view.destination_iata,
+            view.destination,
+            view.arrives,
+            terminal=snapshot.terminal_destination if snapshot else None,
+            gate=snapshot.gate_destination if snapshot else None,
+        ),
+        booked_destination=booking.dest_iata if view.diverted_to else None,
+        progress=progress,
+        airborne_off=window[0] if window else None,
+        airborne_on=window[1] if window else None,
+        block_time=block_time,
+    )
+
+
+def _end(
+    iata: str,
+    airport: Airport | None,
+    line: views.Timeline,
+    *,
+    terminal: str | None,
+    gate: str | None,
+) -> WidgetEnd:
+    tz = airport.tz if airport else FALLBACK_TZ
+    return WidgetEnd(
+        iata=iata,
+        time=views.clock(line.best, tz),
+        zone=views.zone(line.best, tz),
+        day=views.day(line.best, tz) if line.best is not None else None,
+        tone=("stop" if line.late else "ok") if line.moved else None,
+        terminal=terminal,
+        gate=gate,
     )
 
 

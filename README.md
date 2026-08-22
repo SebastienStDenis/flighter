@@ -81,9 +81,11 @@ interval tightens as departure approaches, and stops once the flight is on the g
 its bag belt is known.
 
 **The widget is the board in miniature.** It draws the same status pill and the same
-next milestone the web UI does, in the web UI's colours, light or dark. The only thing it
-works out for itself is the figure beside the milestone, from the phone's clock, in whole
-days, hours and minutes, and never seconds.
+next milestone the web UI does, in the web UI's colours, light or dark, and while a
+flight is under way it becomes that flight's card, the way the flight page opens. The
+only things it works out for itself depend on the phone's clock: the figure beside the
+milestone, in whole days, hours and minutes and never seconds, and where the aircraft
+sits on the card's rule.
 
 **Everything is configured in the app.** There is no file to fill in before first boot.
 You start the container, open `/settings`, and type your Apple ID, your FlightAware key
