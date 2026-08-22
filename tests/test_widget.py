@@ -252,7 +252,7 @@ def test_at_the_gate_the_belt_takes_the_milestones_place(settings: Settings) -> 
     flight = payload([(booking(), done)], settings)["flights"][0]
     assert flight["status_label"] == "Arrived"
     assert flight["detail"] is None
-    assert flight["milestone_label"] == "Bags"
+    assert flight["milestone_label"] == "Baggage claim"
     assert flight["milestone_text"] == "7"
     assert flight["milestone_to"] is None
     assert flight["milestone_due"] is None
@@ -261,7 +261,7 @@ def test_at_the_gate_the_belt_takes_the_milestones_place(settings: Settings) -> 
 def test_a_belt_nobody_has_named_is_the_dash_the_card_shows(settings: Settings) -> None:
     done = snapshot(actual_off=DEPARTURE, actual_on=ARRIVAL, actual_in=ARRIVAL)
     flight = payload([(booking(), done)], settings)["flights"][0]
-    assert flight["milestone_label"] == "Bags"
+    assert flight["milestone_label"] == "Baggage claim"
     assert flight["milestone_text"] == "-"
     assert flight["detail"] is None
 
@@ -283,7 +283,7 @@ def test_a_landed_flight_past_its_gate_time_is_sent_to_the_belt(settings: Settin
     )
     flight = late.model_dump(mode="json")["flights"][0]
     assert flight["status_label"] == "Landed"
-    assert flight["milestone_label"] == "Bags"
+    assert flight["milestone_label"] == "Baggage claim"
     assert flight["milestone_text"] == "7"
     assert flight["detail"] is None
 
@@ -735,7 +735,7 @@ def test_the_script_turns_the_label_into_due_once_the_instant_has_passed() -> No
             "milestone_to": (datetime.now(UTC) - timedelta(minutes=5, seconds=10)).strftime(stamp),
         },
         {
-            "milestone_label": "Bags",
+            "milestone_label": "Baggage claim",
             "milestone_due": None,
             "milestone_to": None,
             "milestone_text": "7",
@@ -751,7 +751,7 @@ def test_the_script_turns_the_label_into_due_once_the_instant_has_passed() -> No
     assert json.loads(rendered) == [
         ["Lands in", "1h 00m"],
         ["Due to land", "5m ago"],
-        ["Bags", "7"],
+        ["Baggage claim", "7"],
     ]
 
 

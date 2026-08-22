@@ -92,7 +92,7 @@ Each flight is the board's card in miniature: the airline's mark, the flight num
 route, the same status pill the web UI shows ("On time", "Departure delayed", "In the air",
 "Arriving late", "Landed" and so on, in the same tone), one line of detail, and on the
 right the same milestone the card's footer carries: "Departs in", "Lands in" or "At the
-gate in" with a time against it, and "Bags" with the belt once the aircraft is parked. A
+gate in" with a time against it, and "Baggage claim" with the belt once the aircraft is parked. A
 flight still days away has no milestone, on the card or here. The detail line is what
 matters in that phase: the day and time it leaves while it is days off; the gate and
 the seat on the day; nothing once it has pushed back, since the milestone and the belt

@@ -525,7 +525,7 @@ def test_a_flight_with_nothing_known_yet_still_renders(
     # Days out there is nothing to walk to and nothing to count to yet, so the card
     # stops at the times rather than drawing a row of dashes under them.
     card = body[body.index('<div class="card gap-5">') : body.index('<div class="card mt-3"')]
-    assert "Bags" not in card and ">Gate</div>" not in card
+    assert "Baggage claim" not in card and ">Gate</div>" not in card
     assert "<footer" not in card and "<time" not in card
     assert "None" not in body
     # A missing value is a dash in its row, never the page-level empty state.
@@ -736,7 +736,7 @@ def test_terminal_and_gate_share_a_line_and_the_gate_keeps_its_colour(
     assert card.index(place("Term", "3")) < card.index(place("Gate", "B27", gate))
     assert card.index(place("Gate", "A14", gate)) < card.index(place("Term", "2"))
     # The belt is not a box: it is the footer's number once the aircraft is parked.
-    assert "Bags" not in card
+    assert "Baggage claim" not in card
 
 
 def place(name: str, value: str, tone: str = "") -> str:
@@ -1611,14 +1611,14 @@ def test_the_footer_carries_the_words_for_when_its_time_has_passed(
     assert ">At the gate in</span>" in body
     assert 'data-due="Due at the gate"' in body
     # The belt waits for the gate: until then the footer is the countdown to it.
-    assert "Bags" not in body
+    assert "Baggage claim" not in body
 
 
 def belt(value: str) -> str:
-    """The footer once parked: the word Bags, then the carousel where the time was."""
+    """The footer once parked: the words Baggage claim, then the carousel where the time was."""
     shown = "" if value != "-" else " text-muted-foreground"
     return (
-        '<span class="text-sm text-muted-foreground">Bags</span>\n'
+        '<span class="text-sm text-muted-foreground">Baggage claim</span>\n'
         f'    <span class="ml-auto font-mono text-lg font-bold{shown}">{value}</span>'
     )
 
