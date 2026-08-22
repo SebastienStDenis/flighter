@@ -50,11 +50,12 @@
     </a>
     {% endif %}
     {# The tab is always there, so it is always in the same place; the mark on it is what
-       says whether there is anything behind it. #}
+       says whether anything behind it is waiting on a person. #}
     {% set problems = request.state.problems|default(0) %}
-    <a class="btn ml-auto" data-size="sm" href="/problems"
-       data-variant="{{ 'secondary' if here.startswith('/problems') else 'ghost' }}"
-       {% if here.startswith('/problems') %}aria-current="page"{% endif %}>
+    {% set mail = here == '/mail' or here.startswith('/mail/') %}
+    <a class="btn ml-auto" data-size="sm" href="/mail"
+       data-variant="{{ 'secondary' if mail else 'ghost' }}"
+       {% if mail %}aria-current="page"{% endif %}>
       {% if problems %}
       <svg class="text-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -62,7 +63,7 @@
       </svg>
       <span class="sr-only">{{ problems }} waiting:</span>
       {% endif %}
-      Problems
+      Email
     </a>
     <a class="btn" data-size="sm" href="/settings"
        data-variant="{{ 'secondary' if here.startswith('/settings') else 'ghost' }}"

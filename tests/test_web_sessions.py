@@ -75,7 +75,7 @@ async def test_looking_a_flight_up_holds_no_transaction_across_flightaware(
     database: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The nav's Problems count, the client's budget check and the airports each take
+    """The nav's waiting count, the client's budget check and the airports each take
     the lock in turn; a count left open across the lookup would deadlock the check."""
     await seed_airports(database)
     client = AeroAPIClient(

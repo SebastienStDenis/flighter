@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}Email{% endblock %}
+{% block content %}
+
+<h1 class="mb-4 text-xl font-semibold tracking-tight">Email</h1>
+
+{% set waiting = imports|selectattr("waiting")|list %}
+{% set history = imports|rejectattr("waiting")|list %}
+
+{% if not imports %}
+<section class="empty mt-8">
+  <header>
+    <figure>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect width="20" height="16" x="2" y="4" rx="2"/>
+        <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+      </svg>
+    </figure>
+    <h2>No email read yet</h2>
+    <p>Flag a booking confirmation in Mail. What came of it - a flight on the board, one
+      already there, or an email that could not be read - is listed here.</p>
+  </header>
+</section>
+{% else %}
+
+{# One row for every email, whatever became of it. An email waiting on a decision is the
+   same row with the buttons that make it: the badge is what says it is waiting, because
+   a page that shouts at a person about a receipt they flagged by mistake is a page they
+   stop opening. #}
+{% for title, group in [("Needs attention", waiting), ("Recent", history)] %}
+{% if group %}
+<h2 class="mt-6 mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase first:mt-0">
+  {{- title -}}</h2>
+<div class="item-group -mx-2.5 mb-2 w-auto">
+  {% for v in group %}
+  <div class="item" data-size="sm">
+    <section class="min-w-0">
+      <h3 class="max-w-full"><span class="truncate">{{ v.subject }}</span></h3>
+      {% if v.account %}<p>{{ v.account }}</p>{% endif %}
+    </section>
+    <aside class="flex-col items-end gap-1">
+      {{ m.badge(v.status) }}
+      <span class="text-xs whitespace-nowrap text-muted-foreground">{{ v.when }}</span>
+    </aside>
+    {% if v.flights %}
+    <footer class="mt-1.5 flex-wrap justify-start gap-x-3 gap-y-1">
+      {% for booking in v.flights %}
+      <a class="font-mono text-xs hover:underline" href="/f/{{ booking.id }}">
+        {{ booking.marketing_carrier }}{{ booking.marketing_number }}
+        <span class="text-muted-foreground">
+          {{- booking.origin_iata }} &rarr; {{ booking.dest_iata }}</span></a>
+      {% endfor %}
+    </footer>
+    {% endif %}
+    {% if v.waiting %}
+    <footer class="mt-2 flex-wrap justify-start gap-2">
+      <form method="post" action="/mail/retry">
+        <input type="hidden" name="message_id" value="{{ v.row.message_id }}">
+        <button class="btn" data-variant="outline" data-size="sm" type="submit">
+          Try again</button>
+      </form>
+      <form method="post" action="/mail/ignore">
+        <input type="hidden" name="message_id" value="{{ v.row.message_id }}">
+        <button class="btn" data-variant="ghost" data-size="sm" type="submit">Ignore</button>
+      </form>
+      <a class="btn ml-auto" data-variant="link" data-size="sm"
+         href="{{ email_url(v.row.message_id) }}">Open in Mail</a>
+    </footer>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endfor %}
+
+{% endif %}
+{% endblock %}

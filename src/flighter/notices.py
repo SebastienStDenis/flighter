@@ -1,10 +1,11 @@
 """What the service says about a flagged email that came to nothing.
 
-The phone and the Problems page tell a person the same thing about the same email, so
-both take their words from here rather than each writing its own. The headline is the
-same sentence every time, because a person reading a lock screen wants to know what
-happened before they are told which email it happened to; which failure it was, and
-which email, are the lines underneath.
+The phone and the email page tell a person the same thing about the same email, so both
+take their words from here rather than each writing its own. The headline is the same
+sentence every time, because a person reading a lock screen wants to know what happened
+before they are told which email it happened to; which failure it was, and which email,
+are the lines underneath. The page has the subject at the top of the card already, so it
+asks for the reason on its own and lets the card say the rest.
 """
 
 from __future__ import annotations

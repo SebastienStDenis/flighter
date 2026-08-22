@@ -279,7 +279,7 @@ class IngestLog(Base):
     It is also the retry state. An `error` row keeps its message flagged and is tried
     again once `retry_at` has passed; a null `retry_at` means the message has either been
     decided or been set aside, and nothing will pick it up again without being asked.
-    An `ignored` row was decided by the person on the Problems page and is waiting for
+    An `ignored` row was decided by the person on the email page and is waiting for
     the sweep to take its flag off, after which it stands as `no_flight`: a message on
     file as holding no flight is read again only if it is flagged again, as is one that
     reached the board once nothing it booked is left there. Having an outcome already
@@ -291,7 +291,7 @@ class IngestLog(Base):
     message_id: Mapped[str] = mapped_column(Text, primary_key=True)
     processed_at: Mapped[datetime] = _created_at()
     outcome: Mapped[str] = mapped_column(Text, nullable=False)
-    # Kept because a Message-ID names nothing a person recognises, and the Problems page
+    # Kept because a Message-ID names nothing a person recognises, and the email page
     # has to say which email it is talking about.
     subject: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     raw_extraction: Mapped[dict[str, Any] | None] = mapped_column(JSON)
