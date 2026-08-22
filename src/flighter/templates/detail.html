@@ -30,8 +30,8 @@
     {# Where this flight already is elsewhere. Each is one tap out of the app, so it is
        an icon at the top rather than a row of its own among the facts. #}
     <div class="card-action row-span-1 -mr-2 flex items-center">
-      {% if calendar_link %}
-      <a class="btn" data-variant="ghost" data-size="icon-sm" href="{{ calendar_link }}"
+      {% if v.calendar_link %}
+      <a class="btn" data-variant="ghost" data-size="icon-sm" href="{{ v.calendar_link }}"
          title="Open in Calendar" aria-label="Open in Calendar">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

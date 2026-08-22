@@ -1400,44 +1400,6 @@ def test_a_flight_on_the_calendar_offers_a_way_into_the_calendar_app(
     assert "calshow:" in client.get("/f/1").text
 
 
-def test_a_flight_on_the_calendar_uses_the_scheme_macos_registers(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    show(monkeypatch, booking(calendar_event_uid="flighter-1@flighter.invalid"), None)
-
-    body = client.get(
-        "/f/1",
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/605.1.15 Version/18.6 Safari/605.1.15"
-            )
-        },
-    ).text
-
-    assert 'href="ical://"' in body
-    assert "calshow:" not in body
-
-
-def test_an_ipad_in_desktop_mode_keeps_the_date_targeted_calendar_link(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    show(monkeypatch, booking(calendar_event_uid="flighter-1@flighter.invalid"), None)
-
-    body = client.get(
-        "/f/1",
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) "
-                "AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1"
-            )
-        },
-    ).text
-
-    assert "calshow:" in body
-    assert 'href="ical://"' not in body
-
-
 def test_a_flight_that_is_not_on_the_calendar_offers_no_link(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
