@@ -1477,6 +1477,8 @@ def test_saving_the_ticket_hands_the_booking_layer_what_was_written(
         "notes": None,
         "friend_name": "Sam",
     }
+
+
 def test_saving_a_ticket_for_a_flight_that_is_not_there_is_a_404(client: TestClient) -> None:
     assert client.post("/f/9/ticket", data={"seat": "14A"}).status_code == 404
 
