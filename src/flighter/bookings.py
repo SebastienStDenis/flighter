@@ -16,6 +16,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from .airlines import normalise_operator
 from .airports import airport_tz
 from .cadence import first_poll_at
 from .models import Booking, BookingStatus, EventKind, FlightEvent, FlightSnapshot
@@ -95,6 +96,9 @@ async def create_booking(
     origin_tz = await airport_tz(session, origin)
     departure_utc, arrival_utc = to_booking_times(
         departure_local, origin_tz, arrival_local, await airport_tz(session, dest)
+    )
+    operating_carrier, operating_number = normalise_operator(
+        operating_carrier, operating_number, marketing_number
     )
 
     now = datetime.now(UTC)

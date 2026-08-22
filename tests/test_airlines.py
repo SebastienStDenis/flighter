@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import pytest
 
-from flighter.airlines import IATA_TO_ICAO, to_icao
+from flighter.airlines import IATA_TO_ICAO, normalise_operator, to_icao
 
 
 @pytest.mark.parametrize(
     ("iata", "icao"),
-    [("DL", "DAL"), ("BA", "BAW"), ("AC", "ACA"), ("6E", "IGO"), ("U2", "EZY")],
+    [
+        ("DL", "DAL"),
+        ("BA", "BAW"),
+        ("AC", "ACA"),
+        ("9E", "EDV"),
+        ("6E", "IGO"),
+        ("U2", "EZY"),
+    ],
 )
 def test_known_carriers_convert_to_icao(iata: str, icao: str) -> None:
     assert to_icao(iata) == icao
@@ -27,6 +34,10 @@ def test_an_unknown_carrier_falls_back_to_what_we_were_given() -> None:
 
 def test_codes_are_normalised_before_lookup() -> None:
     assert to_icao(" dl ") == "DAL"
+
+
+def test_endeavor_name_is_normalised_to_its_ident() -> None:
+    assert normalise_operator("ENDEAVOR AIR", None, "5449") == ("9E", "5449")
 
 
 def test_the_table_is_shaped_the_way_the_lookup_assumes() -> None:

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 IATA_TO_ICAO: dict[str, str] = {
     # North America
+    "9E": "EDV",
     "AA": "AAL",
     "AC": "ACA",
     "AS": "ASA",
@@ -108,6 +109,22 @@ IATA_TO_ICAO: dict[str, str] = {
     "LA": "LAN",
     "Y4": "VOI",
 }
+
+OPERATOR_ALIASES: dict[str, str] = {
+    "ENDEAVOR AIR": "9E",
+}
+
+
+def normalise_operator(
+    carrier: str | None, number: str | None, marketing_number: str
+) -> tuple[str | None, str | None]:
+    if carrier is None:
+        return None, number
+    code = carrier.strip().upper()
+    alias = OPERATOR_ALIASES.get(code)
+    if alias is None:
+        return code, number
+    return alias, number or marketing_number
 
 
 def to_icao(carrier: str) -> str:
