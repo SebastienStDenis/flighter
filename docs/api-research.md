@@ -797,6 +797,11 @@ Apple documents neither the scheme nor the epoch. Both are long-standing and wid
 epoch is the same one `NSDate`'s `timeIntervalSinceReferenceDate` counts from, but nothing here has
 been run against a real device.
 
+The macOS Calendar app does not register `calshow:`. It registers `ical:` and `webcal:` instead;
+neither has a public form for selecting a date or an event. Browser links therefore use `ical://`
+on a Mac, which opens Calendar without promising a date it cannot target, and retain `calshow:` on
+iOS and iPadOS.
+
 ### 5.9 Not verified
 
 Everything in §5.2 through §5.5 about iCloud specifically rests on third-party captures rather
