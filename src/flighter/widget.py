@@ -1,10 +1,12 @@
 """The phone widget's only endpoint: every display decision, already made.
 
-The Scriptable script on the phone is deliberately stupid. It draws strings and colours
-one of them by a tone it is told; it does not know what a diversion is or which gate
-belongs to which end of the flight. The status pill and the milestone are the web UI's
-own, read from the same functions, so the lock screen and the board never disagree.
-Everything that could be got wrong is got wrong here, once, where it is covered by tests.
+The Scriptable script on the phone is deliberately stupid. It draws strings, colours
+one of them by a tone it is told, and fetches one picture from an address it is handed;
+it does not know what a diversion is or which gate belongs to which end of the flight.
+The status pill, the milestone and the rule for when a flight has had its day are the
+web UI's own, read from the same functions, so the lock screen and the board never
+disagree. Everything that could be got wrong is got wrong here, once, where it is
+covered by tests.
 
 Two rules hold the contract together. Every instant is ISO-8601 UTC with a `Z`, because
 the phone measures it against its own clock and a missing zone silently shifts the
@@ -26,7 +28,6 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from pydantic import BaseModel, PlainSerializer
-from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import bookings as booking_repo
@@ -41,12 +42,11 @@ from .phase import (
     CANCELLED,
     DAY_OF,
     DIVERTED,
-    LANDED,
     TAXIING,
+    UPCOMING,
     Phase,
     compute_phase,
     departure_estimate,
-    progress_estimate,
 )
 from .timezones import FALLBACK_TZ
 
@@ -57,14 +57,6 @@ router = APIRouter()
 # A lock screen has room for one flight and a home screen for three. Anything past that
 # is a trip itinerary, which is what the web UI is for.
 MAX_FLIGHTS: Final = 3
-# Wider than MAX_FLIGHTS because relevance order is not departure order: an airborne
-# flight sorts ahead of one that departs sooner.
-CANDIDATE_LIMIT: Final = 12
-# How far past its ticketed arrival a flight is still fetched. A flight leaves the widget
-# once it has landed rather than once it has departed - the whole point of the airborne
-# row is the "Lands in" countdown - so this has to cover the delay as well as the stretch
-# afterwards where it still says which carousel to walk to.
-LATE_ARRIVAL_ALLOWANCE: Final = timedelta(hours=14)
 
 REFRESH_IDLE_SECONDS: Final = 900
 REFRESH_ACTIVE_SECONDS: Final = 600
@@ -95,16 +87,25 @@ UtcInstant = Annotated[datetime, PlainSerializer(_iso_z, return_type=str)]
 
 class WidgetFlight(BaseModel):
     detail_url: str
-    # For the server's own ranking and refresh cadence. The script never reads it: what
-    # it draws is the pill and the milestone, which are words already chosen.
+    # For the server's own refresh cadence. The script never reads it: what it draws is
+    # the pill and the milestone, which are words already chosen.
     phase: Phase
-    title: str
-    subtitle: str | None
+    logo_url: str
+    number: str
+    route: str
     status_label: str
     status_tone: str
+    # The one line of the card that matters in this phase: the day it leaves while that
+    # is still days off, then the time, gate and seat, then the gate at the other end.
+    detail: str | None
     milestone_label: str | None
+    # A milestone is either an instant the phone counts to, or a figure handed over
+    # ready-made: the belt, once there is nothing left to count to.
     milestone_to: UtcInstant | None
-    progress_percent: int | None
+    milestone_text: str | None
+    # What the label becomes once `milestone_to` has gone by, so the phone can turn
+    # "Lands in" into "Due to land" between reloads the way the page does.
+    milestone_due: str | None
 
 
 class WidgetPayload(BaseModel):
@@ -228,36 +229,25 @@ async def last_seen(session: AsyncSession) -> datetime | None:
 
 
 async def load_flight_rows(session: AsyncSession, now: datetime) -> list[FlightRow]:
-    """Active bookings around `now`, each with its newest snapshot."""
-    bookings = (
-        await session.scalars(
-            select(Booking)
-            .where(
-                Booking.status == BookingStatus.ACTIVE,
-                # Measured against the schedule plus the longest delay worth still
-                # showing, so a flight running hours late stays on the widget until it
-                # has actually landed rather than vanishing while it is still in the air.
-                or_(
-                    Booking.scheduled_arrival_utc >= now - LATE_ARRIVAL_ALLOWANCE,
-                    and_(
-                        Booking.scheduled_arrival_utc.is_(None),
-                        Booking.scheduled_departure_utc >= now - LATE_ARRIVAL_ALLOWANCE,
-                    ),
-                ),
-            )
-            .order_by(Booking.scheduled_departure_utc)
-            .limit(CANDIDATE_LIMIT)
-        )
-    ).all()
+    """Every flight the board still has on it at `now`, each with its newest snapshot.
+
+    The same two lists the board reads, cut by the same rule: a flight stays until
+    `off_board_at`, whatever its status says, so one the poller has already closed is
+    still here while someone is walking off it, and one the feed lost goes when the
+    board files it rather than hours later.
+    """
+    bookings = await booking_repo.list_bookings(session, statuses=[BookingStatus.ACTIVE])
+    bookings += await booking_repo.list_recently_flown(session, MAX_FLIGHTS)
     if not bookings:
         return []
 
     latest = await booking_repo.latest_snapshots(session, [booking.id for booking in bookings])
-    return [(booking, latest.get(booking.id)) for booking in bookings]
+    rows = [(booking, latest.get(booking.id)) for booking in bookings]
+    return [(booking, snap) for booking, snap in rows if views.off_board_at(booking, snap) >= now]
 
 
 async def load_zones(session: AsyncSession, rows: Sequence[FlightRow]) -> dict[str, str]:
-    """The zone at each flight's origin, for the one pill that names a day."""
+    """The zone at each flight's origin, for the day and the time it leaves."""
     zones: dict[str, str] = {}
     for booking, _ in rows:
         if booking.origin_iata not in zones:
@@ -288,7 +278,7 @@ def build_payload(
     degraded_reason: str | None = None,
 ) -> WidgetPayload:
     origins = zones or {}
-    ranked: list[tuple[int, datetime, WidgetFlight]] = []
+    ordered: list[tuple[datetime, WidgetFlight]] = []
     observed: list[datetime] = []
     for booking, snapshot in rows:
         flight = _flight(
@@ -299,13 +289,12 @@ def build_payload(
             base_url=base_url,
             origin_tz=origins.get(booking.origin_iata, FALLBACK_TZ),
         )
-        ranked.append(
-            (views.phase_rank(flight.phase), departure_estimate(booking, snapshot), flight)
-        )
+        ordered.append((departure_estimate(booking, snapshot), flight))
         if flight.phase in PHASES_IMMINENT and snapshot is not None and snapshot.observed_at:
             observed.append(snapshot.observed_at)
-    ranked.sort(key=lambda row: (row[0], row[1]))
-    flights = [flight for _, _, flight in ranked[:MAX_FLIGHTS]]
+    # The board's order: by the time each is now leaving, landed or not.
+    ordered.sort(key=lambda row: row[0])
+    flights = [flight for _, flight in ordered[:MAX_FLIGHTS]]
 
     reason = degraded_reason or _stale_reason(min(observed, default=None), now)
     return WidgetPayload(
@@ -327,59 +316,74 @@ def _flight(
 ) -> WidgetFlight:
     phase = compute_phase(booking, snapshot, now)
     pill = views.status(phase, booking, snapshot, now=now, origin_tz=origin_tz)
-    next_up = views.milestone(phase, booking, snapshot, now=now)
+    parked = views.at_the_gate(phase, booking, snapshot, now)
+
+    label: str | None = None
+    due: str | None = None
+    text: str | None = None
+    target: datetime | None = None
+    if parked:
+        # The card's footer once the aircraft is parked: the belt, or the dash that
+        # says nobody has named one yet.
+        label, text = "Bags", views.dash(snapshot.baggage_claim if snapshot else None)
+    elif views.watched(phase):
+        next_up = views.milestone(phase, booking, snapshot, now=now)
+        if next_up is not None:
+            label = views.milestone_label(next_up, now)
+            due = views.DUE.get(next_up.label, next_up.label)
+            target = next_up.target
+
     return WidgetFlight(
         detail_url=f"{base_url}/f/{booking.id}",
         phase=phase,
-        title=(
-            f"{booking.marketing_carrier}{booking.marketing_number}"
-            f"  {booking.origin_iata} → {views.destination_iata(booking, snapshot)}"
-        ),
-        subtitle=_subtitle(phase, booking, snapshot),
+        logo_url=views.logo_url(booking.marketing_carrier),
+        number=f"{booking.marketing_carrier}{booking.marketing_number}",
+        route=f"{booking.origin_iata} → {views.destination_iata(booking, snapshot)}",
         status_label=pill.label,
         status_tone=pill.tone,
-        milestone_label=views.milestone_label(next_up, now) if next_up else None,
-        milestone_to=next_up.target if next_up else None,
-        # Only while airborne: the feed reports 0 on the ground and 100 after landing,
-        # either of which draws a bar that says nothing.
-        progress_percent=progress_estimate(booking, snapshot, now) if phase == AIRBORNE else None,
+        detail=_detail(phase, booking, snapshot, parked=parked, origin_tz=origin_tz),
+        milestone_label=label,
+        milestone_to=target,
+        milestone_text=text,
+        milestone_due=due,
     )
 
 
-def _subtitle(phase: Phase, booking: Booking, snapshot: FlightSnapshot | None) -> str | None:
-    """Gate, terminal or carousel, whichever is the one to walk towards now."""
+def _detail(
+    phase: Phase,
+    booking: Booking,
+    snapshot: FlightSnapshot | None,
+    *,
+    parked: bool,
+    origin_tz: str,
+) -> str | None:
+    """What the card says that matters most right now, on one line.
+
+    Days out, the day it leaves. On the day, the time it now leaves with the gate and
+    the seat to find. Once it has pushed back the origin is behind it, so the line turns
+    to the gate at the other end; parked, the belt has the milestone's place and only
+    the terminal is left to say.
+    """
     if phase == CANCELLED:
         return None
-    if phase == DIVERTED:
-        bound_for = views.destination_iata(booking, snapshot)
-        return f"Diverted to {bound_for}" if bound_for != booking.dest_iata else "Diverted"
+    departure = departure_estimate(booking, snapshot)
+    if phase == UPCOMING:
+        return views.at(departure, origin_tz, with_date=True)
 
     parts: list[str] = []
-    if phase == LANDED:
-        if snapshot and snapshot.baggage_claim:
-            parts.append(f"Bag claim {snapshot.baggage_claim}")
-        if snapshot and snapshot.terminal_destination:
-            parts.append(f"Terminal {snapshot.terminal_destination}")
-        return " · ".join(parts) if parts else "Landed"
-
-    if phase == AIRBORNE:
-        if snapshot and snapshot.gate_destination:
-            parts.append(f"Gate {snapshot.gate_destination}")
-        if snapshot and snapshot.terminal_destination:
-            parts.append(f"Terminal {snapshot.terminal_destination}")
-        return " · ".join(parts) if parts else None
-
-    # The aircraft has left the origin gate, so naming it would send someone backwards.
-    if phase == TAXIING:
-        return None
-
-    if snapshot and snapshot.gate_origin:
-        parts.append(f"Gate {snapshot.gate_origin}")
-    if snapshot and snapshot.terminal_origin:
-        parts.append(f"Terminal {snapshot.terminal_origin}")
-    if parts:
+    if phase == DAY_OF:
+        parts.append(views.clock(departure, origin_tz))
+        if snapshot and snapshot.gate_origin:
+            parts.append(f"Gate {snapshot.gate_origin}")
+        if booking.seat:
+            parts.append(f"Seat {booking.seat}")
         return " · ".join(parts)
-    return f"Seat {booking.seat}" if booking.seat else None
+
+    if not parked and snapshot and snapshot.gate_destination:
+        parts.append(f"Gate {snapshot.gate_destination}")
+    if snapshot and snapshot.terminal_destination:
+        parts.append(f"Terminal {snapshot.terminal_destination}")
+    return " · ".join(parts) if parts else None
 
 
 def _refresh_seconds(flights: Sequence[WidgetFlight]) -> int:

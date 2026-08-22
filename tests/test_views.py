@@ -28,6 +28,7 @@ from flighter.views import (
     FlightView,
     Milestone,
     Status,
+    at_the_gate,
     clock,
     day_word,
     destination_iata,
@@ -151,6 +152,25 @@ def test_nothing_known_ahead_is_no_milestone_rather_than_a_guess() -> None:
     taxiing = snapshot(actual_out=DEPARTURE)
     assert milestone(TAXIING, no_arrival, taxiing, now=NOW) is None
     assert milestone(LANDED, no_arrival, snapshot(actual_on=ARRIVAL), now=NOW) is None
+
+
+def test_parked_is_the_gate_confirmed_or_its_time_gone_by() -> None:
+    """The feed confirms on-blocks unreliably, so the gate estimate stands in for it."""
+    now = ARRIVAL
+    down = snapshot(
+        actual_on=ARRIVAL - timedelta(minutes=10), estimated_in=now + timedelta(minutes=5)
+    )
+    assert not at_the_gate(LANDED, booking(), down, now)
+    assert at_the_gate(LANDED, booking(), down, now + timedelta(minutes=5))
+    parked = snapshot(actual_on=ARRIVAL - timedelta(minutes=10), actual_in=now)
+    assert at_the_gate(LANDED, booking(), parked, now - timedelta(minutes=1))
+    # Nothing anywhere says when the gate is, so there is nothing to wait for.
+    nowhere = snapshot(actual_on=ARRIVAL - timedelta(minutes=10))
+    assert at_the_gate(LANDED, booking(scheduled_arrival_utc=None), nowhere, now)
+    # Still in the air, however late: the gate is the milestone, not the belt.
+    assert not at_the_gate(
+        AIRBORNE, booking(), snapshot(actual_off=DEPARTURE), now + timedelta(hours=2)
+    )
 
 
 def test_a_cancelled_flight_counts_to_nothing() -> None:

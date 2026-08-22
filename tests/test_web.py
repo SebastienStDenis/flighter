@@ -717,8 +717,8 @@ def test_terminal_and_gate_share_a_line_and_the_gate_keeps_its_colour(
     gate = "text-plan font-semibold"
     assert card.index(place("Term", "3")) < card.index(place("Gate", "B27", gate))
     assert card.index(place("Gate", "A14", gate)) < card.index(place("Term", "2"))
-    # Bags is a box of the same kind, on the arrival side with the gate it comes after.
-    assert place("Bags", "7") in card and card.count(">Bags</div>") == 1
+    # The belt is not a box: it is the footer's number once the aircraft is parked.
+    assert "Bags" not in card
 
 
 def place(name: str, value: str, tone: str = "") -> str:
@@ -814,7 +814,7 @@ def test_the_board_card_is_the_flight_page_card_with_a_link_on_it(
     inside = slice(board.index("<header>"), board.index("</footer>"))
     on_the_page = slice(page.index("<header>"), page.index("</footer>"))
     assert board[inside] == page[on_the_page]
-    for piece in ("Montreal", 'class="ends"', "B27", "Bags", "Lands in"):
+    for piece in ("Montreal", 'class="ends"', "B27", "Lands in"):
         assert piece in board[inside]
     # What the Details card says stays on the flight page.
     assert "14A" not in board
@@ -1592,6 +1592,59 @@ def test_the_footer_carries_the_words_for_when_its_time_has_passed(
     body = client.get("/f/1").text
     assert ">At the gate in</span>" in body
     assert 'data-due="Due at the gate"' in body
+    # The belt waits for the gate: until then the footer is the countdown to it.
+    assert "Bags" not in body
+
+
+def belt(value: str) -> str:
+    """The footer once parked: the word Bags, then the carousel where the time was."""
+    shown = "" if value != "-" else " text-muted-foreground"
+    return (
+        '<span class="text-sm text-muted-foreground">Bags</span>\n'
+        f'    <span class="ml-auto font-mono text-lg font-bold{shown}">{value}</span>'
+    )
+
+
+def test_a_landed_flight_whose_gate_time_has_passed_shows_the_belt(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On-blocks is the one word the feed often never sends, so the clock stands in."""
+    left = NOW - timedelta(hours=7)
+    overdue = replace_snapshot(
+        actual_out=left,
+        actual_off=left + timedelta(minutes=12),
+        actual_on=NOW - timedelta(minutes=25),
+        estimated_in=NOW - timedelta(minutes=8),
+        baggage_claim="7",
+    )
+    show(
+        monkeypatch,
+        booking(scheduled_departure_utc=left, scheduled_arrival_utc=NOW - timedelta(minutes=8)),
+        overdue,
+    )
+    body = client.get("/f/1").text
+    # The pill says only what the feed has said; the footer says where to walk.
+    assert ">Landed</span>" in body and "Arrived" not in body
+    assert belt("7") in body and "<time" not in body
+
+
+def test_a_parked_flight_with_no_belt_on_file_says_so(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    left = NOW - timedelta(hours=7)
+    parked = replace_snapshot(
+        actual_out=left,
+        actual_off=left + timedelta(minutes=12),
+        actual_on=NOW - timedelta(minutes=40),
+        actual_in=NOW - timedelta(minutes=30),
+    )
+    show(
+        monkeypatch,
+        booking(scheduled_departure_utc=left, scheduled_arrival_utc=NOW - timedelta(minutes=30)),
+        parked,
+    )
+    body = client.get("/f/1").text
+    assert "Arrived" in body and belt("-") in body
 
 
 def test_a_flight_the_feed_lost_has_no_footer_to_grow(
@@ -1654,7 +1707,7 @@ def test_a_flight_just_at_the_gate_stays_on_the_board_a_while(
     )
     body = client.get("/").text
     assert 'class="card' in body and "Flown" not in body
-    assert "Arrived" in body and place("Bags", "7") in body
+    assert "Arrived" in body and belt("7") in body
 
 
 def test_a_flight_long_at_the_gate_is_filed_under_flown(
