@@ -232,11 +232,12 @@
 </div>
 {% endmacro %}
 
-{% macro editable(name, value, field, mono=false) %}
+{% macro editable(name, value, field, mono=false, friend=none) %}
 <button class="item w-full py-1 text-left" data-size="xs" type="button"
         onclick="editTicket('{{ field }}')" aria-label="Change {{ name|lower }}">
   <section><p>{{ name }}</p></section>
   <aside class="text-right {{ 'font-mono ' if mono }}{{ 'text-muted-foreground' if value == missing else 'font-medium' }}">
+    {%- if friend %}{{ friend_avatar(friend, "size-4", "text-[0.625rem]") }}{% endif %}
     {{- value -}}
   </aside>
 </button>
