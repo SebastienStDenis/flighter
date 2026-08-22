@@ -12,16 +12,39 @@
 
 {# The one card a person can write on. Each ticket row opens the same dialog on its own
    box: what the ticket says is theirs to correct, and nothing else on the page is. #}
-<div class="card mt-3" data-size="sm">
+<div class="card mt-3 gap-2 py-3" data-size="sm">
   <header class="items-center">
     <h3>Details</h3>
-    <div class="card-action row-span-1">
-      <button class="btn -mr-2.5" data-variant="ghost" data-size="sm" type="button"
+    {# Where this flight already is elsewhere. Each is one tap out of the app, so it is
+       an icon at the top rather than a row of its own among the facts. #}
+    <div class="card-action row-span-1 -mr-2 flex items-center">
+      {% if v.calendar_link %}
+      <a class="btn" data-variant="ghost" data-size="icon-sm" href="{{ v.calendar_link }}"
+         title="Open in Calendar" aria-label="Open in Calendar">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M8 2v4"/><path d="M16 2v4"/>
+          <rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>
+        </svg>
+      </a>
+      {% endif %}
+      {% if v.booking.source_message_id %}
+      <a class="btn" data-variant="ghost" data-size="icon-sm"
+         href="{{ email_url(v.booking.source_message_id) }}"
+         title="Open in Mail" aria-label="Open in Mail">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect width="20" height="16" x="2" y="4" rx="2"/>
+          <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+        </svg>
+      </a>
+      {% endif %}
+      <button class="btn" data-variant="ghost" data-size="sm" type="button"
               onclick="editTicket('confirmation_code')">Edit</button>
     </div>
   </header>
   <section>
-    <div class="item-group -mx-2.5 w-auto">
+    <div class="item-group -mx-2.5 w-auto gap-0">
       {{ m.editable("Confirmation", dash(v.booking.confirmation_code), "confirmation_code", mono=true) }}
       {{ m.editable("Seat", dash(v.booking.seat), "seat", mono=true) }}
       {{ m.editable("Notes", dash(v.booking.notes), "notes") }}
@@ -32,24 +55,6 @@
       {{ m.detail("Operated " ~ ("as" if v.booking.operating_number else "by"),
                   v.booking.operating_carrier ~ (v.booking.operating_number or ""),
                   mono=true, carrier=v.booking.operating_carrier) }}
-      {% endif %}
-      {% if v.calendar_link %}
-      <div class="item py-1" data-size="xs">
-        <section><p>Calendar</p></section>
-        <aside>
-          <a class="btn px-0" data-variant="link" data-size="xs" href="{{ v.calendar_link }}">
-            Open in Calendar</a>
-        </aside>
-      </div>
-      {% endif %}
-      {% if v.booking.source_message_id %}
-      <div class="item py-1" data-size="xs">
-        <section><p>Email</p></section>
-        <aside>
-          <a class="btn px-0" data-variant="link" data-size="xs"
-             href="{{ email_url(v.booking.source_message_id) }}">Open in Mail</a>
-        </aside>
-      </div>
       {% endif %}
     </div>
   </section>
@@ -124,17 +129,18 @@
 
 {% set stop_footer %}
 <form method="post" action="/f/{{ id }}/delete">
-  <button class="btn" data-variant="destructive" type="submit">Stop tracking</button>
+  <button class="btn" data-variant="destructive" type="submit">Confirm</button>
 </form>
-<button class="btn" data-variant="outline" type="button"
-        onclick="this.closest('dialog').close()">Keep it</button>
 {% endset %}
+{# Only the answer that does something is a button. Backing out is the X, which is
+   where a person already looks to leave a dialog. #}
 {{ bc.dialog(
      id='stop-tracking',
      title='Stop tracking ' ~ v.flight_number ~ '?',
-     description='It comes off the board and out of your calendar.',
+     description='This flight will be removed from your board and its calendar entry deleted.',
      footer=stop_footer,
-     close_button=false) }}
+     header_attrs={'class': 'pe-8'},
+     footer_attrs={'class': 'flex-row justify-end'}) }}
 
 <div class="mt-6 mb-6">
   <button class="btn w-full" data-variant="outline" type="button"
