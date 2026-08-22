@@ -356,7 +356,7 @@ function renderSmall(widget, flight, data, result, logos) {
   // the route takes the line under the number instead of shrinking beside it.
   titleRow(widget, flight, logos, 13, false);
   const route = widget.addText(flight.route);
-  route.font = Font.monospacedSystemFont(11);
+  route.font = Font.regularMonospacedSystemFont(11);
   route.textColor = MUTED;
   route.lineLimit = 1;
 
@@ -468,7 +468,7 @@ function titleRow(container, flight, logos, size, withRoute) {
   if (withRoute) {
     row.addSpacer(3);
     const route = row.addText(flight.route);
-    route.font = Font.monospacedSystemFont(size);
+    route.font = Font.regularMonospacedSystemFont(size);
     route.textColor = MUTED;
     route.lineLimit = 1;
     route.minimumScaleFactor = 0.7;
