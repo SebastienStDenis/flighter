@@ -404,12 +404,31 @@
     }
   }
 
+  /* A fieldset is laid out at no less than its widest line, which is a browser's rule
+     for a form that owns the page rather than one folded into a card. Here it means a
+     single long value - an address, a key - carries the panel around it off the side of
+     a narrow screen, taking the rows that would have fitted with it, instead of being
+     truncated by the row it sits in. Nothing in this app is worth widening a card for. */
+  fieldset {
+    min-inline-size: 0;
+  }
+
   /* The button that opens onto the boxes. It is a summary rather than a button so the
      form behind it needs no script to appear. */
   /* Explicitly block: a summary picks up inline-flex from elsewhere in the sheet, which
      puts the button beside what it is meant to sit under. */
+  /* Reading what a setting is set to is not asking to change it, so the row carries the
+     value and the button carries the gesture. It is the summary that stops taking the
+     pointer rather than the value inside it, because the air beside a short value is as
+     much a miss as the value itself; the controls in it take the pointer back and are
+     then the only way in. The keyboard is untouched - the summary is still what tabbing
+     lands on and what Enter opens - and so is a browser with no script. */
   .reveal > summary {
-    @apply block cursor-pointer list-none;
+    @apply pointer-events-none block cursor-pointer list-none;
+  }
+
+  .reveal > summary :is(.btn, button) {
+    @apply pointer-events-auto;
   }
 
   .reveal > summary::-webkit-details-marker {
@@ -430,8 +449,12 @@
 
   /* Basecoat sizes its accordion for a page of prose. Here a disclosure sits inside a
      step or a card, where that much air reads as a gap rather than as grouping. */
+  /* Centred, because Basecoat starts its chevron at the top of the first line for a
+     summary that runs to several. Every one of these is a single phrase, and against
+     one line the arrow sits high by half the difference between its 16px and the line
+     it is meant to be pointing at. */
   .accordion-tight > details > summary {
-    @apply py-2.5;
+    @apply items-center py-2.5;
   }
 
   .accordion-tight > details > :not(summary) {
