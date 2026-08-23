@@ -320,6 +320,13 @@
     @apply rotate-180;
   }
 
+  /* A credential that is on file. There is nothing to print - it is never rendered back
+     - so a bar stands where the value would be rather than a row of dots pretending to
+     be the right length. */
+  .secret-bar {
+    @apply inline-block h-3.5 w-28 shrink-0 rounded-full bg-muted;
+  }
+
   /* A field's name sits a step under the heading of the section holding it, so a card
      reads as a title with settings under it rather than as a list of equals. Scoped to
      this page: Basecoat's own 14px label is right on a form that is the whole screen. */
@@ -352,11 +359,15 @@
     @apply hidden;
   }
 
-  /* Open, the boxes stand where what they replace was standing, and throwing the
-     account away is not offered beside the form for keeping it. Cancel is what puts
-     both back, so the row is never half-swapped. */
-  .reveal[open] > summary,
-  .editing:has(.reveal[open]) > .removable {
+  /* Open, the boxes stand where what they replace was standing. Cancel is what puts it
+     back, so the row is never half-swapped. */
+  .reveal[open] > summary {
+    @apply hidden;
+  }
+
+  /* The button that posts this sits up beside Edit; this is only the form it submits.
+     With no script there is no such button, so the form shows itself instead. */
+  .removable {
     @apply hidden;
   }
 

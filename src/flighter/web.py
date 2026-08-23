@@ -484,6 +484,10 @@ def create_app(settings: Settings) -> FastAPI:
             "budget": await budget_status(session),
             "saved": "saved" in request.query_params,
             "tab": request.query_params.get("tab"),
+            # Which account row to come back open on. A save reloads the page so the row
+            # redraws with what it now holds, and folding it shut on the way would hide
+            # the very thing that just changed.
+            "opened": request.query_params.get("open"),
             "error": None,
         }
 

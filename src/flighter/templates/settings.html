@@ -10,6 +10,10 @@
 
 <h1 class="mb-4 text-xl font-semibold tracking-tight">Settings</h1>
 
+{# Remove is drawn inside a summary, where only a script can keep a press from folding
+   the row instead. Without one, the plain form below each account is what shows. #}
+<noscript><style>.removable { display: block; }</style></noscript>
+
 {% if error %}
 <div class="alert mb-3" data-variant="destructive" role="alert">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -50,21 +54,32 @@
    dots and not a box, because a box invites typing into something that is already set
    and cannot be read back. #}
 {% macro stored(field) %}
-<div class="flex items-baseline justify-between gap-3">
+<div class="flex items-center justify-between gap-3">
   <span class="shrink-0 text-[0.8125rem] font-medium">{{ field.label }}</span>
+  {% if field.value %}
   <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
-    {{- field.value if field.value else '••••••••••' -}}</span>
+    {{- field.value -}}</span>
+  {% else %}
+  {# Nothing to print: the value is on file and is never rendered back, so what stands
+     in for it is a bar rather than a string pretending to be one. #}
+  <span class="secret-bar" aria-hidden="true"></span>
+  <span class="sr-only">Saved</span>
+  {% endif %}
 </div>
 {% endmacro %}
 
-{% macro box(field) %}
+{# What is already set is put back in the box, except where it is a secret: those are
+   never rendered into the page, so the dots stand for them and an empty box means
+   "leave it alone". #}
+{% macro box(field, ready=False) %}
 <div role="group" class="field">
   <label for="{{ field.name }}">{{ field.label }}</label>
   <input type="{{ field.type|default('password') }}" id="{{ field.name }}"
          name="{{ field.name }}" class="font-mono"
          autocomplete="{{ field.autocomplete|default('off') }}"
          {% if field.help %}aria-describedby="{{ field.name }}-help"{% endif %}
-         placeholder="{{ field.hint|default('') }}">
+         value="{{ field.value|default('') }}"
+         placeholder="{{ field.hint or ('••••••••••' if ready and not field.value else '') }}">
   {% if field.help %}
   <p id="{{ field.name }}-help" class="text-xs">{{ field.help|safe }}</p>
   {% endif %}
@@ -76,7 +91,7 @@
    to read rather than a form to be careful around. Each stays its own form, because
    only a form scoped to one service can say which empty box was meant. #}
 {% macro account(key, name, ready, fields, detail='', todo='Not connected', tone='quiet') %}
-<details class="setting">
+<details class="setting"{{ ' open' if opened == key }}>
   <summary>
     <span class="min-w-0 flex-1">
       <span class="block font-medium">{{ name }}</span>
@@ -98,26 +113,33 @@
           {% for field in fields %}{{ stored(field) }}{% endfor %}
         </div>
         {# Where Save and Cancel stand once it is open, so the row of buttons is in the
-           same place whichever of the two the row is showing. #}
-        <div class="mt-4">
+           same place whichever of the two the row is showing. Remove sits beside Edit
+           rather than under it, and is drawn here so the two line up; the form that
+           actually posts it is below, outside this summary. #}
+        <div class="mt-4 flex items-center gap-2">
           <span class="btn" data-variant="outline" data-size="sm">Edit</span>
+          <button class="btn text-stop" data-variant="ghost" data-size="sm" type="button"
+                  onclick="removeAccount(event, '{{ key }}')">Remove</button>
         </div>
       </summary>
       <form method="post" action="/settings/credentials">
         <input type="hidden" name="service" value="{{ key }}">
         <fieldset class="fieldset gap-4">
-          {% for field in fields %}{{ box(field) }}{% endfor %}
+          {% for field in fields %}{{ box(field, ready) }}{% endfor %}
         </fieldset>
         <div class="mt-4 flex items-center gap-2">
           <button class="btn" data-size="sm" type="submit">Save</button>
           <button class="btn" data-variant="ghost" data-size="sm" type="button"
-                  onclick="this.closest('details').open = false">Cancel</button>
+                  onclick="cancelEdit(this)">Cancel</button>
           <p class="save-error min-w-0 flex-1 text-xs text-stop" role="alert"></p>
         </div>
       </form>
     </details>
     {{ caller() if caller }}
-    <form class="removable mt-3" method="post" action="/settings/credentials">
+    {# The button for this is drawn up in the summary beside Edit. Kept out of the way
+       rather than styled away, so a browser with no script still has one to press. #}
+    <form class="removable mt-3" id="{{ key }}-remove" method="post"
+          action="/settings/credentials">
       <input type="hidden" name="service" value="{{ key }}">
       <button class="btn text-stop" data-variant="ghost" data-size="sm" type="submit"
               name="forget" value="1">Remove</button>
@@ -237,7 +259,9 @@
     <section>
       <fieldset>
         <legend class="sr-only">Import flag colour</legend>
-        <div class="flex flex-wrap justify-between gap-1">
+        {# The 44px a thumb needs leaves 6px of air above the 32px circle drawn in it,
+           which reads as a gap the other cards do not have. This takes it back. #}
+        <div class="-mt-1.5 flex flex-wrap justify-between gap-1">
           {% for colour in flag_colours %}
           <label class="flag-target">
             <input type="radio" class="peer sr-only" name="imap_flag_colour"
@@ -302,18 +326,17 @@
           {# The one preference that is not saved the moment it changes: an address being
              typed is half an address most of the way through, and every keystroke of it
              would be posted and followed. Save is what commits it. #}
-          <details class="reveal" data-manual-save>
+          <details class="reveal" id="address-setting" data-manual-save>
             <summary>
               <span class="flex items-center justify-between gap-3">
                 <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
                   {{- detected_base_url -}}</span>
                 <span class="flex shrink-0 gap-2">
-                  <span class="btn" data-variant="outline" data-size="sm">
-                    {{- 'Edit' if manual else 'Override' -}}</span>
-                  {% if manual %}
+                  <span class="btn" data-variant="outline" data-size="sm"
+                        id="address-edit-label">{{ 'Edit' if manual else 'Override' }}</span>
                   <button class="btn" data-variant="ghost" data-size="sm" type="button"
-                          onclick="revertAddress(event)">Revert</button>
-                  {% endif %}
+                          id="address-revert" onclick="revertAddress(event)"
+                          {{- ' hidden' if not manual }}>Revert</button>
                 </span>
               </span>
             </summary>
@@ -340,7 +363,7 @@
         <div role="group" class="field">
           <label for="aeroapi_monthly_cap_usd">Monthly limit (USD)</label>
           {# A figure half typed is a different limit, so this one commits on Save too. #}
-          <details class="reveal" data-manual-save>
+          <details class="reveal" data-manual-save data-prefix="$">
             <summary>
               <span class="flex items-center justify-between gap-3">
                 <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
@@ -592,25 +615,44 @@
     // Inside a summary, so without this the row would fold open on its way out.
     event.preventDefault();
     event.stopPropagation();
-    var button = event.currentTarget;
     var box = document.getElementById("public_base_url");
     box.value = "";
-    box.defaultValue = "";
     if (!(await saveSettings())) return;
-    // There is no override left to revert, so the row goes back to saying what it is
-    // following. The placeholder is the worked-out address the server put there.
-    var summary = box.closest("details").querySelector("summary");
-    summary.querySelector(".font-mono").textContent = box.placeholder;
-    summary.querySelector(".btn").textContent = "Override";
-    button.remove();
-    var help = document.getElementById("url-help");
-    help.querySelector('[data-when="manual"]').hidden = true;
-    help.querySelector('[data-when="auto"]').hidden = false;
+    showAddressState();
   }
 
-  function saveField(button) {
-    saveSettings();
-    button.closest("details").open = false;
+  // Whether there is an override is what the row says about itself, and nothing reloads
+  // to redraw it. An empty box means the address is being followed rather than set, and
+  // the placeholder is the followed one the server worked out.
+  function showAddressState() {
+    var box = document.getElementById("public_base_url");
+    var manual = box.value.trim().length > 0;
+    box.defaultValue = box.value;
+    box.closest("details").querySelector("summary .font-mono").textContent = manual
+      ? box.value.trim()
+      : box.placeholder;
+    document.getElementById("address-edit-label").textContent = manual ? "Edit" : "Override";
+    document.getElementById("address-revert").hidden = !manual;
+    var help = document.getElementById("url-help");
+    help.querySelector('[data-when="manual"]').hidden = !manual;
+    help.querySelector('[data-when="auto"]').hidden = manual;
+  }
+
+  async function saveField(button) {
+    if (!(await saveSettings())) return;
+    var details = button.closest("details");
+    var box = details.querySelector("input");
+    if (details.id === "address-setting") {
+      showAddressState();
+    } else {
+      var typed = box.value.trim();
+      box.defaultValue = box.value;
+      details.querySelector("summary .font-mono").textContent =
+        details.dataset.prefix === "$"
+          ? "$" + Number(typed || 0).toFixed(2)
+          : typed || box.placeholder;
+    }
+    details.open = false;
   }
 
   // defaultValue is what the server rendered, which is what "cancel" means here.
@@ -672,7 +714,9 @@
         headers: { Accept: "application/json" },
       });
       if (response.ok) {
-        location.assign("/settings?saved=1&tab=connections");
+        // Back on the row that was just saved, open, so what changed is what you see.
+        var service = form.querySelector('input[name="service"]').value;
+        location.assign("/settings?saved=1&tab=connections&open=" + service);
         return;
       }
       var answer = await response.json().catch(function () {
@@ -688,6 +732,27 @@
   function setBusy(button, busy) {
     button.disabled = busy;
     button.classList.toggle("is-busy", busy);
+  }
+
+  // Cancelling puts the boxes back to what the server drew, so reopening Edit does not
+  // show yesterday's half-typed attempt.
+  function cancelEdit(button) {
+    var details = button.closest("details");
+    details.querySelectorAll("input").forEach(function (box) {
+      box.value = box.defaultValue;
+    });
+    details.querySelector(".save-error").textContent = "";
+    details.open = false;
+  }
+
+  // Remove is drawn beside Edit but posts the form kept below, which is the one that
+  // carries the flag that clears the credentials.
+  function removeAccount(event, key) {
+    // Inside a summary, so without this the row would fold open on its way out.
+    event.preventDefault();
+    event.stopPropagation();
+    var form = document.getElementById(key + "-remove");
+    form.requestSubmit(form.querySelector('button[name="forget"]'));
   }
 
   async function copyText(button, id) {
