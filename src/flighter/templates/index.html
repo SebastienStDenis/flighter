@@ -38,9 +38,7 @@
       </svg>
     </figure>
     <h2>Nothing on the board</h2>
-    {% if set_up %}
-    <p>Add a flight, or flag a booking confirmation.</p>
-    {% else %}
+    {% if not set_up %}
     <p>Nothing is connected yet. Connect a service, then flag a booking confirmation.</p>
     {% endif %}
   </header>
@@ -48,7 +46,8 @@
      its own padding, which inside a line of prose reads as a hole around the words. #}
   {% if not set_up %}
   <section class="mt-4">
-    <a class="btn" data-variant="outline" data-size="sm" href="/settings">Settings</a>
+    <a class="btn" data-variant="outline" data-size="sm"
+       href="/settings?tab=connections">Accounts</a>
   </section>
   {% endif %}
 </section>
@@ -71,7 +70,6 @@
       </svg>
     </figure>
     <h2>No friends flying soon</h2>
-    <p>Open any flight and change its owner to a friend.</p>
   </header>
 </section>
 {% endif %}
@@ -94,7 +92,6 @@
       </svg>
     </figure>
     <h2>No flown flights yet</h2>
-    <p>Past flights, yours and friends', will collect here.</p>
   </header>
 </section>
 {% endif %}

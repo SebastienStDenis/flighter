@@ -72,6 +72,11 @@
   --input: oklch(0.885 0.008 258);
   --ring: oklch(0.62 0.09 250);
 
+  /* Lucide's own external-link, carried as an image because it is painted after a
+     link rather than written into one. Masked rather than drawn, so it takes the colour
+     of the words it follows in either scheme. */
+  --external-link-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>');
+
   --quiet: oklch(0.47 0.014 258);
   --plan: oklch(0.48 0.13 250);
   --live: oklch(0.495 0.16 300);
@@ -464,6 +469,22 @@
      With no script there is no such button, so the form shows itself instead. */
   .removable {
     @apply hidden;
+  }
+
+  /* A link that leaves the app says so. Not on a button: one that is already a target
+     the size of a thumb is not asking to be told apart from the words around it. */
+  a[target='_blank']:not(.btn)::after {
+    @apply ms-1 inline-block size-3 align-[-0.05em] content-[''];
+    background-color: currentColor;
+    mask: var(--external-link-icon) center / contain no-repeat;
+  }
+
+  /* The line under a box explains that box, so it sits closer to it than the next field
+     does. Basecoat spaces everything in a field alike, which leaves the note as far from
+     what it explains as from what comes after it. Written at Basecoat's own shape, or
+     the rule it sets this with outranks a shorter one and the note keeps its distance. */
+  :is(.field > p, .field section > p):last-child {
+    @apply -mt-1.5;
   }
 
   /* Basecoat animates the height a disclosure opens to but leaves what is inside it

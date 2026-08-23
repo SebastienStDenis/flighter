@@ -2184,7 +2184,7 @@ def test_the_calendars_are_not_asked_for_until_there_is_an_account(
         options = fresh.get("/settings/calendars").text
 
     assert asked is False
-    assert "Connect iCloud under Accounts to" in body
+    assert "Connect iCloud in" in body
     assert CALENDARS[0].url not in options
 
 
@@ -2200,7 +2200,8 @@ def test_neither_job_can_be_switched_on_without_the_account_it_runs_on(
         assert switch is not None
         assert "disabled" in switch.group()
         assert "checked" not in switch.group()
-    assert body.count("Connect iCloud under Accounts to") == 2
+    assert body.count("Connect iCloud in") == 2
+    assert body.count('href="/settings?tab=connections"') == 2
 
 
 def test_a_picker_with_nothing_stored_opens_on_the_first_calendar(
