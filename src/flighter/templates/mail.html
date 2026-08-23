@@ -31,9 +31,11 @@
    same card with the buttons that make it: the badge is what says it is waiting, because
    a page that shouts at a person about a receipt they flagged by mistake is a page they
    stop opening. #}
-{% for title, group in [("Needs attention", waiting), ("Recent", history)] %}
-{% if group %}
-<h2 class="mt-6 mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase first:mt-0">
+{# Empty groups are filtered in the loop rather than skipped inside it, so `loop.first`
+   means the first group actually drawn: the heading above it needs no gap of its own,
+   because the page's own title already keeps one. #}
+{% for title, group in [("Needs attention", waiting), ("Recent", history)] if group %}
+<h2 class="{{ 'mt-0' if loop.first else 'mt-6' }} mb-2 text-xs font-semibold text-muted-foreground">
   {{- title -}}</h2>
 <div class="item-group gap-2">
   {% for v in group %}
@@ -90,7 +92,6 @@
   </div>
   {% endfor %}
 </div>
-{% endif %}
 {% endfor %}
 
 {% endif %}

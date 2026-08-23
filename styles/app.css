@@ -363,6 +363,23 @@
     @apply rotate-180;
   }
 
+  /* A tab panel opens the same distance under the picker as its cards keep from each
+     other, so the first card is not held closer to the tabs than the rest are to it.
+     Basecoat's own gap is 8px, which is the one distance on the page that matches
+     nothing else on it. */
+  .settings .tabs {
+    @apply gap-3;
+  }
+
+  /* A card that opens onto a divided list starts it where any other content would start.
+     The rows carry their own padding so that a divider sits centred between two of them,
+     and on the first row that padding lands on top of the card's own gap and reads as a
+     hole under the heading. Only where there is a heading above it: a card that is
+     nothing but the list keeps its rows' padding as the card's own. */
+  .card > header + section > .divide-y {
+    @apply -mt-3 -mb-3;
+  }
+
   /* A credential that is on file. There is nothing to print - it is never rendered back
      - so a bar stands where the value would be rather than a row of dots pretending to
      be the right length. */
@@ -424,7 +441,14 @@
   /* Tighter again for a disclosure hanging off a step, where the step's own padding is
      already holding it apart from the one below. */
   .accordion-inline > details > summary {
-    @apply py-1;
+    @apply w-fit items-center justify-start gap-1 py-1;
+  }
+
+  /* This one is a phrase rather than a row, so its chevron sits against the words. Left
+     to Basecoat it is pushed out to the far edge with the width of the card between it
+     and the thing it opens. */
+  .accordion-inline > details > summary > svg:last-child {
+    @apply ms-0;
   }
 
   .accordion-inline > details > :not(summary) {
