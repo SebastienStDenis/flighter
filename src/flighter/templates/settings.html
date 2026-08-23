@@ -505,8 +505,10 @@
       <div class="relative mt-2">
         <pre id="widget-token"
              class="overflow-x-auto rounded-md bg-muted p-3 pr-20 font-mono text-xs">{{ widget_token }}</pre>
-        {# One line of token, so the button sits centred in it: the same air above it,
-           below it and beside it. #}
+        {# Centred against the line rather than measured down from the top: the token is
+           one line in a box taller than the button, and a figure that happens to land
+           near the middle is not the middle. What is left beside it is what centring
+           leaves above and below it. #}
         <div class="absolute top-1/2 right-1 -translate-y-1/2">
           {{ m.copy_button('widget-token') }}</div>
       </div>

@@ -229,10 +229,11 @@
   <aside class="gap-2 text-right {{ 'font-mono ' if mono }}{{ 'text-muted-foreground' if value == missing else 'font-medium' }}">
     {%- if carrier %}{{ logo(carrier, "size-4") }}{% endif -%}
     {%- if friend %}{{ friend_avatar(friend, "size-4", "text-[0.625rem]") }}{% endif -%}
-    {%- if copy %}<span id="{{ copy }}">{{ value }}</span>
-    {#- The button is taller than the line it sits on, so the row keeps the height of the
-        rows without one. #}
-    {{- copy_button(copy, size='icon-xs', classes='-my-0.5') }}
+    {#- The button leads the value, clear of the row's right edge where the eye lands on
+        the value itself. It is taller than the line it sits on, so the row keeps the
+        height of the rows without one. #}
+    {%- if copy %}{{ copy_button(copy, size='icon-xs', classes='-my-0.5') }}
+    <span id="{{ copy }}">{{ value }}</span>
     {%- else %}{{ value }}{% endif -%}
   </aside>
 </div>
