@@ -32,8 +32,9 @@ from .caldav import CalendarClient, CalendarUnavailable, Collection, macos_calen
 from .checks import check_calendar, check_service
 from .config import CREDENTIALS, SERVICES, Settings, mint_widget_token, write_secrets
 from .db import get_session, session_scope
-from .mail import FLAG_COLOURS, message_url
+from .mail import FLAG_COLOURS, IDLE_CYCLE_SECONDS, message_url
 from .models import BookingSource, BookingStatus, FlightEvent
+from .notify import NOTIFICATION_CHOICES, NOTIFICATION_FLAGS
 from .views import FlightView, build_views
 from .widget import connect_url, last_seen, script_source
 from .widget import router as widget_router
@@ -59,7 +60,10 @@ LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 SETTINGS_TABS = ("connections", "preferences", "widget")
 
 # The preferences a tickbox turns on, which is what makes an absent one meaningful.
-FRIEND_FLAGS = (
+PREFERENCE_FLAGS = (
+    "email_import_enabled",
+    "calendar_sync_enabled",
+    *NOTIFICATION_FLAGS,
     "sync_friend_flights_to_calendar",
     "notify_for_friend_flights",
     "show_friend_flights_in_widget",
@@ -125,6 +129,15 @@ def _first_validation_message(exc: ValidationError) -> str:
     error = exc.errors()[0]
     field = ".".join(str(part) for part in error["loc"]) or "value"
     return f"{field.replace('_', ' ')}: {error['msg']}"
+
+
+def _posted_flag(value: Any) -> str | None:
+    """One switch as the form sent it, or None for a field this form does not carry.
+
+    Starlette hands back an UploadFile for a file part; nothing here posts one, and a
+    preference is never read out of anything but a plain string.
+    """
+    return value if isinstance(value, str) else None
 
 
 def _saved(tab: str) -> RedirectResponse:
@@ -480,7 +493,11 @@ def create_app(settings: Settings) -> FastAPI:
             "widget_last_seen": views.ago(seen, now) if seen else None,
             "widget_connected": seen is not None and now - seen < WIDGET_QUIET_AFTER,
             "log_levels": LOG_LEVELS,
+            "notification_choices": NOTIFICATION_CHOICES,
             "flag_colours": tuple(FLAG_COLOURS),
+            # How often the watcher sweeps when no new mail wakes it, which is what the
+            # import card promises. Whole minutes: nobody is timing it.
+            "mail_sweep_minutes": round(IDLE_CYCLE_SECONDS / 60),
             "budget": await budget_status(session),
             "saved": "saved" in request.query_params,
             "tab": request.query_params.get("tab"),
@@ -503,10 +520,10 @@ def create_app(settings: Settings) -> FastAPI:
             return await CalendarClient(settings).calendars(), None
         except CalendarUnavailable:
             log.warning("could not list the iCloud calendars", exc_info=True)
-            return [], "iCloud did not answer, so its calendars cannot be listed right now."
+            return [], "Check the iCloud connection under Accounts."
         except Exception:
             log.warning("could not list the iCloud calendars", exc_info=True)
-            return [], "Something went wrong listing the calendars on this account."
+            return [], "Check the iCloud connection under Accounts."
 
     @app.get("/settings/calendars")
     async def list_calendars(request: Request) -> Response:
@@ -527,6 +544,42 @@ def create_app(settings: Settings) -> FastAPI:
             },
         )
 
+    async def _remirror_calendar(
+        session: AsyncSession, previous: prefs.Prefs, updated: prefs.Prefs
+    ) -> None:
+        """Re-mirror the calendar after a switch changed which flights belong on it.
+
+        Switched on, the flights it now covers are queued so the next drain writes them.
+        Switched off, the entries already written are taken back out: a calendar holding
+        flights nothing will ever update again is worse than one holding none.
+
+        The wider switch wins. Turning sync off is about every flight, so there is no
+        point asking the friends switch about the same bookings afterwards.
+        """
+        if previous.calendar_sync_enabled != updated.calendar_sync_enabled:
+            friends_only, removing = False, not updated.calendar_sync_enabled
+        elif previous.sync_friend_flights_to_calendar != updated.sync_friend_flights_to_calendar:
+            friends_only, removing = True, not updated.sync_friend_flights_to_calendar
+        else:
+            return
+
+        bookings = await booking_repo.queue_calendar_updates(session, friends_only=friends_only)
+        await session.commit()
+        if not removing:
+            return
+        calendar = CalendarClient(settings)
+        for booking in bookings:
+            try:
+                removed = await calendar.delete(booking)
+            except Exception:
+                log.warning(
+                    "could not remove the calendar event for booking %s", booking.id, exc_info=True
+                )
+                continue
+            if removed:
+                booking.calendar_event_uid = None
+                await session.commit()
+
     @app.get("/settings")
     async def settings_page(request: Request, session: SessionDep) -> Response:
         return page(request, "settings.html", await settings_context(request, session))
@@ -540,6 +593,8 @@ def create_app(settings: Settings) -> FastAPI:
         aeroapi_monthly_cap_usd: Annotated[str | None, Form()] = None,
         imap_flag_colour: Annotated[str | None, Form()] = None,
         icloud_calendar_url: Annotated[str | None, Form()] = None,
+        email_import_enabled: Annotated[str | None, Form()] = None,
+        calendar_sync_enabled: Annotated[str | None, Form()] = None,
         sync_friend_flights_to_calendar: Annotated[str | None, Form()] = None,
         notify_for_friend_flights: Annotated[str | None, Form()] = None,
         show_friend_flights_in_widget: Annotated[str | None, Form()] = None,
@@ -550,21 +605,27 @@ def create_app(settings: Settings) -> FastAPI:
         Each card is its own form, so what arrives is a slice rather than the lot, and
         a field nobody sent is one nobody touched.
         """
-        entered = {
+        form = await request.form()
+        entered: dict[str, str | None] = {
+            name: _posted_flag(form.get(name)) for name in NOTIFICATION_FLAGS
+        }
+        entered |= {
             "public_base_url": public_base_url,
             "log_level": log_level.upper() if log_level is not None else None,
             "aeroapi_monthly_cap_usd": aeroapi_monthly_cap_usd,
             "imap_flag_colour": imap_flag_colour,
             "icloud_calendar_url": icloud_calendar_url,
+            "email_import_enabled": email_import_enabled,
+            "calendar_sync_enabled": calendar_sync_enabled,
             "sync_friend_flights_to_calendar": sync_friend_flights_to_calendar,
             "notify_for_friend_flights": notify_for_friend_flights,
             "show_friend_flights_in_widget": show_friend_flights_in_widget,
         }
         # A cleared checkbox posts nothing at all, which everywhere else on this route
-        # means "leave it alone". The preferences form carries all three every time, so
-        # on that form alone an absent one is a box somebody unticked.
+        # means "leave it alone". The preferences form carries every switch on it each
+        # time, so on that form alone an absent one is a box somebody unticked.
         if tab == "preferences":
-            for name in FRIEND_FLAGS:
+            for name in PREFERENCE_FLAGS:
                 entered[name] = entered[name] or "false"
         posted = {name: value.strip() for name, value in entered.items() if value is not None}
         previous = prefs.current()
@@ -588,27 +649,7 @@ def create_app(settings: Settings) -> FastAPI:
             context["posted"] = context["posted"] | posted
             context["tab"] = tab
             return page(request, "settings.html", context, status_code=400)
-        calendar_toggled = (
-            previous.sync_friend_flights_to_calendar != updated.sync_friend_flights_to_calendar
-        )
-        if calendar_toggled:
-            friend_bookings = await booking_repo.queue_friend_calendar_updates(session)
-            await session.commit()
-            if not updated.sync_friend_flights_to_calendar:
-                calendar = CalendarClient(settings)
-                for booking in friend_bookings:
-                    try:
-                        removed = await calendar.delete(booking)
-                    except Exception:
-                        log.warning(
-                            "could not remove the calendar event for friend booking %s",
-                            booking.id,
-                            exc_info=True,
-                        )
-                        continue
-                    if removed:
-                        booking.calendar_event_uid = None
-                        await session.commit()
+        await _remirror_calendar(session, previous, updated)
         # Applied here rather than only at boot, so turning the logs up to find out what
         # is going wrong does not need the restart that would clear the evidence.
         logging.getLogger().setLevel(updated.log_level.upper())

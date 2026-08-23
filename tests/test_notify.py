@@ -161,6 +161,79 @@ async def test_friend_notifications_follow_the_preference(
     assert recorder.only["message"] == "Gate B22"
 
 
+@pytest.mark.parametrize(
+    ("field", "flight_event"),
+    [
+        ("notify_gate_changes", event(EventKind.GATE_ASSIGNED, new="B22")),
+        ("notify_time_changes", event(EventKind.DEPARTURE_DELAYED, new=DELAYED.isoformat())),
+        ("notify_departure_and_landing", event(EventKind.DEPARTED, new=DELAYED.isoformat())),
+        ("notify_baggage_claim", event(EventKind.BAGGAGE_CLAIM_ASSIGNED, new="3")),
+        ("notify_disruptions", event(EventKind.CANCELLED, new="true")),
+    ],
+)
+async def test_a_class_of_news_switched_off_is_not_pushed(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, field: str, flight_event: FlightEvent
+) -> None:
+    """Each switch answers for its own kinds and for nobody else's."""
+    monkeypatch.setattr(prefs, "_current", Prefs().model_copy(update={field: False}))
+    assert (await push(settings, flight_event)).requests == []
+
+    monkeypatch.setattr(prefs, "_current", Prefs())
+    assert (await push(settings, flight_event)).requests != []
+
+
+async def test_the_master_switch_stops_every_push_about_a_trip(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One switch rather than seven, for somebody who wants the phone left alone."""
+    monkeypatch.setattr(
+        prefs, "_current", Prefs().model_copy(update={"notifications_enabled": False})
+    )
+
+    assert (await push(settings, event(EventKind.CANCELLED, new="true"))).requests == []
+
+    recorder = Recorder()
+    notifier = Notifier(settings, transport=recorder.transport)
+    await notifier.mail_imported([booking()], outcome="created")
+    await notifier.mail_failed(message_id="<a@x>", subject="Trip", reason=None)
+    assert recorder.requests == []
+
+
+async def test_the_budget_alarm_is_not_one_of_the_switches(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It is how somebody finds out the board stopped updating, so it is never silenced."""
+    monkeypatch.setattr(
+        prefs, "_current", Prefs().model_copy(update={"notifications_enabled": False})
+    )
+    recorder = Recorder()
+
+    await Notifier(settings, transport=recorder.transport).budget_tripped(
+        Decimal("4.00"), Decimal("4.00")
+    )
+
+    assert recorder.only["title"] == "AeroAPI budget reached"
+
+
+@pytest.mark.parametrize(
+    ("field", "outcome"),
+    [("notify_imports", "created"), ("notify_import_failures", None)],
+)
+async def test_the_import_pushes_follow_their_own_switches(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, field: str, outcome: str | None
+) -> None:
+    monkeypatch.setattr(prefs, "_current", Prefs().model_copy(update={field: False}))
+    recorder = Recorder()
+    notifier = Notifier(settings, transport=recorder.transport)
+
+    if outcome is None:
+        await notifier.mail_failed(message_id="<a@x>", subject="Trip", reason=None)
+    else:
+        await notifier.mail_imported([booking()], outcome=outcome)
+
+    assert recorder.requests == []
+
+
 async def test_an_unreachable_pushover_is_a_failure_the_caller_hears_about(
     settings: Settings,
 ) -> None:

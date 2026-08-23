@@ -28,6 +28,7 @@ from flighter.views import (
     FlightView,
     Milestone,
     Status,
+    ago,
     at_the_gate,
     clock,
     day_word,
@@ -221,6 +222,25 @@ def test_the_figure_never_shows_seconds_and_only_days_past_a_day(
     ahead: timedelta, figure: str
 ) -> None:
     assert until(datetime.now(UTC) + ahead) == figure
+
+
+AGES = [
+    (timedelta(days=3, hours=5), "3d ago"),
+    (timedelta(hours=24, minutes=1), "1d ago"),
+    (timedelta(hours=23, minutes=59), "23h ago"),
+    (timedelta(hours=1, minutes=59), "1h ago"),
+    (timedelta(minutes=59, seconds=59), "59m ago"),
+    (timedelta(seconds=20), "0m ago"),
+]
+
+
+@pytest.mark.parametrize(("elapsed", "reading"), AGES)
+def test_an_age_is_one_unit_and_drops_the_minutes_past_an_hour(
+    elapsed: timedelta, reading: str
+) -> None:
+    """Nobody reading how long ago something happened is counting the minutes in it."""
+    now = datetime.now(UTC)
+    assert ago(now - elapsed, now) == reading
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the page's script")

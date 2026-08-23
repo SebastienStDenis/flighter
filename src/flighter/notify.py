@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from decimal import Decimal
+from typing import Final
 
 import httpx
 
@@ -45,6 +46,48 @@ PRIORITY_NORMAL = 0
 PRIORITY_QUIET = -1
 
 _HIGH_PRIORITY_KINDS = frozenset({EventKind.CANCELLED, EventKind.DIVERTED, EventKind.GATE_CHANGED})
+
+# The preference each kind of change is pushed under. A person chooses between classes of
+# news rather than between ten event kinds, so several kinds share one switch. A kind that
+# is not here is not pushed about at all, which is `events.NOTIFIABLE_KINDS`.
+_NOTIFY_FIELDS: Final = {
+    EventKind.GATE_ASSIGNED: "notify_gate_changes",
+    EventKind.GATE_CHANGED: "notify_gate_changes",
+    EventKind.TERMINAL_CHANGED: "notify_gate_changes",
+    EventKind.DEPARTURE_DELAYED: "notify_time_changes",
+    EventKind.DEPARTURE_MOVED_EARLIER: "notify_time_changes",
+    EventKind.DEPARTED: "notify_departure_and_landing",
+    EventKind.LANDED: "notify_departure_and_landing",
+    EventKind.BAGGAGE_CLAIM_ASSIGNED: "notify_baggage_claim",
+    EventKind.CANCELLED: "notify_disruptions",
+    EventKind.DIVERTED: "notify_disruptions",
+}
+
+# What each switch is called on the settings page, in the order they are drawn. Kept here
+# beside the fields they set, so a switch and what it governs cannot drift apart.
+NOTIFICATION_CHOICES: Final = (
+    ("notify_gate_changes", "Gates and terminals"),
+    ("notify_time_changes", "Delays and earlier departures"),
+    ("notify_departure_and_landing", "Take-off and landing"),
+    ("notify_baggage_claim", "Baggage claim"),
+    ("notify_disruptions", "Cancellations and diversions"),
+    ("notify_imports", "Email imported"),
+    ("notify_import_failures", "Email import errors"),
+)
+
+# Every preference the notifications card posts, master switch first.
+NOTIFICATION_FLAGS: Final = ("notifications_enabled", *(field for field, _ in NOTIFICATION_CHOICES))
+
+
+def wanted(field: str) -> bool:
+    """Whether a push of this class is one somebody has asked to be sent.
+
+    The master switch answers for all of them, so turning it off is one question rather
+    than seven. Only the pushes about a trip go through here; the budget alarm does not.
+    """
+    current = prefs.current()
+    return current.notifications_enabled and bool(getattr(current, field))
+
 
 # The lock screen shows the title above the message, so the title names the flight and
 # the message says what happened, in as few words as still make a sentence.
@@ -164,6 +207,9 @@ class Notifier:
     ) -> None:
         if booking.friend_name and not prefs.current().notify_for_friend_flights:
             return
+        field = _NOTIFY_FIELDS.get(EventKind(event.kind))
+        if field is None or not wanted(field):
+            return
         priority = PRIORITY_HIGH if event.kind in _HIGH_PRIORITY_KINDS else PRIORITY_NORMAL
         await self._send(
             title=flight_label(booking),
@@ -184,6 +230,8 @@ class Notifier:
         Best effort: the ingest log is the record of the decision and is written whether
         or not the phone heard about it, and there is no column to retry a push from.
         """
+        if not wanted("notify_imports"):
+            return
         title, body = _IMPORTED[IngestOutcome(outcome)]
         flights = ", ".join(flight_label(booking) for booking in bookings)
         try:
@@ -206,6 +254,8 @@ class Notifier:
 
         The words come from `notices` so that the push and that page say the same thing.
         """
+        if not wanted("notify_import_failures"):
+            return
         notice = notices.import_failed(subject=subject, reason=reason)
         try:
             await self._send(

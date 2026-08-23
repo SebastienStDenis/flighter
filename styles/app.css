@@ -145,10 +145,46 @@
 }
 
 @layer components {
+  /* One scale, four steps: the page's own heading, a card's, the text inside it, and
+     whatever is supplementary to that. The rules below put the top two on the components
+     rather than on every tag that uses them, so a card is titled the same on every page.
+
+     Basecoat sizes a small card's title down to the body text around it, which leaves a
+     card reading as a list of equals rather than as a title with things under it - and
+     leaves a title the same size as the line explaining it. The second selector is the
+     small card written out at Basecoat's own specificity, because a shorter one loses to
+     it and the title quietly stays at 14px. */
+  .card > header > :is(h2, h3, [data-title], .card-title),
+  .card[data-size='sm'] > header > :is(h2, h3, [data-title], .card-title) {
+    @apply text-base font-semibold tracking-tight;
+  }
+
+  /* The line under that title is supplementary to it, so it reads at the size everything
+     supplementary reads at - the same one the account rows describe themselves at.
+     Basecoat sets it at body size, which on a small card leaves a 14px line under a 16px
+     title and reads as a second heading rather than as a note on the first. */
+  .card > header > :is(p, [data-description], .card-description) {
+    @apply text-xs leading-snug;
+  }
+
   /* Basecoat cuts a row's text off at two lines because its rows are list entries. Here
      a row is as often a step of instructions, and a step cut off cannot be followed. */
   .item p {
     @apply line-clamp-none;
+  }
+
+  /* The line under a row's heading is a step under it, the way the line under a card's
+     heading is. Basecoat draws the two at the same size on everything but its smallest
+     row, so a row reads as one block of text rather than a title and a note. */
+  .item[data-size='sm'] p {
+    @apply text-xs;
+  }
+
+  /* The tightest row is not a list entry here but a fact: a name on the left and its
+     value on the right. Those read at one size, the name quiet because it is muted
+     rather than because it is smaller than the thing it names. */
+  .item[data-size='xs'] p {
+    @apply text-sm;
   }
 
   /* Basecoat ships one destructive badge. A flight has six things it can be, and each
@@ -260,6 +296,13 @@
     background: var(--flag);
   }
 
+  /* The sentence under the swatches names the flag that is armed, and names it in that
+     flag's own colour: the picker above says it that way, so the line saying it back
+     should not have to be read against a row of colours to be believed. */
+  .flag-name {
+    color: var(--flag);
+  }
+
   /* The label is the 44px a thumb needs; the circle drawn inside it is smaller, so the
      mark around the chosen flag sits close to the glyph rather than around the target. */
   .flag-target {
@@ -320,6 +363,23 @@
     @apply rotate-180;
   }
 
+  /* A tab panel opens the same distance under the picker as its cards keep from each
+     other, so the first card is not held closer to the tabs than the rest are to it.
+     Basecoat's own gap is 8px, which is the one distance on the page that matches
+     nothing else on it. */
+  .settings .tabs {
+    @apply gap-3;
+  }
+
+  /* A card that opens onto a divided list starts it where any other content would start.
+     The rows carry their own padding so that a divider sits centred between two of them,
+     and on the first row that padding lands on top of the card's own gap and reads as a
+     hole under the heading. Only where there is a heading above it: a card that is
+     nothing but the list keeps its rows' padding as the card's own. */
+  .card > header + section > .divide-y {
+    @apply -mt-3 -mb-3;
+  }
+
   /* A credential that is on file. There is nothing to print - it is never rendered back
      - so a bar stands where the value would be rather than a row of dots pretending to
      be the right length. */
@@ -331,22 +391,15 @@
     background-color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
   }
 
-  /* A field's name sits a step under the heading of the section holding it, so a card
-     reads as a title with settings under it rather than as a list of equals. Scoped to
-     this page: Basecoat's own 14px label is right on a form that is the whole screen. */
-  .settings .field > label {
-    @apply text-[0.8125rem];
-  }
-
   /* Basecoat scopes the switch's dark thumb to `html.dark`, and this app has no such
      class: the scheme comes from the phone. Without these the thumb stays the page's
      near-black on a dark track and the control reads as empty in both positions. */
   @media (prefers-color-scheme: dark) {
-    .field > input[type='checkbox'][role='switch']:not(:checked)::before {
+    :is(.field > input, .input)[type='checkbox'][role='switch']:not(:checked)::before {
       background-color: var(--foreground);
     }
 
-    .field > input[type='checkbox'][role='switch']:checked::before {
+    :is(.field > input, .input)[type='checkbox'][role='switch']:checked::before {
       background-color: var(--primary-foreground);
     }
   }
@@ -388,7 +441,14 @@
   /* Tighter again for a disclosure hanging off a step, where the step's own padding is
      already holding it apart from the one below. */
   .accordion-inline > details > summary {
-    @apply py-1;
+    @apply w-fit items-center justify-start gap-1 py-1;
+  }
+
+  /* This one is a phrase rather than a row, so its chevron sits against the words. Left
+     to Basecoat it is pushed out to the far edge with the width of the card between it
+     and the thing it opens. */
+  .accordion-inline > details > summary > svg:last-child {
+    @apply ms-0;
   }
 
   .accordion-inline > details > :not(summary) {
@@ -416,22 +476,6 @@
   .step-number {
     @apply grid size-6 shrink-0 place-items-center rounded-full bg-secondary
       font-mono text-xs font-semibold text-muted-foreground;
-  }
-
-  /* Why a setting exists, rather than what to type into it: supplementary by
-     definition, so it is behind a tap and never in the way. A browser that does not
-     know the attribute leaves it closed rather than printing it inline. */
-  [popover] {
-    @apply hidden;
-  }
-
-  [popover]:popover-open {
-    @apply m-auto block w-[min(20rem,calc(100vw-2rem))] rounded-lg border bg-popover
-      p-3 text-sm text-popover-foreground shadow-lg;
-  }
-
-  [popover]::backdrop {
-    @apply bg-black/20;
   }
 
   /* The main action of every screen, inside the thumb's reach and clear of the home

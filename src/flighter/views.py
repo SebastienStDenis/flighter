@@ -684,11 +684,19 @@ class MailImport:
 
 
 def ago(then: datetime, now: datetime) -> str:
-    """`4m ago`, `3d ago`: how long since something last happened."""
-    elapsed = now - then
-    if elapsed >= timedelta(days=1):
-        return f"{elapsed.days}d ago"
-    return f"{duration(elapsed)} ago"
+    """`4m ago`, `3h ago`, `3d ago`: how long since something last happened.
+
+    One unit, always the largest that fits. Minutes stop mattering the moment there are
+    hours to say instead: nobody reading how long ago an email was read is counting them.
+    """
+    minutes = int(max(now - then, timedelta()).total_seconds() // 60)
+    days, rest = divmod(minutes, 1440)
+    hours = rest // 60
+    if days:
+        return f"{days}d ago"
+    if hours:
+        return f"{hours}h ago"
+    return f"{minutes}m ago"
 
 
 async def build_mail_imports(session: AsyncSession, rows: Iterable[IngestLog]) -> list[MailImport]:

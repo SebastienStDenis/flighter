@@ -182,12 +182,18 @@ async def update_ticket(
     return booking
 
 
-async def queue_friend_calendar_updates(session: AsyncSession) -> list[Booking]:
-    result = await session.execute(
-        select(Booking).where(
-            Booking.friend_name.is_not(None), Booking.status != BookingStatus.ARCHIVED
-        )
-    )
+async def queue_calendar_updates(
+    session: AsyncSession, *, friends_only: bool = False
+) -> list[Booking]:
+    """Queue every live booking for a calendar rewrite, or only the friends' ones.
+
+    What a switch on the settings page turns to once it has changed which flights the
+    calendar is meant to hold.
+    """
+    where = [Booking.status != BookingStatus.ARCHIVED]
+    if friends_only:
+        where.append(Booking.friend_name.is_not(None))
+    result = await session.execute(select(Booking).where(*where))
     bookings = list(result.scalars())
     for booking in bookings:
         _record(session, booking, EventKind.BOOKING_EDITED)
