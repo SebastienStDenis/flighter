@@ -1764,6 +1764,31 @@ def test_forgetting_a_connection_clears_every_credential_it_needs(
     assert written == [{"pushover_token": "", "pushover_user_key": ""}]
 
 
+def test_forgetting_icloud_puts_down_the_jobs_that_ran_on_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A switch left on for an account that is gone is one nothing can honour."""
+    record_secrets(monkeypatch)
+    assert prefs.current().calendar_sync_enabled
+    assert prefs.current().email_import_enabled
+
+    client.post("/settings/credentials", data={"service": "icloud", "forget": "1"})
+
+    assert not prefs.current().calendar_sync_enabled
+    assert not prefs.current().email_import_enabled
+
+
+def test_forgetting_another_connection_leaves_those_jobs_alone(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_secrets(monkeypatch)
+
+    client.post("/settings/credentials", data={"service": "pushover", "forget": "1"})
+
+    assert prefs.current().calendar_sync_enabled
+    assert prefs.current().email_import_enabled
+
+
 def test_details_the_service_will_not_take_are_not_kept(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2159,8 +2184,37 @@ def test_the_calendars_are_not_asked_for_until_there_is_an_account(
         options = fresh.get("/settings/calendars").text
 
     assert asked is False
-    assert "Connect iCloud under Accounts to pick a calendar." in body
+    assert "Connect iCloud under Accounts to" in body
     assert CALENDARS[0].url not in options
+
+
+def test_neither_job_can_be_switched_on_without_the_account_it_runs_on(
+    unconfigured: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both run on iCloud, so with no account both switches are off and unflickable."""
+    with build_client(unconfigured, monkeypatch) as fresh:
+        body = fresh.get("/settings").text
+
+    for field in ("calendar_sync_enabled", "email_import_enabled"):
+        switch = re.search(rf'<input[^>]*id="{field}"[^>]*>', body)
+        assert switch is not None
+        assert "disabled" in switch.group()
+        assert "checked" not in switch.group()
+    assert body.count("Connect iCloud under Accounts to") == 2
+
+
+def test_a_picker_with_nothing_stored_opens_on_the_first_calendar(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A calendar showing in the picker is one the page then stores, so it is never a
+    name on screen that nothing behind it agrees with."""
+    monkeypatch.setattr(prefs, "_current", prefs.Prefs(icloud_calendar_url=""))
+
+    options = client.get("/settings/calendars").text
+
+    first, second = CALENDARS[0], CALENDARS[1]
+    assert re.search(rf'value="{re.escape(first.url)}"\s+selected\s+data-default', options)
+    assert "data-default" not in options.split(second.url)[1]
 
 
 def test_the_settings_page_still_opens_when_icloud_cannot_be_reached(

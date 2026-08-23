@@ -40,11 +40,17 @@
 
 {# The switch that puts a whole card's job down. It sits in the card's header rather than
    among the settings it governs, because what it turns off is everything under them, and
-   the card folds away to the heading and this. #}
-{% macro toggle(field, label, governs) %}
+   the card folds away to the heading and this.
+
+   Both jobs run on the iCloud account, so without one there is nothing for the switch to
+   turn on: it is drawn off and cannot be flicked, and the card says what is missing.
+   Removing the account puts the stored preference down too, so the switch is off because
+   the job is off rather than because the page is hiding it. #}
+{% macro toggle(field, label, governs, ready=True) %}
 <label for="{{ field }}" class="sr-only">{{ label }}</label>
 <input class="input" type="checkbox" role="switch" id="{{ field }}" name="{{ field }}"
-       value="true" data-enables="{{ governs }}"{{ ' checked' if posted[field] }}>
+       value="true" data-enables="{{ governs }}"
+       {{- ' checked' if posted[field] and ready }}{{ ' disabled' if not ready }}>
 {% endmacro %}
 
 {# What is on file, shown rather than offered for editing. A stored secret is a block of
@@ -224,13 +230,19 @@
     <header>
       <h3>Calendar Sync</h3>
       <div class="card-action">
-        {{ toggle('calendar_sync_enabled', 'Calendar sync', 'calendar-settings') }}
+        {{ toggle('calendar_sync_enabled', 'Calendar sync', 'calendar-settings',
+                  icloud_ready) }}
       </div>
       <p>Synchronize flights to your calendar.</p>
     </header>
-    <section id="calendar-settings"{{ ' hidden' if not posted['calendar_sync_enabled'] }}>
+    {# Only a card whose switch is on folds away. With no account the switch is off
+       because it has to be, and folding the card on that would take the sentence saying
+       so with it. #}
+    <section id="calendar-settings"
+             {{- ' hidden' if icloud_ready and not posted['calendar_sync_enabled'] }}>
       {% if not icloud_ready %}
-      <p class="text-sm text-muted-foreground">Connect iCloud under Accounts to pick a calendar.</p>
+      <p class="text-sm text-muted-foreground">Connect iCloud under Accounts to
+        synchronize flights to your calendar.</p>
       {% else %}
       {# The options arrive after the page does, so the control is present but held until
          iCloud has answered rather than the whole page waiting on it. The select stays a
@@ -252,11 +264,17 @@
     <header>
       <h3>Email import</h3>
       <div class="card-action">
-        {{ toggle('email_import_enabled', 'Email import', 'import-settings') }}
+        {{ toggle('email_import_enabled', 'Email import', 'import-settings',
+                  icloud_ready) }}
       </div>
       <p>Import flights from flagged emails.</p>
     </header>
-    <section id="import-settings"{{ ' hidden' if not posted['email_import_enabled'] }}>
+    <section id="import-settings"
+             {{- ' hidden' if icloud_ready and not posted['email_import_enabled'] }}>
+      {% if not icloud_ready %}
+      <p class="text-sm text-muted-foreground">Connect iCloud under Accounts to import
+        flights from email.</p>
+      {% else %}
       <fieldset>
         <legend class="sr-only">Import flag colour</legend>
         {# The 44px a thumb needs leaves 6px of air around the 32px circle drawn in it,
@@ -289,6 +307,7 @@
           {{- posted['imap_flag_colour']|capitalize -}}</strong>
         from any iCloud mailbox to import into Flighter. Processes within
         {{ mail_sweep_minutes }} mins.</p>
+      {% endif %}
     </section>
   </div>
 
@@ -694,6 +713,12 @@
     select.disabled = !!failed;
     select.removeAttribute("aria-busy");
     document.getElementById("calendar-spinner").hidden = true;
+    // With nothing picked yet the picker opens on the first calendar the account offers,
+    // and saving it is what makes that the calendar in force rather than only the one on
+    // screen. Flicking the switch on posts this form anyway, so it is only worth doing
+    // here while sync is already running.
+    var sync = document.getElementById("calendar_sync_enabled");
+    if (select.querySelector("[data-default]") && sync.checked) saveSettings();
   })();
 
   // Saving an account goes and asks the service whether the details work, which takes

@@ -702,6 +702,15 @@ def create_app(settings: Settings) -> FastAPI:
             return JSONResponse({"ok": True}) if wants_json else _saved("connections")
         restore = {name: getattr(settings, name) for name in found.fields}
         write_secrets(changed)
+        # Both jobs on the preferences page run on the iCloud account, so throwing it
+        # away puts them down rather than leaving two switches on for work that has
+        # nothing left to do it with. The calendar entries already written stay where
+        # they are: the credentials that could take them back out are the ones just
+        # removed.
+        if forget and service == "icloud":
+            await prefs.save(
+                session, {"calendar_sync_enabled": False, "email_import_enabled": False}
+            )
         # Forgetting is never refused: a credential you are throwing away does not have
         # to work first.
         if not forget:
