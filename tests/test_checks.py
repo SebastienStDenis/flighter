@@ -145,7 +145,7 @@ async def test_a_database_that_will_not_open_is_reported_as_itself(
 async def test_aeroapi_is_not_probed_until_there_is_a_key(unconfigured: Settings) -> None:
     result = await checks._check_aeroapi(unconfigured)
 
-    assert (result.ok, result.detail) == (False, "add a FlightAware key under Connections")
+    assert (result.ok, result.detail) == (False, "add a FlightAware key under Accounts")
 
 
 async def test_a_rejected_aeroapi_key_says_so_rather_than_showing_a_status_code(
@@ -222,9 +222,9 @@ async def test_the_calendar_probe_waits_for_one_to_be_picked(
 ) -> None:
     monkeypatch.setattr(prefs, "_current", Prefs())
 
-    result = await checks._check_calendar(settings)
+    result = await checks.check_calendar(settings)
 
-    assert (result.ok, result.detail) == (False, "pick a calendar under Connections")
+    assert (result.ok, result.detail) == (False, "pick a calendar under Preferences")
 
 
 async def test_the_calendar_probe_finds_the_picked_calendar_on_the_account(
@@ -237,7 +237,7 @@ async def test_the_calendar_probe_finds_the_picked_calendar_on_the_account(
         lambda settings: FakeCalendars(settings, Collection("Flights", CALENDAR_URL)),
     )
 
-    result = await checks._check_calendar(settings)
+    result = await checks.check_calendar(settings)
 
     assert result.ok is True
     assert "Flights" in result.detail
@@ -254,7 +254,7 @@ async def test_a_calendar_deleted_in_the_calendar_app_is_named_as_gone(
         lambda settings: FakeCalendars(settings, Collection("Home", "https://example.invalid/h/")),
     )
 
-    result = await checks._check_calendar(settings)
+    result = await checks.check_calendar(settings)
 
     assert result.ok is False
     assert "no longer on this account" in result.detail
@@ -269,7 +269,7 @@ async def test_a_calendar_that_cannot_be_reached_is_reported_rather_than_raised(
         caldav, "CalendarClient", lambda settings: FakeCalendars(settings, fails="CalDAV said 503")
     )
 
-    result = await checks._check_calendar(settings)
+    result = await checks.check_calendar(settings)
 
     assert (result.ok, result.detail) == (False, "CalDAV said 503")
 

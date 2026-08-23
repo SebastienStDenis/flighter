@@ -21,8 +21,8 @@
 {% endif %}
 
 {# A status is a word first. The badge only colours the word it is already carrying. #}
-{% macro status(ready, done='Connected', todo='Not connected') %}
-<span class="badge shrink-0" data-variant="{{ 'ok' if ready else 'quiet' }}">
+{% macro status(ready, done='Connected', todo='Not connected', tone='quiet') %}
+<span class="badge shrink-0" data-variant="{{ 'ok' if ready else tone }}">
   {{- done if ready else todo -}}</span>
 {% endmacro %}
 
@@ -46,22 +46,36 @@
 <div id="{{ id }}" popover>{{ caller() }}</div>
 {% endmacro %}
 
-{# A stored credential is never shown back, so the box carries dots rather than a
-   sentence: something is saved, and what you type replaces it. #}
-{% macro secret(name, label, stored, hint='', help='') %}
-<div role="group" class="field">
-  <label for="{{ name }}">{{ label }}</label>
-  <input type="password" id="{{ name }}" name="{{ name }}" class="font-mono" autocomplete="off"
-         {% if help %}aria-describedby="{{ name }}-help"{% endif %}
-         placeholder="{{ '••••••••' if stored else hint }}">
-  {% if help %}<p id="{{ name }}-help" class="text-xs">{{ help|safe }}</p>{% endif %}
+{# What is on file, shown rather than offered for editing. A stored secret is a block of
+   dots and not a box, because a box invites typing into something that is already set
+   and cannot be read back. #}
+{% macro stored(field) %}
+<div class="flex items-baseline justify-between gap-3">
+  <span class="shrink-0 text-[0.8125rem] font-medium">{{ field.label }}</span>
+  <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
+    {{- field.value if field.value else '••••••••••' -}}</span>
 </div>
 {% endmacro %}
 
-{# One row per account, closed until there is a reason to open it: the name, whether it
-   works, and the form behind it. Each stays its own form, because nothing is rendered
-   back and only a form scoped to one service can say which empty box was meant. #}
-{% macro account(key, name, ready, detail='', todo='Not connected') %}
+{% macro box(field) %}
+<div role="group" class="field">
+  <label for="{{ field.name }}">{{ field.label }}</label>
+  <input type="{{ field.type|default('password') }}" id="{{ field.name }}"
+         name="{{ field.name }}" class="font-mono"
+         autocomplete="{{ field.autocomplete|default('off') }}"
+         {% if field.help %}aria-describedby="{{ field.name }}-help"{% endif %}
+         placeholder="{{ field.hint|default('') }}">
+  {% if field.help %}
+  <p id="{{ field.name }}-help" class="text-xs">{{ field.help|safe }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# One row per account, closed until there is a reason to open it. Connected, it shows
+   what is on file and keeps the boxes behind a button, so the common case is something
+   to read rather than a form to be careful around. Each stays its own form, because
+   only a form scoped to one service can say which empty box was meant. #}
+{% macro account(key, name, ready, fields, detail='', todo='Not connected', tone='quiet') %}
 <details class="setting">
   <summary>
     <span class="min-w-0 flex-1">
@@ -70,20 +84,58 @@
       <span class="block truncate text-xs text-muted-foreground">{{ detail }}</span>
       {% endif %}
     </span>
-    {{ status(ready, 'Connected', todo) }}
+    {{ status(ready, 'Connected', todo, tone) }}
     {{ chevron() }}
   </summary>
-  <form class="pb-4" method="post" action="/settings/credentials">
-    <input type="hidden" name="service" value="{{ key }}">
-    <fieldset class="fieldset gap-4">{{ caller() }}</fieldset>
-    <div class="mt-4 flex items-center">
-      <button class="btn" data-size="sm" type="submit">Save</button>
-      {% if ready %}
-      <button class="btn ml-auto text-stop" data-variant="ghost" data-size="sm"
-              type="submit" name="forget" value="1">Remove</button>
-      {% endif %}
-    </div>
-  </form>
+  <div class="editing pb-4">
+    {% if ready %}
+    {# What is on file and the boxes that replace it are the same space: opening the one
+       puts the other away, so there is never a filled block beside an empty box asking
+       to be told apart. #}
+    <details class="reveal">
+      <summary>
+        <div class="fieldset gap-2">
+          {% for field in fields %}{{ stored(field) }}{% endfor %}
+        </div>
+        {# Where Save and Cancel stand once it is open, so the row of buttons is in the
+           same place whichever of the two the row is showing. #}
+        <div class="mt-4">
+          <span class="btn" data-variant="outline" data-size="sm">Edit</span>
+        </div>
+      </summary>
+      <form method="post" action="/settings/credentials">
+        <input type="hidden" name="service" value="{{ key }}">
+        <fieldset class="fieldset gap-4">
+          {% for field in fields %}{{ box(field) }}{% endfor %}
+        </fieldset>
+        <div class="mt-4 flex items-center gap-2">
+          <button class="btn" data-size="sm" type="submit">Save</button>
+          <button class="btn" data-variant="ghost" data-size="sm" type="button"
+                  onclick="this.closest('details').open = false">Cancel</button>
+          <p class="save-error min-w-0 flex-1 text-xs text-stop" role="alert"></p>
+        </div>
+      </form>
+    </details>
+    {{ caller() if caller }}
+    <form class="removable mt-3" method="post" action="/settings/credentials">
+      <input type="hidden" name="service" value="{{ key }}">
+      <button class="btn text-stop" data-variant="ghost" data-size="sm" type="submit"
+              name="forget" value="1">Remove</button>
+    </form>
+    {% else %}
+    <form method="post" action="/settings/credentials">
+      <input type="hidden" name="service" value="{{ key }}">
+      <fieldset class="fieldset gap-4">
+        {% for field in fields %}{{ box(field) }}{% endfor %}
+      </fieldset>
+      {{ caller() if caller }}
+      <div class="mt-4 flex items-center gap-2">
+        <button class="btn" data-size="sm" type="submit">Save</button>
+        <p class="save-error min-w-0 flex-1 text-xs text-stop" role="alert"></p>
+      </div>
+    </form>
+    {% endif %}
+  </div>
 </details>
 {% endmacro %}
 
@@ -92,98 +144,39 @@
 <div class="card py-1" data-size="sm">
   <section>
     <div class="divide-y">
-      {% call account('icloud', 'iCloud', icloud_ready, icloud_email) %}
-      <div role="group" class="field">
-        <label for="icloud_email">Apple ID</label>
-        <input type="email" id="icloud_email" name="icloud_email" class="font-mono"
-               autocomplete="username" placeholder="you@icloud.com" value="{{ icloud_email }}">
-      </div>
-      {{ secret('icloud_app_password', 'App-specific password',
-                connected['icloud_app_password'], 'xxxx-xxxx-xxxx-xxxx',
-                'Create one at <a href="https://appleid.apple.com" target="_blank"
-                 rel="noopener">appleid.apple.com</a>.') }}
-      {% endcall %}
+      {# First, and the only one the app cannot do without: with no feed there is
+         nothing to put on the board. #}
+      {{ account('flightaware', 'FlightAware', flightaware_ready, [
+           {'name': 'aeroapi_key', 'label': 'AeroAPI key',
+            'help': 'Free to $5 a month on the <a
+                     href="https://www.flightaware.com/aeroapi/signup/personal"
+                     target="_blank" rel="noopener">Personal tier</a>.'},
+         ], 'Gates, delays, diversions and baggage belts', 'Required', 'stop') }}
 
-      {% call account('flightaware', 'FlightAware', flightaware_ready) %}
-      {{ secret('aeroapi_key', 'AeroAPI key', connected['aeroapi_key'], '',
-                'Free to $5 a month on the <a
-                 href="https://www.flightaware.com/aeroapi/signup/personal" target="_blank"
-                 rel="noopener">Personal tier</a>.') }}
-      <p class="text-xs {{ 'text-stop' if budget.tripped else 'text-muted-foreground' }}">
-        ${{ '%.2f'|format(budget.spend_usd) }} of ${{ '%.2f'|format(budget.cap_usd) }} this
-        month{{ ', so updates are paused' if budget.tripped }}.</p>
-      {% endcall %}
+      {{ account('icloud', 'iCloud', icloud_ready, [
+           {'name': 'icloud_email', 'label': 'Apple ID', 'type': 'email',
+            'autocomplete': 'username', 'hint': 'you@icloud.com', 'value': icloud_email},
+           {'name': 'icloud_app_password', 'label': 'App-specific password',
+            'hint': 'xxxx-xxxx-xxxx-xxxx',
+            'help': 'Create one at <a href="https://appleid.apple.com" target="_blank"
+                     rel="noopener">appleid.apple.com</a>.'},
+         ], 'Reads the flagged email and writes the calendar') }}
 
-      {% call account('pushover', 'Pushover', pushover_ready) %}
-      {{ secret('pushover_token', 'Application token', connected['pushover_token'], '',
-                'Register an app at <a href="https://pushover.net/apps/build"
-                 target="_blank" rel="noopener">pushover.net</a>.') }}
-      {{ secret('pushover_user_key', 'User key', connected['pushover_user_key'], '',
-                'On your <a href="https://pushover.net" target="_blank"
-                 rel="noopener">dashboard</a>.') }}
-      {% endcall %}
+      {{ account('pushover', 'Pushover', pushover_ready, [
+           {'name': 'pushover_token', 'label': 'Application token',
+            'help': 'Register an app at <a href="https://pushover.net/apps/build"
+                     target="_blank" rel="noopener">pushover.net</a>.'},
+           {'name': 'pushover_user_key', 'label': 'User key',
+            'help': 'On your <a href="https://pushover.net" target="_blank"
+                     rel="noopener">dashboard</a>.'},
+         ], 'Tells the phone when something changes') }}
 
-      <details class="setting">
-        <summary>
-          <span class="min-w-0 flex-1">
-            <span class="block font-medium">Calendar</span>
-            <span class="block truncate text-xs text-muted-foreground">
-              {{- 'Flights are written to iCloud' if calendar_ready else 'Not writing to a calendar' -}}
-            </span>
-          </span>
-          {{ status(calendar_ready, 'On', 'Off') }}
-          {{ chevron() }}
-        </summary>
-        <div class="pb-4">
-          {% if not icloud_ready %}
-          <p class="text-sm text-muted-foreground">Connect the Apple ID above to pick a calendar.</p>
-          {% elif calendar_error %}
-          <p class="text-sm text-muted-foreground">{{ calendar_error }}</p>
-          {% else %}
-          <form method="post" action="/settings">
-            <input type="hidden" name="tab" value="connections">
-            <div role="group" class="field">
-              <label for="icloud_calendar_url" class="sr-only">Calendar</label>
-              <select id="icloud_calendar_url" name="icloud_calendar_url"
-                      aria-describedby="calendar-help">
-                <option value=""{{ ' selected' if not posted['icloud_calendar_url'] }}>
-                  Do not write to a calendar</option>
-                {% for calendar in calendars %}
-                <option value="{{ calendar.url }}"
-                        {{- ' selected' if calendar.url == posted['icloud_calendar_url'] }}>
-                  {{- calendar.name -}}</option>
-                {% endfor %}
-              </select>
-              <p id="calendar-help" class="text-xs">Make the calendar in the Calendar app
-                first. Giving flights one of their own means a bad sync is undone by
-                deleting it.</p>
-            </div>
-            <div class="mt-4"><button class="btn" data-size="sm" type="submit">Save</button></div>
-          </form>
-          {% endif %}
-        </div>
-      </details>
-
-      {% call account('anthropic', 'Anthropic', connected['anthropic_api_key'],
-                      'Reads airlines that send no structured data', 'Optional') %}
-      {{ secret('anthropic_api_key', 'API key', connected['anthropic_api_key'], '',
-                'From <a href="https://console.anthropic.com" target="_blank"
-                 rel="noopener">console.anthropic.com</a>. Only flagged email is sent.') }}
-      {% endcall %}
+      {{ account('anthropic', 'Anthropic', connected['anthropic_api_key'], [
+           {'name': 'anthropic_api_key', 'label': 'API key',
+            'help': 'From <a href="https://console.anthropic.com" target="_blank"
+                     rel="noopener">console.anthropic.com</a>. Only flagged email is sent.'},
+         ], 'Reads airlines that send no structured data') }}
     </div>
-    <p class="mt-3 text-xs text-muted-foreground">An empty box keeps what is already
-      saved. <strong>Remove</strong> clears it.</p>
-  </section>
-</div>
-
-<div class="card mt-3" data-size="sm">
-  <header><h3 class="text-base font-semibold tracking-tight">Checks</h3></header>
-  <section>
-    <button class="btn w-full" data-variant="outline" type="button"
-            onclick="runChecks(this)">Run checks</button>
-    <p class="mt-2 text-xs text-muted-foreground">Tries every account and names the one
-      that is broken. Pushover sends a real push.</p>
-    <div id="checks"></div>
   </section>
 </div>
 {% endset %}
@@ -192,30 +185,40 @@
 <form id="settings-form" method="post" action="/settings">
   <input type="hidden" name="tab" value="preferences">
 
-  <div class="card" data-size="sm">
-    <header><h3 class="text-base font-semibold tracking-tight">Address</h3></header>
+  {# Browsers refuse a service worker anywhere but https and localhost, and refuse it
+     silently, so an http address means the board never opens without a connection and
+     nothing anywhere says why. #}
+  <div class="alert mb-3" id="insecure" role="status" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/>
+    </svg>
+    <strong>The board will not open offline</strong>
     <section>
-      <div role="group" class="field">
-        <label for="public_base_url" class="sr-only">Public base URL</label>
-        <input type="url" id="public_base_url" name="public_base_url" required
-               class="font-mono" aria-describedby="url-help"
-               value="{{ posted['public_base_url'] }}">
-        <p id="url-help" class="text-xs">What the calendar, the pushes and the widget
-          link to. It has to work away from home.</p>
+      <p class="text-xs">Browsers only run a service worker on <code>https://</code>.</p>
+    </section>
+  </div>
+
+  <div class="card" data-size="sm">
+    <header><h3 class="text-base font-semibold tracking-tight">Calendar</h3></header>
+    <section>
+      {% if not icloud_ready %}
+      <p class="text-sm text-muted-foreground">Connect iCloud under Accounts to pick a calendar.</p>
+      {% else %}
+      {# The options arrive after the page does, so the control is present but held until
+         iCloud has answered rather than the whole page waiting on it. The select stays a
+         direct child of the field, which is what Basecoat draws it from. #}
+      <div role="group" class="field relative">
+        <label for="icloud_calendar_url" class="sr-only">Calendar</label>
+        <select id="icloud_calendar_url" name="icloud_calendar_url"
+                aria-describedby="calendar-help" aria-busy="true" disabled>
+          <option>Loading calendars…</option>
+        </select>
+        <span class="spinner" id="calendar-spinner" aria-hidden="true"></span>
+        <p id="calendar-help" class="text-xs">Give flights a calendar of their own, made
+          in the Calendar app. Nothing is written until you pick one.</p>
       </div>
-      {# Browsers refuse a service worker anywhere but https and localhost, and refuse it
-         silently, so an http address means the board never opens without a connection
-         and nothing anywhere says why. #}
-      <div class="alert mt-3" id="insecure" role="status" hidden>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/>
-        </svg>
-        <strong>The board will not open offline</strong>
-        <section>
-          <p class="text-xs">Browsers only run a service worker on <code>https://</code>.</p>
-        </section>
-      </div>
+      {% endif %}
     </section>
   </div>
 
@@ -236,7 +239,7 @@
         <legend class="sr-only">Import flag colour</legend>
         <div class="flex flex-wrap justify-between gap-1">
           {% for colour in flag_colours %}
-          <label>
+          <label class="flag-target">
             <input type="radio" class="peer sr-only" name="imap_flag_colour"
                    value="{{ colour }}"{{ ' checked' if colour == posted['imap_flag_colour'] }}>
             <span class="flag-pick" data-colour="{{ colour }}">
@@ -252,7 +255,7 @@
           {% endfor %}
         </div>
       </fieldset>
-      <p class="mt-2 text-xs text-muted-foreground">Flag a booking email
+      <p class="text-xs text-muted-foreground">Flag a booking email
         <strong class="text-foreground">{{ posted['imap_flag_colour']|capitalize }}</strong>
         in Mail and the flight appears on the board.</p>
     </section>
@@ -265,7 +268,7 @@
         turn up.</p>
     </header>
     <section>
-      <div class="-mt-3 divide-y border-y">
+      <div class="divide-y">
         {% set friend_options = [
           ('sync_friend_flights_to_calendar', 'Calendar'),
           ('notify_for_friend_flights', 'Notifications'),
@@ -274,7 +277,7 @@
         {% for field, label in friend_options %}
         <div role="group" class="field py-3" data-orientation="horizontal">
           <label for="{{ field }}" class="font-normal">{{ label }}</label>
-          <input type="checkbox" id="{{ field }}" name="{{ field }}"
+          <input type="checkbox" role="switch" id="{{ field }}" name="{{ field }}"
                  value="true"{{ ' checked' if posted[field] }}>
         </div>
         {% endfor %}
@@ -282,17 +285,82 @@
     </section>
   </div>
 
-  <div class="accordion mt-3 rounded-lg border px-3">
+  <div class="accordion accordion-tight mt-3 rounded-lg border px-3">
     <details>
       <summary>Advanced {{ chevron() }}</summary>
       <fieldset class="fieldset gap-4 pb-3">
+        {# Automatic follows whatever address the app was last opened on, which is the
+           one demonstrably reachable from where somebody typed it. The two modes each
+           carry their own control, and whichever is not showing is disabled so that
+           exactly one of them is what gets posted. #}
+        {% set manual = posted['public_base_url']|length > 0 %}
+        {# Worked out from the address the app was last opened on, until somebody says
+           otherwise. What they type is what it stays; clearing it hands it back. #}
+        <div role="group" class="field">
+          <label for="public_base_url">Address</label>
+          {# The one preference that is not saved the moment it changes: an address being
+             typed is half an address most of the way through, and every keystroke of it
+             would be posted and followed. Save is what commits it. #}
+          <details class="reveal" data-manual-save>
+            <summary>
+              <span class="flex items-center justify-between gap-3">
+                <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
+                  {{- detected_base_url -}}</span>
+                <span class="flex shrink-0 gap-2">
+                  <span class="btn" data-variant="outline" data-size="sm">
+                    {{- 'Edit' if manual else 'Override' -}}</span>
+                  {% if manual %}
+                  <button class="btn" data-variant="ghost" data-size="sm" type="button"
+                          onclick="revertAddress(event)">Revert</button>
+                  {% endif %}
+                </span>
+              </span>
+            </summary>
+            <input type="url" id="public_base_url" name="public_base_url"
+                   class="input font-mono" aria-describedby="url-help"
+                   placeholder="{{ auto_base_url }}"
+                   value="{{ posted['public_base_url'] }}">
+            <div class="mt-3 flex items-center gap-2">
+              <button class="btn" data-size="sm" type="button"
+                      onclick="saveField(this)">Save</button>
+              <button class="btn" data-variant="ghost" data-size="sm" type="button"
+                      onclick="cancelField(this)">Cancel</button>
+            </div>
+          </details>
+          {# Both readings live here rather than in the script, so reverting can swap
+             them without the copy being written down twice. #}
+          <p id="url-help" class="text-xs">
+            <span data-when="manual"{{ ' hidden' if not manual }}>Set by hand. What the
+              calendar, the pushes and the widget link to.</span>
+            <span data-when="auto"{{ ' hidden' if manual }}>Followed from the address you
+              open this on. A localhost one never replaces one that is not.</span>
+          </p>
+        </div>
         <div role="group" class="field">
           <label for="aeroapi_monthly_cap_usd">Monthly limit (USD)</label>
-          <input type="text" inputmode="decimal" class="font-mono" required
-                 id="aeroapi_monthly_cap_usd" name="aeroapi_monthly_cap_usd"
-                 aria-describedby="cap-help" value="{{ posted['aeroapi_monthly_cap_usd'] }}">
+          {# A figure half typed is a different limit, so this one commits on Save too. #}
+          <details class="reveal" data-manual-save>
+            <summary>
+              <span class="flex items-center justify-between gap-3">
+                <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
+                  ${{- '%.2f'|format(budget.cap_usd) -}}</span>
+                <span class="btn shrink-0" data-variant="outline" data-size="sm">Edit</span>
+              </span>
+            </summary>
+            <input type="text" inputmode="decimal" class="input font-mono"
+                   id="aeroapi_monthly_cap_usd" name="aeroapi_monthly_cap_usd"
+                   aria-describedby="cap-help"
+                   value="{{ posted['aeroapi_monthly_cap_usd'] }}">
+            <div class="mt-3 flex items-center gap-2">
+              <button class="btn" data-size="sm" type="button"
+                      onclick="saveField(this)">Save</button>
+              <button class="btn" data-variant="ghost" data-size="sm" type="button"
+                      onclick="cancelField(this)">Cancel</button>
+            </div>
+          </details>
           <p id="cap-help" class="text-xs">Updates stop for the rest of the month at this
-            much FlightAware spend.</p>
+            much FlightAware spend.
+            <span class="{{ 'text-stop' if budget.tripped else '' }}">${{ '%.2f'|format(budget.spend_usd) }} of ${{ '%.2f'|format(budget.cap_usd) }} this month{{ ', so updates are paused' if budget.tripped }}.</span></p>
         </div>
         <div role="group" class="field">
           <label for="log_level">Log level</label>
@@ -306,9 +374,6 @@
     </details>
   </div>
 
-  <div class="action-bar">
-    <button class="btn w-full" data-size="lg" type="submit">Save</button>
-  </div>
 </form>
 {% endset %}
 
@@ -329,7 +394,7 @@
   </div>
   {# Whatever a step opens onto starts where its own words start and runs the full width
      of the card, so a step with a button beside it lines up with one without. #}
-  {% if caller %}<div class="mt-2 ml-9">{{ caller() }}</div>{% endif %}
+  {% if caller %}<div class="ml-9">{{ caller() }}</div>{% endif %}
 </div>
 {% endmacro %}
 
@@ -354,16 +419,16 @@
       Lock Screen. Work down this list on the phone.</p>
   </header>
   <section>
-    <div class="-mt-3 divide-y border-y">
+    <div class="divide-y">
       {{ step(1, 'Install Scriptable', 'Free on the App Store.',
               'https://apps.apple.com/app/scriptable/id1405459188', 'Get',
               'target="_blank" rel="noopener"') }}
       {% call step(2, 'Add the script', 'Imports into Scriptable as “Flighter”.',
                    '/widget/Flighter.scriptable', 'Install') %}
-      <div class="accordion">
+      <div class="accordion accordion-inline mt-2">
         <details>
-          <summary class="text-xs">Copy it manually {{ chevron() }}</summary>
-          <p class="mt-2 text-xs text-muted-foreground">In Scriptable tap <strong>+</strong>,
+          <summary class="text-xs">Or copy it manually {{ chevron() }}</summary>
+          <p class="text-xs text-muted-foreground">In Scriptable tap <strong>+</strong>,
             paste, and name it <strong>Flighter</strong>. The name is what step 3 runs.</p>
           <div class="relative mt-2">
             <textarea id="widget-script" class="h-24 w-full rounded-md bg-muted p-2 pr-20 font-mono text-xs"
@@ -375,56 +440,43 @@
       {% endcall %}
       {{ step(3, 'Connect this phone', 'Hands Scriptable the address and the token.',
               widget_connect_url, 'Connect') }}
-      {% call step(4, 'Add the widget', 'Touch and hold the wallpaper, tap +, choose Scriptable.') %}
-      <div class="accordion">
-        <details>
-          <summary class="text-xs">Home Screen {{ chevron() }}</summary>
-          <p class="mt-2 text-xs text-muted-foreground">Tap the placed widget and set
-            <strong>Script</strong> to Flighter and <strong>When Interacting</strong> to
-            <strong>Run Script</strong>. Medium and large show three flights.</p>
-        </details>
-        <details>
-          <summary class="text-xs">Lock Screen {{ chevron() }}</summary>
-          <p class="mt-2 text-xs text-muted-foreground">Touch and hold the Lock Screen, tap
-            <strong>Customise</strong>, then the area under the clock. Needs iOS 16.</p>
-        </details>
-      </div>
-      {% endcall %}
+      {{ step(4, 'Add the widget', 'Touch and hold the wallpaper, tap +, choose Scriptable,
+              then set Script to Flighter and When Interacting to Run Script.') }}
     </div>
-    <p class="mt-3 text-xs text-muted-foreground">
-      {%- if widget_last_seen -%}
-      Last fetched by a phone <strong>{{ widget_last_seen }}</strong>.
-      {%- else -%}
-      No phone has fetched flights yet.
-      {%- endif -%}
-    </p>
   </section>
-  <footer class="border-t">
-    <div class="accordion w-full">
-      <details>
-        <summary class="text-xs">Advanced {{ chevron() }}</summary>
-        <div class="pb-1">
-          <p class="mt-2 text-xs text-muted-foreground">The bearer token for
-            <code>GET /api/widget</code>.</p>
-          <div class="relative mt-2">
-            <pre id="widget-token"
-                 class="overflow-x-auto rounded-md bg-muted p-3 pr-20 font-mono text-xs">{{ widget_token }}</pre>
-            <div class="absolute top-1.5 right-2">{{ copy_button('widget-token') }}</div>
-          </div>
-          <form class="mt-3" method="post" action="/settings/widget/token"
-                onsubmit="return confirm('Every phone will stop updating until it taps Connect again. Continue?')">
-            <button class="btn text-stop" data-variant="ghost" data-size="sm" type="submit">
-              Regenerate token</button>
-          </form>
-        </div>
-      </details>
+</div>
+
+<div class="accordion accordion-tight mt-3 rounded-lg border px-3">
+  <details>
+    <summary>Advanced {{ chevron() }}</summary>
+    <div class="pb-3">
+      <p class="text-xs text-muted-foreground">
+        {%- if widget_last_seen -%}
+        Last fetched by a phone <strong>{{ widget_last_seen }}</strong>.
+        {%- else -%}
+        No phone has fetched flights yet.
+        {%- endif -%}
+      </p>
+      <p class="mt-3 text-xs text-muted-foreground">The bearer token for
+        <code>GET /api/widget</code>.</p>
+      <div class="relative mt-2">
+        <pre id="widget-token"
+             class="overflow-x-auto rounded-md bg-muted p-3 pr-20 font-mono text-xs">{{ widget_token }}</pre>
+        <div class="absolute top-1.5 right-2">{{ copy_button('widget-token') }}</div>
+      </div>
+      <form class="mt-3" method="post" action="/settings/widget/token"
+            onsubmit="return confirm('Every phone will stop updating until it taps Connect again. Continue?')">
+        <button class="btn text-stop" data-variant="ghost" data-size="sm" type="submit">
+          Regenerate token</button>
+      </form>
     </div>
-  </footer>
+  </details>
 </div>
 {% endset %}
 
 {# Saving comes back through a redirect, so the tab the form was on is carried in the
    address and picked out again here rather than being lost to the default. #}
+<div class="settings">
 {{ bc.tabs(
      id='settings-tabs',
      tablist_attrs={'class': 'w-full'},
@@ -434,6 +486,7 @@
        {'tab': 'Preferences', 'panel': preferences},
        {'tab': 'Widget', 'panel': widget},
      ]) }}
+</div>
 
 {% if saved %}
 <div class="toaster" data-align="center">
@@ -455,6 +508,57 @@
   // through, in a way that reading the scheme is not.
   if (!window.isSecureContext) document.getElementById("insecure").hidden = false;
 
+  // A preference takes effect when it is changed rather than when a button is pressed,
+  // so there is no button. Posted in the background because a reload would fold the
+  // section being edited shut and lose the place on the page; a refusal is the one case
+  // that goes through the browser, so the reason lands on a page with the values on it.
+  (function () {
+    var form = document.getElementById("settings-form");
+    if (!form) return;
+    form.addEventListener("change", function (event) {
+      // Everything commits as it changes except what says otherwise for itself.
+      if (event.target.closest("[data-manual-save]")) return;
+      saveSettings();
+    });
+  })();
+
+  async function saveSettings() {
+    var form = document.getElementById("settings-form");
+    var response;
+    try {
+      response = await fetch(form.action, { method: "POST", body: new FormData(form) });
+    } catch (error) {
+      form.submit();
+      return false;
+    }
+    // A refusal goes through the browser instead, so the reason lands on a page that
+    // still has the values that caused it.
+    if (!response.ok) {
+      form.submit();
+      return false;
+    }
+    flashSaved();
+    return true;
+  }
+
+  function flashSaved() {
+    var already = document.querySelector(".toaster");
+    if (already) already.remove();
+    var toaster = document.createElement("div");
+    toaster.className = "toaster";
+    toaster.setAttribute("data-align", "center");
+    toaster.innerHTML =
+      '<div class="toast" role="status" aria-atomic="true"><div class="toast-content">' +
+      '<svg class="text-ok" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
+      ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>' +
+      "<section><h2>Saved</h2></section></div></div>";
+    document.body.appendChild(toaster);
+    setTimeout(function () {
+      toaster.remove();
+    }, 2000);
+  }
+
   // A save says so and then gets out of the way.
   (function () {
     var toaster = document.querySelector(".toaster");
@@ -474,16 +578,108 @@
     }, 2500);
   })();
 
-  // The results are HTML the server already knows how to draw, so they are dropped in
-  // as they arrive rather than rebuilt here.
-  async function runChecks(button) {
-    button.disabled = true;
+  // An empty override is what "work it out" is stored as, so handing the address back
+  // is the same save as any other, with an empty box.
+  async function revertAddress(event) {
+    // Inside a summary, so without this the row would fold open on its way out.
+    event.preventDefault();
+    event.stopPropagation();
+    var button = event.currentTarget;
+    var box = document.getElementById("public_base_url");
+    box.value = "";
+    box.defaultValue = "";
+    if (!(await saveSettings())) return;
+    // There is no override left to revert, so the row goes back to saying what it is
+    // following. The placeholder is the worked-out address the server put there.
+    var summary = box.closest("details").querySelector("summary");
+    summary.querySelector(".font-mono").textContent = box.placeholder;
+    summary.querySelector(".btn").textContent = "Override";
+    button.remove();
+    var help = document.getElementById("url-help");
+    help.querySelector('[data-when="manual"]').hidden = true;
+    help.querySelector('[data-when="auto"]').hidden = false;
+  }
+
+  function saveField(button) {
+    saveSettings();
+    button.closest("details").open = false;
+  }
+
+  // defaultValue is what the server rendered, which is what "cancel" means here.
+  function cancelField(button) {
+    var details = button.closest("details");
+    details.querySelectorAll("input").forEach(function (box) {
+      box.value = box.defaultValue;
+    });
+    details.open = false;
+  }
+
+  // The calendars are four round trips to iCloud, so the page does not wait on them.
+  // The options are HTML the server already knows how to draw, including which one is
+  // picked, so they are dropped straight into the select rather than rebuilt here.
+  (async function () {
+    var select = document.getElementById("icloud_calendar_url");
+    if (!select) return;
     try {
-      const response = await fetch("/settings/checks", { method: "POST" });
-      document.getElementById("checks").innerHTML = await response.text();
-    } finally {
-      button.disabled = false;
+      var response = await fetch("/settings/calendars");
+      if (!response.ok) throw new Error(response.status);
+      select.innerHTML = await response.text();
+    } catch (error) {
+      select.innerHTML = '<option data-error>iCloud could not be reached</option>';
     }
+    // A picker that could not be filled stays shut, and the reason goes under it rather
+    // than into an option, where a sentence is cut off at the width of the control.
+    var failed = select.querySelector("[data-error]");
+    if (failed) {
+      document.getElementById("calendar-help").textContent = failed.textContent.trim();
+      select.innerHTML = "<option>Unavailable</option>";
+    }
+    select.disabled = !!failed;
+    select.removeAttribute("aria-busy");
+    document.getElementById("calendar-spinner").hidden = true;
+  })();
+
+  // Saving an account goes and asks the service whether the details work, which takes
+  // as long as that service does. The button says so, and a refusal lands next to the
+  // button that was pressed rather than at the top of the page: the row stays open on
+  // what was typed, and only a save that worked folds it away.
+  document.addEventListener("submit", async function (event) {
+    var form = event.target;
+    if (form.method !== "post" || event.defaultPrevented) return;
+    // The Remove button is the one submit that carries a name, and it posts normally.
+    var button = form.querySelector('button[type="submit"]:not([name="forget"])');
+    if (!button) return;
+    var note = form.querySelector(".save-error");
+    if (!note) {
+      setBusy(button, true);
+      return;
+    }
+    event.preventDefault();
+    note.textContent = "";
+    setBusy(button, true);
+    try {
+      var response = await fetch(form.action, {
+        method: "POST",
+        body: new FormData(form),
+        headers: { Accept: "application/json" },
+      });
+      if (response.ok) {
+        location.assign("/settings?saved=1&tab=connections");
+        return;
+      }
+      var answer = await response.json().catch(function () {
+        return {};
+      });
+      note.textContent = answer.error || "Could not save";
+    } catch (error) {
+      note.textContent = "Could not reach the server";
+    }
+    setBusy(button, false);
+  });
+
+  function setBusy(button, busy) {
+    button.disabled = busy;
+    button.classList.toggle("is-busy", busy);
   }
 
   async function copyText(button, id) {

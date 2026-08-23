@@ -47,7 +47,7 @@ async def _check_aeroapi(settings: Settings) -> CheckResult:
     one call path able to run the bill past the cap.
     """
     if not settings.aeroapi_configured:
-        return CheckResult("aeroapi", False, "add a FlightAware key under Connections")
+        return CheckResult("aeroapi", False, "add a FlightAware key under Accounts")
     try:
         payload = await shared_client().flight_info("UAL4", ident_type="designator")
     except BudgetExceeded as exc:
@@ -68,7 +68,7 @@ async def _check_aeroapi(settings: Settings) -> CheckResult:
 
 async def _check_pushover(settings: Settings) -> CheckResult:
     if not settings.pushover_configured:
-        return CheckResult("pushover", False, "add a Pushover token and user key under Connections")
+        return CheckResult("pushover", False, "add a Pushover token and user key under Accounts")
     try:
         await Notifier(settings).check()
     except Exception as exc:
@@ -84,7 +84,7 @@ async def _check_mail(settings: Settings) -> CheckResult:
     """
     if not settings.icloud_configured:
         return CheckResult(
-            "mail", False, "add an Apple ID and app-specific password under Connections"
+            "mail", False, "add an Apple ID and app-specific password under Accounts"
         )
     from .mail import Mailbox
 
@@ -104,18 +104,22 @@ async def _check_mail(settings: Settings) -> CheckResult:
     )
 
 
-async def _check_calendar(settings: Settings) -> CheckResult:
+async def check_calendar(settings: Settings, url: str | None = None) -> CheckResult:
     """Signs in over CalDAV and lists the account's calendars, then looks for ours in it.
 
     That is the one thing a sync cannot tell you on its own: writes go straight to a
     stored URL, so a calendar deleted in the Calendar app is a 404 on the next flight
     rather than something anybody was told about.
+
+    Takes the URL to prove rather than reading the saved one when it is given a choice
+    somebody has only just made, so a calendar that does not answer is refused instead
+    of saved and then reported.
     """
     from .caldav import CalendarClient
 
-    chosen = prefs.current().icloud_calendar_url
+    chosen = prefs.current().icloud_calendar_url if url is None else url
     if not chosen:
-        return CheckResult("calendar", False, "pick a calendar under Connections")
+        return CheckResult("calendar", False, "pick a calendar under Preferences")
     try:
         offered = await CalendarClient(settings).calendars()
     except Exception as exc:
@@ -131,11 +135,44 @@ async def _check_calendar(settings: Settings) -> CheckResult:
     return CheckResult("calendar", True, f"writing to {found.name} at {found.url}")
 
 
+async def _check_anthropic(settings: Settings) -> CheckResult:
+    """Lists the models, which proves the key without spending a token to do it."""
+    if not settings.anthropic_api_key:
+        return CheckResult("anthropic", False, "add an Anthropic key under Accounts")
+    from anthropic import AsyncAnthropic
+
+    client = AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
+    try:
+        await client.models.list(limit=1)
+    except Exception as exc:
+        return CheckResult("anthropic", False, str(exc))
+    finally:
+        await client.close()
+    return CheckResult("anthropic", True, "key accepted")
+
+
+# What proves each section of the settings page before it is allowed to save. Anthropic
+# is here but not in `run_checks`: a deployment that has no key for it is not a broken
+# one, but a key that was just typed and does not work is.
+SERVICE_CHECKS = {
+    "icloud": _check_mail,
+    "flightaware": _check_aeroapi,
+    "pushover": _check_pushover,
+    "anthropic": _check_anthropic,
+}
+
+
+async def check_service(settings: Settings, service: str) -> CheckResult | None:
+    """Prove one section's settings, or None where there is nothing to prove."""
+    check = SERVICE_CHECKS.get(service)
+    return await check(settings) if check is not None else None
+
+
 async def run_checks(settings: Settings) -> list[CheckResult]:
     return [
         await _check_database(),
         await _check_aeroapi(settings),
         await _check_mail(settings),
-        await _check_calendar(settings),
+        await check_calendar(settings),
         await _check_pushover(settings),
     ]

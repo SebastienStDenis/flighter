@@ -260,8 +260,14 @@
     background: var(--flag);
   }
 
+  /* The label is the 44px a thumb needs; the circle drawn inside it is smaller, so the
+     mark around the chosen flag sits close to the glyph rather than around the target. */
+  .flag-target {
+    @apply grid size-11 cursor-pointer place-items-center;
+  }
+
   .flag-pick {
-    @apply grid size-11 cursor-pointer place-items-center rounded-full transition-colors;
+    @apply grid size-8 place-items-center rounded-full transition-colors;
     color: var(--flag);
   }
 
@@ -287,7 +293,7 @@
   [data-colour='orange'] { --flag: #ff9500; }
   [data-colour='yellow'] { --flag: #d99e00; }
   [data-colour='green']  { --flag: #34c759; }
-  [data-colour='blue']   { --flag: #007aff; }
+  [data-colour='blue']   { --flag: #32ade6; }
   [data-colour='purple'] { --flag: #af52de; }
   [data-colour='grey']   { --flag: #8e8e93; }
 
@@ -312,6 +318,82 @@
 
   .setting[open] > summary .chevron {
     @apply rotate-180;
+  }
+
+  /* A field's name sits a step under the heading of the section holding it, so a card
+     reads as a title with settings under it rather than as a list of equals. Scoped to
+     this page: Basecoat's own 14px label is right on a form that is the whole screen. */
+  .settings .field > label {
+    @apply text-[0.8125rem];
+  }
+
+  /* Basecoat scopes the switch's dark thumb to `html.dark`, and this app has no such
+     class: the scheme comes from the phone. Without these the thumb stays the page's
+     near-black on a dark track and the control reads as empty in both positions. */
+  @media (prefers-color-scheme: dark) {
+    .field > input[type='checkbox'][role='switch']:not(:checked)::before {
+      background-color: var(--foreground);
+    }
+
+    .field > input[type='checkbox'][role='switch']:checked::before {
+      background-color: var(--primary-foreground);
+    }
+  }
+
+  /* The button that opens onto the boxes. It is a summary rather than a button so the
+     form behind it needs no script to appear. */
+  /* Explicitly block: a summary picks up inline-flex from elsewhere in the sheet, which
+     puts the button beside what it is meant to sit under. */
+  .reveal > summary {
+    @apply block cursor-pointer list-none;
+  }
+
+  .reveal > summary::-webkit-details-marker {
+    @apply hidden;
+  }
+
+  /* Open, the boxes stand where what they replace was standing, and throwing the
+     account away is not offered beside the form for keeping it. Cancel is what puts
+     both back, so the row is never half-swapped. */
+  .reveal[open] > summary,
+  .editing:has(.reveal[open]) > .removable {
+    @apply hidden;
+  }
+
+  /* Basecoat sizes its accordion for a page of prose. Here a disclosure sits inside a
+     step or a card, where that much air reads as a gap rather than as grouping. */
+  .accordion-tight > details > summary {
+    @apply py-2.5;
+  }
+
+  .accordion-tight > details > :not(summary) {
+    @apply pb-3;
+  }
+
+  /* Tighter again for a disclosure hanging off a step, where the step's own padding is
+     already holding it apart from the one below. */
+  .accordion-inline > details > summary {
+    @apply py-1;
+  }
+
+  .accordion-inline > details > :not(summary) {
+    @apply pb-1;
+  }
+
+  /* Waiting on a service to answer: the picker that is being filled, and the button
+     that is off asking whether what was typed works. */
+  .field > .spinner {
+    @apply pointer-events-none absolute right-9 size-4 animate-spin rounded-full border-2;
+    top: 1.125rem;
+    translate: 0 -50%;
+    border-color: color-mix(in oklab, var(--muted-foreground) 30%, transparent);
+    border-top-color: var(--muted-foreground);
+  }
+
+  .btn.is-busy::before {
+    @apply mr-2 inline-block size-3.5 shrink-0 animate-spin rounded-full content-[''];
+    border: 2px solid color-mix(in oklab, currentColor 30%, transparent);
+    border-top-color: currentColor;
   }
 
   /* The step's number, on a rail of its own so every step's text starts at the same
