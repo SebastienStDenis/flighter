@@ -505,7 +505,11 @@
       <div class="relative mt-2">
         <pre id="widget-token"
              class="overflow-x-auto rounded-md bg-muted p-3 pr-20 font-mono text-xs">{{ widget_token }}</pre>
-        <div class="absolute top-1.5 right-2">{{ m.copy_button('widget-token') }}</div>
+        {# Centred against the line rather than measured down from the top: the token is
+           one line in a box taller than the button, and a figure that happens to land
+           near the middle is not the middle. #}
+        <div class="absolute top-1/2 right-2 -translate-y-1/2">
+          {{ m.copy_button('widget-token') }}</div>
       </div>
       <form class="mt-3" method="post" action="/settings/widget/token"
             onsubmit="return confirm('Every phone will stop updating until it taps Connect again. Continue?')">
