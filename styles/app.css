@@ -150,8 +150,12 @@
      rather than on every tag that uses them, so a card is titled the same on every page.
 
      Basecoat sizes a small card's title down to the body text around it, which leaves a
-     card reading as a list of equals rather than as a title with things under it. */
-  .card > header > :is(h2, h3) {
+     card reading as a list of equals rather than as a title with things under it - and
+     leaves a title the same size as the line explaining it. The second selector is the
+     small card written out at Basecoat's own specificity, because a shorter one loses to
+     it and the title quietly stays at 14px. */
+  .card > header > :is(h2, h3, [data-title], .card-title),
+  .card[data-size='sm'] > header > :is(h2, h3, [data-title], .card-title) {
     @apply text-base font-semibold tracking-tight;
   }
 
