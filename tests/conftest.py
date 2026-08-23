@@ -57,6 +57,9 @@ def preferences(monkeypatch: pytest.MonkeyPatch) -> Prefs:
     configured = Prefs(
         public_base_url="https://flights.example.com",
         icloud_calendar_url="https://p34-caldav.icloud.com/12345/calendars/6c1f4f0e-flights/",
+        # The master switch starts off on a deployment nobody has set up; this one is
+        # set up, and every test about what reaches a phone starts from that.
+        notifications_enabled=True,
     )
     monkeypatch.setattr(prefs, "_current", configured)
     monkeypatch.setattr(prefs, "_last_seen_origin", None)

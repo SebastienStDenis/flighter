@@ -66,6 +66,11 @@ def event(kind: str, old: str | None = None, new: str | None = None) -> FlightEv
     return FlightEvent(id=1, booking_id=7, kind=kind, old_value=old, new_value=new)
 
 
+# Notifications start off, so a test about which pushes go out is a deployment that has
+# asked for them.
+PUSHING = Prefs(notifications_enabled=True)
+
+
 async def push(settings: Settings, flight_event: FlightEvent, **kwargs: object) -> Recorder:
     recorder = Recorder(**kwargs)  # type: ignore[arg-type]
     notifier = Notifier(settings, transport=recorder.transport)
@@ -77,7 +82,7 @@ async def test_an_unsaved_address_links_to_where_the_app_was_last_reached(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A push goes out from the poller, with no request to borrow an address from."""
-    monkeypatch.setattr(prefs, "_current", Prefs())
+    monkeypatch.setattr(prefs, "_current", PUSHING)
     monkeypatch.setattr(prefs, "_last_seen_origin", "http://192.168.1.20:8586")
 
     sent = (await push(settings, event(EventKind.GATE_ASSIGNED, new="B22"))).only
@@ -175,10 +180,10 @@ async def test_a_class_of_news_switched_off_is_not_pushed(
     settings: Settings, monkeypatch: pytest.MonkeyPatch, field: str, flight_event: FlightEvent
 ) -> None:
     """Each switch answers for its own kinds and for nobody else's."""
-    monkeypatch.setattr(prefs, "_current", Prefs().model_copy(update={field: False}))
+    monkeypatch.setattr(prefs, "_current", PUSHING.model_copy(update={field: False}))
     assert (await push(settings, flight_event)).requests == []
 
-    monkeypatch.setattr(prefs, "_current", Prefs())
+    monkeypatch.setattr(prefs, "_current", PUSHING)
     assert (await push(settings, flight_event)).requests != []
 
 
@@ -187,7 +192,7 @@ async def test_the_master_switch_stops_every_push_about_a_trip(
 ) -> None:
     """One switch rather than seven, for somebody who wants the phone left alone."""
     monkeypatch.setattr(
-        prefs, "_current", Prefs().model_copy(update={"notifications_enabled": False})
+        prefs, "_current", PUSHING.model_copy(update={"notifications_enabled": False})
     )
 
     assert (await push(settings, event(EventKind.CANCELLED, new="true"))).requests == []
@@ -204,7 +209,7 @@ async def test_the_budget_alarm_is_not_one_of_the_switches(
 ) -> None:
     """It is how somebody finds out the board stopped updating, so it is never silenced."""
     monkeypatch.setattr(
-        prefs, "_current", Prefs().model_copy(update={"notifications_enabled": False})
+        prefs, "_current", PUSHING.model_copy(update={"notifications_enabled": False})
     )
     recorder = Recorder()
 
@@ -222,7 +227,7 @@ async def test_the_budget_alarm_is_not_one_of_the_switches(
 async def test_the_import_pushes_follow_their_own_switches(
     settings: Settings, monkeypatch: pytest.MonkeyPatch, field: str, outcome: str | None
 ) -> None:
-    monkeypatch.setattr(prefs, "_current", Prefs().model_copy(update={field: False}))
+    monkeypatch.setattr(prefs, "_current", PUSHING.model_copy(update={field: False}))
     recorder = Recorder()
     notifier = Notifier(settings, transport=recorder.transport)
 

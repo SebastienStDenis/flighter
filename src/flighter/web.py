@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Final
 
 import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -60,6 +60,13 @@ LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 SETTINGS_TABS = ("connections", "preferences", "widget")
 
 # The preferences a tickbox turns on, which is what makes an absent one meaningful.
+# What each account is running, for when it is removed. Switched back on by hand: an
+# account connected again is not somebody asking for the job that used to run on it.
+PUT_DOWN_WITH: Final[dict[str, tuple[str, ...]]] = {
+    "icloud": ("calendar_sync_enabled", "email_import_enabled"),
+    "pushover": ("notifications_enabled",),
+}
+
 PREFERENCE_FLAGS = (
     "email_import_enabled",
     "calendar_sync_enabled",
@@ -702,15 +709,12 @@ def create_app(settings: Settings) -> FastAPI:
             return JSONResponse({"ok": True}) if wants_json else _saved("connections")
         restore = {name: getattr(settings, name) for name in found.fields}
         write_secrets(changed)
-        # Both jobs on the preferences page run on the iCloud account, so throwing it
-        # away puts them down rather than leaving two switches on for work that has
-        # nothing left to do it with. The calendar entries already written stay where
-        # they are: the credentials that could take them back out are the ones just
-        # removed.
-        if forget and service == "icloud":
-            await prefs.save(
-                session, {"calendar_sync_enabled": False, "email_import_enabled": False}
-            )
+        # Every job on the preferences page runs on one of these accounts, so throwing
+        # one away puts down what ran on it rather than leaving a switch on for work that
+        # has nothing left to do it with. Calendar entries already written stay where they
+        # are: the credentials that could take them back out are the ones just removed.
+        if forget and service in PUT_DOWN_WITH:
+            await prefs.save(session, dict.fromkeys(PUT_DOWN_WITH[service], False))
         # Forgetting is never refused: a credential you are throwing away does not have
         # to work first.
         if not forget:

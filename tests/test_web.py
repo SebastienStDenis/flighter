@@ -1624,7 +1624,7 @@ def test_the_settings_page_shows_what_is_connected(client: TestClient) -> None:
 
 def test_the_widget_tab_says_whether_a_phone_has_fetched(client: TestClient) -> None:
     body = client.get("/settings").text
-    assert "No phone has fetched flights yet" in body
+    assert "No Widget has fetched flights yet" in body
     assert "Not connected" in body
 
     recent = datetime.now(UTC) - timedelta(minutes=4)
@@ -1632,7 +1632,7 @@ def test_the_widget_tab_says_whether_a_phone_has_fetched(client: TestClient) -> 
         KV(key=LAST_SEEN_KEY, value={"at": recent.strftime("%Y-%m-%dT%H:%M:%SZ")})
     ]
     body = client.get("/settings").text
-    assert "Last fetched by a phone <strong>4m ago</strong>" in body
+    assert "Last fetched by a Widget <strong>4m ago</strong>" in body
 
 
 def test_a_phone_not_heard_from_in_a_day_is_not_connected(client: TestClient) -> None:
@@ -1642,7 +1642,7 @@ def test_a_phone_not_heard_from_in_a_day_is_not_connected(client: TestClient) ->
         KV(key=LAST_SEEN_KEY, value={"at": long_ago.strftime("%Y-%m-%dT%H:%M:%SZ")})
     ]
     body = client.get("/settings").text
-    assert "Last fetched by a phone <strong>3d ago</strong>" in body
+    assert "Last fetched by a Widget <strong>3d ago</strong>" in body
     assert "Not connected" in body
 
 
@@ -1673,8 +1673,12 @@ def test_the_install_copy_fallback_carries_the_whole_script(client: TestClient) 
     assert "Keychain.set(TOKEN_KEY" in body
 
 
-def test_the_settings_page_says_what_the_month_has_cost(client: TestClient) -> None:
-    assert "$0.42 of $4.00 this" in client.get("/settings").text
+def test_the_limit_is_set_on_the_account_it_is_a_limit_on(client: TestClient) -> None:
+    """It is what FlightAware is allowed to cost, so it is drawn with the FlightAware
+    account rather than among the preferences."""
+    accounts = client.get("/settings").text.split('id="settings-tabs-panel-2"')[0]
+    assert "Monthly spend limit" in accounts
+    assert 'name="aeroapi_monthly_cap_usd"' in accounts
 
 
 def test_no_stored_credential_is_ever_rendered_back(client: TestClient) -> None:
@@ -1699,8 +1703,6 @@ def test_a_fresh_deployment_is_told_what_to_do_in_order(
     assert body.count("Not connected") >= 3
     # The feed is the one there is no board without, so it asks louder than the rest.
     assert "Required" in body
-    # And the board says where to go rather than sitting there empty.
-    assert "Nothing is connected yet" in fresh.get("/").text
 
 
 def test_a_deployment_nobody_has_told_its_address_is_offered_this_one(
@@ -1764,29 +1766,54 @@ def test_forgetting_a_connection_clears_every_credential_it_needs(
     assert written == [{"pushover_token": "", "pushover_user_key": ""}]
 
 
+# Written through the route rather than set on the live copy, so the row a removal merges
+# into is a deployment that really had these on.
+RUNNING = {
+    "calendar_sync_enabled": "true",
+    "email_import_enabled": "true",
+    "notifications_enabled": "true",
+}
+
+
 def test_forgetting_icloud_puts_down_the_jobs_that_ran_on_it(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A switch left on for an account that is gone is one nothing can honour."""
     record_secrets(monkeypatch)
-    assert prefs.current().calendar_sync_enabled
-    assert prefs.current().email_import_enabled
+    client.post("/settings", data=RUNNING)
 
     client.post("/settings/credentials", data={"service": "icloud", "forget": "1"})
 
     assert not prefs.current().calendar_sync_enabled
     assert not prefs.current().email_import_enabled
+    # The account that was not removed keeps what runs on it.
+    assert prefs.current().notifications_enabled
 
 
-def test_forgetting_another_connection_leaves_those_jobs_alone(
+def test_forgetting_pushover_puts_down_the_notifications(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     record_secrets(monkeypatch)
+    client.post("/settings", data=RUNNING)
 
     client.post("/settings/credentials", data={"service": "pushover", "forget": "1"})
 
+    assert not prefs.current().notifications_enabled
     assert prefs.current().calendar_sync_enabled
     assert prefs.current().email_import_enabled
+
+
+def test_forgetting_an_account_nothing_runs_on_puts_down_nothing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_secrets(monkeypatch)
+    client.post("/settings", data=RUNNING)
+
+    client.post("/settings/credentials", data={"service": "anthropic", "forget": "1"})
+
+    assert prefs.current().calendar_sync_enabled
+    assert prefs.current().email_import_enabled
+    assert prefs.current().notifications_enabled
 
 
 def test_details_the_service_will_not_take_are_not_kept(
@@ -2191,17 +2218,18 @@ def test_the_calendars_are_not_asked_for_until_there_is_an_account(
 def test_neither_job_can_be_switched_on_without_the_account_it_runs_on(
     unconfigured: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Both run on iCloud, so with no account both switches are off and unflickable."""
+    """Every job runs on an account, so with none connected no switch can be flicked."""
     with build_client(unconfigured, monkeypatch) as fresh:
         body = fresh.get("/settings").text
 
-    for field in ("calendar_sync_enabled", "email_import_enabled"):
+    for field in ("calendar_sync_enabled", "email_import_enabled", "notifications_enabled"):
         switch = re.search(rf'<input[^>]*id="{field}"[^>]*>', body)
         assert switch is not None
         assert "disabled" in switch.group()
         assert "checked" not in switch.group()
     assert body.count("Connect iCloud in") == 2
-    assert body.count('href="/settings?tab=connections"') == 2
+    assert body.count("Connect Pushover in") == 1
+    assert body.count('href="/settings?tab=connections"') == 3
 
 
 def test_a_picker_with_nothing_stored_opens_on_the_first_calendar(

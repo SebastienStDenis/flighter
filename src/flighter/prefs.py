@@ -57,13 +57,16 @@ class Prefs(BaseModel):
     icloud_calendar_url: str = ""
 
     # What the phone is told about. The master switch stops every push about a flight or
-    # an email; the rest choose between classes of news under it. All on by default,
-    # because a deployment nobody has configured should still say when a gate moves.
+    # an email; the rest choose between classes of news under it.
+    #
+    # The master starts off: nothing can be sent until a Pushover account is on the app,
+    # and connecting one is not the same as asking to be pushed at. Turning it on turns
+    # on every class under it, which is why the classes start on.
     #
     # The budget alarm is deliberately not among these: it is the one push that is about
     # the service rather than about a trip, and it is how somebody finds out the board
     # has stopped updating.
-    notifications_enabled: bool = True
+    notifications_enabled: bool = False
     notify_gate_changes: bool = True
     notify_time_changes: bool = True
     notify_departure_and_landing: bool = True
