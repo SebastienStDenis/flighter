@@ -191,7 +191,7 @@
   // Only the icon changes, so the button keeps its size and nothing beside it moves.
   function showCopyState(button, state) {
     button.querySelectorAll("[data-state]").forEach(function (icon) {
-      icon.hidden = icon.dataset.state !== state;
+      icon.toggleAttribute("hidden", icon.dataset.state !== state);
     });
     var label = state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy";
     button.title = label;
