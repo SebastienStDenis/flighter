@@ -335,8 +335,8 @@
                   <span class="btn" data-variant="outline" data-size="sm"
                         id="address-edit-label">{{ 'Edit' if manual else 'Override' }}</span>
                   <button class="btn" data-variant="ghost" data-size="sm" type="button"
-                          id="address-revert" onclick="revertAddress(event)"
-                          {{- ' hidden' if not manual }}>Revert</button>
+                          id="address-reset" onclick="resetAddress(event)"
+                          {{- ' hidden' if not manual }}>Reset</button>
                 </span>
               </span>
             </summary>
@@ -351,7 +351,7 @@
                       onclick="cancelField(this)">Cancel</button>
             </div>
           </details>
-          {# Both readings live here rather than in the script, so reverting can swap
+          {# Both readings live here rather than in the script, so resetting can swap
              them without the copy being written down twice. #}
           <p id="url-help" class="text-xs">
             <span data-when="manual"{{ ' hidden' if not manual }}>Set by hand. What the
@@ -611,7 +611,7 @@
 
   // An empty override is what "work it out" is stored as, so handing the address back
   // is the same save as any other, with an empty box.
-  async function revertAddress(event) {
+  async function resetAddress(event) {
     // Inside a summary, so without this the row would fold open on its way out.
     event.preventDefault();
     event.stopPropagation();
@@ -632,7 +632,7 @@
       ? box.value.trim()
       : box.placeholder;
     document.getElementById("address-edit-label").textContent = manual ? "Edit" : "Override";
-    document.getElementById("address-revert").hidden = !manual;
+    document.getElementById("address-reset").hidden = !manual;
     var help = document.getElementById("url-help");
     help.querySelector('[data-when="manual"]').hidden = !manual;
     help.querySelector('[data-when="auto"]').hidden = manual;

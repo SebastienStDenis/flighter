@@ -323,8 +323,12 @@
   /* A credential that is on file. There is nothing to print - it is never rendered back
      - so a bar stands where the value would be rather than a row of dots pretending to
      be the right length. */
+  /* Basecoat's radius scale is relative to the card's own 12px, which on a 14px bar is
+     most of the way to a pill, so this one is set rather than picked off the scale. */
   .secret-bar {
-    @apply inline-block h-3.5 w-28 shrink-0 rounded-full bg-muted;
+    @apply inline-block h-3.5 w-28 shrink-0;
+    border-radius: 3px;
+    background-color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
   }
 
   /* A field's name sits a step under the heading of the section holding it, so a card
