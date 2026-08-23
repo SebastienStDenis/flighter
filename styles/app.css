@@ -145,10 +145,34 @@
 }
 
 @layer components {
+  /* One scale, four steps: the page's own heading, a card's, the text inside it, and
+     whatever is supplementary to that. The rules below put the top two on the components
+     rather than on every tag that uses them, so a card is titled the same on every page.
+
+     Basecoat sizes a small card's title down to the body text around it, which leaves a
+     card reading as a list of equals rather than as a title with things under it. */
+  .card > header > :is(h2, h3) {
+    @apply text-base font-semibold tracking-tight;
+  }
+
   /* Basecoat cuts a row's text off at two lines because its rows are list entries. Here
      a row is as often a step of instructions, and a step cut off cannot be followed. */
   .item p {
     @apply line-clamp-none;
+  }
+
+  /* The line under a row's heading is a step under it, the way the line under a card's
+     heading is. Basecoat draws the two at the same size on everything but its smallest
+     row, so a row reads as one block of text rather than a title and a note. */
+  .item[data-size='sm'] p {
+    @apply text-xs;
+  }
+
+  /* The tightest row is not a list entry here but a fact: a name on the left and its
+     value on the right. Those read at one size, the name quiet because it is muted
+     rather than because it is smaller than the thing it names. */
+  .item[data-size='xs'] p {
+    @apply text-sm;
   }
 
   /* Basecoat ships one destructive badge. A flight has six things it can be, and each
@@ -260,6 +284,13 @@
     background: var(--flag);
   }
 
+  /* The sentence under the swatches names the flag that is armed, and names it in that
+     flag's own colour: the picker above says it that way, so the line saying it back
+     should not have to be read against a row of colours to be believed. */
+  .flag-name {
+    color: var(--flag);
+  }
+
   /* The label is the 44px a thumb needs; the circle drawn inside it is smaller, so the
      mark around the chosen flag sits close to the glyph rather than around the target. */
   .flag-target {
@@ -331,22 +362,15 @@
     background-color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
   }
 
-  /* A field's name sits a step under the heading of the section holding it, so a card
-     reads as a title with settings under it rather than as a list of equals. Scoped to
-     this page: Basecoat's own 14px label is right on a form that is the whole screen. */
-  .settings .field > label {
-    @apply text-[0.8125rem];
-  }
-
   /* Basecoat scopes the switch's dark thumb to `html.dark`, and this app has no such
      class: the scheme comes from the phone. Without these the thumb stays the page's
      near-black on a dark track and the control reads as empty in both positions. */
   @media (prefers-color-scheme: dark) {
-    .field > input[type='checkbox'][role='switch']:not(:checked)::before {
+    :is(.field > input, .input)[type='checkbox'][role='switch']:not(:checked)::before {
       background-color: var(--foreground);
     }
 
-    .field > input[type='checkbox'][role='switch']:checked::before {
+    :is(.field > input, .input)[type='checkbox'][role='switch']:checked::before {
       background-color: var(--primary-foreground);
     }
   }
@@ -416,22 +440,6 @@
   .step-number {
     @apply grid size-6 shrink-0 place-items-center rounded-full bg-secondary
       font-mono text-xs font-semibold text-muted-foreground;
-  }
-
-  /* Why a setting exists, rather than what to type into it: supplementary by
-     definition, so it is behind a tap and never in the way. A browser that does not
-     know the attribute leaves it closed rather than printing it inline. */
-  [popover] {
-    @apply hidden;
-  }
-
-  [popover]:popover-open {
-    @apply m-auto block w-[min(20rem,calc(100vw-2rem))] rounded-lg border bg-popover
-      p-3 text-sm text-popover-foreground shadow-lg;
-  }
-
-  [popover]::backdrop {
-    @apply bg-black/20;
   }
 
   /* The main action of every screen, inside the thumb's reach and clear of the home

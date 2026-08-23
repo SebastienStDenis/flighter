@@ -250,7 +250,13 @@ class CalendarClient:
         if not configured(self._settings):
             log.debug("iCloud Calendar is not configured; skipping booking %s", booking.id)
             return None
-        if booking.friend_name and not prefs.current().sync_friend_flights_to_calendar:
+        current = prefs.current()
+        # Only the writing stops. Deleting stays open, so switching sync off can take the
+        # entries it already wrote back out rather than stranding them.
+        if not current.calendar_sync_enabled:
+            log.debug("calendar sync is off; skipping booking %s", booking.id)
+            return None
+        if booking.friend_name and not current.sync_friend_flights_to_calendar:
             log.debug("friend calendar sync is off; skipping booking %s", booking.id)
             return None
         body = event_body(booking, snapshot, self._airports, base_url=prefs.public_base_url())

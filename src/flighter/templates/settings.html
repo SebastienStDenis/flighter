@@ -37,17 +37,13 @@
 </svg>
 {% endmacro %}
 
-{# Why a setting exists, rather than what to put in it. The native attribute carries it,
-   so it opens on a tap rather than on a hover a phone cannot perform. #}
-{% macro info(id, label) %}
-<button class="btn size-6 shrink-0 p-0 text-muted-foreground" data-variant="ghost"
-        type="button" popovertarget="{{ id }}" aria-label="{{ label }}">
-  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
-       stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
-  </svg>
-</button>
-<div id="{{ id }}" popover>{{ caller() }}</div>
+{# The switch that puts a whole card's job down. It sits in the card's header rather than
+   among the settings it governs, because what it turns off is everything under them, and
+   the card folds away to the heading and this. #}
+{% macro toggle(field, label, governs) %}
+<label for="{{ field }}" class="sr-only">{{ label }}</label>
+<input class="input" type="checkbox" role="switch" id="{{ field }}" name="{{ field }}"
+       value="true" data-enables="{{ governs }}"{{ ' checked' if posted[field] }}>
 {% endmacro %}
 
 {# What is on file, shown rather than offered for editing. A stored secret is a block of
@@ -55,7 +51,7 @@
    and cannot be read back. #}
 {% macro stored(field) %}
 <div class="flex items-center justify-between gap-3">
-  <span class="shrink-0 text-[0.8125rem] font-medium">{{ field.label }}</span>
+  <span class="shrink-0 text-sm font-medium">{{ field.label }}</span>
   {% if field.value %}
   <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
     {{- field.value -}}</span>
@@ -96,7 +92,7 @@
     <span class="min-w-0 flex-1">
       <span class="block font-medium">{{ name }}</span>
       {% if detail %}
-      <span class="block truncate text-xs text-muted-foreground">{{ detail }}</span>
+      <span class="block text-xs leading-snug text-muted-foreground">{{ detail }}</span>
       {% endif %}
     </span>
     {{ status(ready, 'Connected', todo, tone) }}
@@ -109,7 +105,9 @@
        to be told apart. #}
     <details class="reveal">
       <summary>
-        <div class="fieldset gap-2">
+        {# Held off the edge by the width of the chevron above, so what is on file ends
+           where the row's own badge ends rather than past everything else on the card. #}
+        <div class="fieldset gap-2 pe-7">
           {% for field in fields %}{{ stored(field) }}{% endfor %}
         </div>
         {# Where Save and Cancel stand once it is open, so the row of buttons is in the
@@ -173,7 +171,7 @@
             'help': 'Free to $5 a month on the <a
                      href="https://www.flightaware.com/aeroapi/signup/personal"
                      target="_blank" rel="noopener">Personal tier</a>.'},
-         ], 'Gates, delays, diversions and baggage belts', 'Required', 'stop') }}
+         ], 'Source for flight details', 'Required', 'stop') }}
 
       {{ account('icloud', 'iCloud', icloud_ready, [
            {'name': 'icloud_email', 'label': 'Apple ID', 'type': 'email',
@@ -182,7 +180,7 @@
             'hint': 'xxxx-xxxx-xxxx-xxxx',
             'help': 'Create one at <a href="https://appleid.apple.com" target="_blank"
                      rel="noopener">appleid.apple.com</a>.'},
-         ], 'Reads the flagged email and writes the calendar') }}
+         ], 'Import flights from email, synchronize them to your calendar') }}
 
       {{ account('pushover', 'Pushover', pushover_ready, [
            {'name': 'pushover_token', 'label': 'Application token',
@@ -191,13 +189,13 @@
            {'name': 'pushover_user_key', 'label': 'User key',
             'help': 'On your <a href="https://pushover.net" target="_blank"
                      rel="noopener">dashboard</a>.'},
-         ], 'Tells the phone when something changes') }}
+         ], 'Flight notifications') }}
 
       {{ account('anthropic', 'Anthropic', connected['anthropic_api_key'], [
            {'name': 'anthropic_api_key', 'label': 'API key',
             'help': 'From <a href="https://console.anthropic.com" target="_blank"
                      rel="noopener">console.anthropic.com</a>. Only flagged email is sent.'},
-         ], 'Reads airlines that send no structured data') }}
+         ], 'Extract flight details from email') }}
     </div>
   </section>
 </div>
@@ -222,8 +220,14 @@
   </div>
 
   <div class="card" data-size="sm">
-    <header><h3 class="text-base font-semibold tracking-tight">Calendar</h3></header>
-    <section>
+    <header>
+      <h3>Calendar Sync</h3>
+      <div class="card-action">
+        {{ toggle('calendar_sync_enabled', 'Calendar sync', 'calendar-settings') }}
+      </div>
+      <p>Keeps every flight on an iCloud calendar of its own, restated as it moves</p>
+    </header>
+    <section id="calendar-settings"{{ ' hidden' if not posted['calendar_sync_enabled'] }}>
       {% if not icloud_ready %}
       <p class="text-sm text-muted-foreground">Connect iCloud under Accounts to pick a calendar.</p>
       {% else %}
@@ -246,17 +250,13 @@
 
   <div class="card mt-3" data-size="sm">
     <header>
-      <h3 class="text-base font-semibold tracking-tight">Import flag</h3>
+      <h3>Email import</h3>
       <div class="card-action">
-        {% call info('flag-info', 'Why red is missing') %}
-        <p>Red is the one colour Apple sends with no marker, so it cannot be told apart
-          from an ordinary flag. iOS Mail also refuses to flag anything it filed under
-          Promotions, Updates or Transactions, and airline confirmations are
-          Transactions; List View has no such restriction.</p>
-        {% endcall %}
+        {{ toggle('email_import_enabled', 'Email import', 'import-settings') }}
       </div>
+      <p>Turns booking confirmations you flag in Mail into flights on the board</p>
     </header>
-    <section>
+    <section id="import-settings"{{ ' hidden' if not posted['email_import_enabled'] }}>
       <fieldset>
         <legend class="sr-only">Import flag colour</legend>
         {# The 44px a thumb needs leaves 6px of air above the 32px circle drawn in it,
@@ -279,18 +279,44 @@
           {% endfor %}
         </div>
       </fieldset>
-      <p class="text-xs text-muted-foreground">Flag a booking email
-        <strong class="text-foreground" id="flag-name">
+      {# The colour is named in the colour, the way the swatches above say it. #}
+      <p class="text-xs text-muted-foreground">Flag a booking email in
+        <strong class="flag-name" id="flag-name"
+                data-colour="{{ posted['imap_flag_colour'] }}">
           {{- posted['imap_flag_colour']|capitalize -}}</strong>
-        in Mail and the flight appears on the board.</p>
+        from any iCloud mailbox to import into Flighter. Runs every
+        {{ mail_sweep_minutes }} min.</p>
+    </section>
+  </div>
+
+  {# One switch for the lot, and a row per class of news under it. Every class is on to
+     begin with: a deployment nobody has configured should still say when a gate moves. #}
+  <div class="card mt-3" data-size="sm">
+    <header>
+      <h3>Notifications</h3>
+      <div class="card-action">
+        {{ toggle('notifications_enabled', 'Notifications', 'notification-settings') }}
+      </div>
+      <p>What your phone is pushed about, through Pushover</p>
+    </header>
+    <section id="notification-settings"
+             {{- ' hidden' if not posted['notifications_enabled'] }}>
+      <div class="divide-y">
+        {% for field, label in notification_choices %}
+        <div role="group" class="field py-3" data-orientation="horizontal">
+          <label for="{{ field }}" class="font-normal">{{ label }}</label>
+          <input type="checkbox" role="switch" id="{{ field }}" name="{{ field }}"
+                 value="true"{{ ' checked' if posted[field] }}>
+        </div>
+        {% endfor %}
+      </div>
     </section>
   </div>
 
   <div class="card mt-3" data-size="sm">
     <header>
-      <h3 class="text-base font-semibold tracking-tight">Friends</h3>
-      <p class="text-[0.8125rem] leading-snug">Where flights you follow for someone else
-        turn up.</p>
+      <h3>Friends</h3>
+      <p>Where to include friends' flights</p>
     </header>
     <section>
       <div class="divide-y">
@@ -437,10 +463,10 @@
 {% set widget %}
 <div class="card" data-size="sm">
   <header>
-    <h3 class="text-base font-semibold tracking-tight">Widget</h3>
+    <h3>Widget</h3>
     <div class="card-action">{{ status(widget_connected) }}</div>
-    <p class="text-[0.8125rem] leading-snug">The next flight and its countdown, on the
-      Lock Screen. Work down this list on the phone.</p>
+    <p>The next flight and its countdown, on the Lock Screen. Work down this list on
+      the phone.</p>
   </header>
   <section>
     <div class="divide-y">
@@ -450,7 +476,9 @@
       {% call step(2, 'Add the script',
                    'Open the download in Scriptable to import it as “Flighter”.',
                    '/widget/Flighter.scriptable', 'Download') %}
-      <div class="accordion accordion-inline mt-2">
+      {# The step's own padding is what holds it off the rule below, so the summary's is
+         taken back: a step that opens onto something ends where a plain one does. #}
+      <div class="accordion accordion-inline -mb-1 mt-2">
         <details>
           <summary class="text-xs">Or copy it manually {{ chevron() }}</summary>
           <p class="text-xs text-muted-foreground">In Scriptable tap <strong>+</strong>,
@@ -543,18 +571,33 @@
     form.addEventListener("change", function (event) {
       // Everything commits as it changes except what says otherwise for itself.
       if (event.target.closest("[data-manual-save]")) return;
-      // The line under the flags names the one that is picked, and nothing reloads to
-      // redraw it.
+      // The line under the flags names the one that is picked, in the colour it is
+      // picked in, and nothing reloads to redraw it.
       if (event.target.name === "imap_flag_colour") {
         var colour = event.target.value;
-        document.getElementById("flag-name").textContent =
-          colour.charAt(0).toUpperCase() + colour.slice(1);
+        var name = document.getElementById("flag-name");
+        name.textContent = colour.charAt(0).toUpperCase() + colour.slice(1);
+        name.dataset.colour = colour;
       }
-      saveSettings();
+      // A switch that takes effect as it is flicked is its own confirmation. Only the
+      // boxes with a Save button to press are worth a word back.
+      saveSettings(false);
     });
   })();
 
-  async function saveSettings() {
+  // A card's own switch decides whether the rest of the card is on screen: there is
+  // nothing to configure about a job that is not running.
+  (function () {
+    document.querySelectorAll("[data-enables]").forEach(function (box) {
+      var governed = document.getElementById(box.dataset.enables);
+      if (!governed) return;
+      box.addEventListener("change", function () {
+        governed.hidden = !box.checked;
+      });
+    });
+  })();
+
+  async function saveSettings(announce) {
     var form = document.getElementById("settings-form");
     var response;
     try {
@@ -569,7 +612,7 @@
       form.submit();
       return false;
     }
-    flashSaved();
+    if (announce) flashSaved();
     return true;
   }
 
@@ -618,7 +661,7 @@
     event.stopPropagation();
     var box = document.getElementById("public_base_url");
     box.value = "";
-    if (!(await saveSettings())) return;
+    if (!(await saveSettings(true))) return;
     showAddressState();
   }
 
@@ -640,7 +683,7 @@
   }
 
   async function saveField(button) {
-    if (!(await saveSettings())) return;
+    if (!(await saveSettings(true))) return;
     var details = button.closest("details");
     var box = details.querySelector("input");
     if (details.id === "address-setting") {

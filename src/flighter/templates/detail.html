@@ -79,7 +79,9 @@
     {% if events %}
     {{ m.change(events[0], v.origin_tz) }}
     {% if events|length > 1 %}
-    <div class="accordion mt-1">
+    {# The card's own bottom padding is what ends the card, so this takes the summary's
+       back: without it a closed disclosure sits on twice the air anything else ends on. #}
+    <div class="accordion accordion-tight -mb-2.5 mt-0.5">
       <details>
         <summary>
           Earlier changes

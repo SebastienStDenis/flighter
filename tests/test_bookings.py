@@ -20,7 +20,7 @@ from flighter.bookings import (
     latest_snapshots,
     on_board_from_message,
     operated_note,
-    queue_friend_calendar_updates,
+    queue_calendar_updates,
     to_booking_times,
     update_ticket,
 )
@@ -289,9 +289,22 @@ async def test_friend_calendar_updates_cover_active_and_flown_flights(seeded: No
             status="completed",
         )
         await book(session, datetime(2026, 9, 14, 9, 0), marketing_number="9012")
-        queued = await queue_friend_calendar_updates(session)
+        queued = await queue_calendar_updates(session, friends_only=True)
         assert [booking.id for booking in queued] == [active.id, flown.id]
         assert (await events_for(session, flown.id)) == [EventKind.BOOKING_EDITED]
+
+
+async def test_calendar_updates_cover_every_live_flight_when_not_scoped_to_friends(
+    seeded: None,
+) -> None:
+    """What turning calendar sync itself off has to reach: mine as well as theirs."""
+    async with session_scope() as session:
+        friend = await book(session, datetime(2026, 9, 12, 9, 0), friend_name="Sam")
+        mine = await book(session, datetime(2026, 9, 13, 9, 0), marketing_number="5678")
+
+        queued = await queue_calendar_updates(session)
+
+        assert [booking.id for booking in queued] == [friend.id, mine.id]
 
 
 async def test_the_same_flight_resent_with_a_corrected_time_is_a_duplicate(seeded: None) -> None:

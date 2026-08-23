@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from flighter import ingest, notices
+from flighter import ingest, notices, prefs
 from flighter.airports import UnknownAirport
 from flighter.config import Settings
 from flighter.db import session_scope
@@ -806,6 +806,19 @@ async def test_a_flagged_email_naming_an_unknown_airport_is_set_aside_at_once(
 
 
 # --- Against the database ------------------------------------------------------------
+
+
+def test_the_watcher_needs_an_account_and_the_import_switched_on(
+    settings: Settings, unconfigured: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Switching the import off drops the connection rather than leaving one idling."""
+    assert ingest.watching(settings)
+    assert not ingest.watching(unconfigured)
+
+    monkeypatch.setattr(
+        prefs, "_current", prefs.current().model_copy(update={"email_import_enabled": False})
+    )
+    assert not ingest.watching(settings)
 
 
 def logged(message_id: str, minutes_ago: int, outcome: str, **fields: Any) -> IngestLog:

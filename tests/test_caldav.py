@@ -468,6 +468,23 @@ async def test_an_unpicked_calendar_is_a_quiet_no_op(
     await client.delete(booking(calendar_event_uid="flighter-7@flighter.invalid"))
 
 
+async def test_sync_switched_off_writes_nothing_but_still_cleans_up(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, icloud: FakeICloud
+) -> None:
+    """Only the writing stops. Deleting stays open, which is what lets switching sync off
+    take the entries it already wrote back out rather than stranding them."""
+    monkeypatch.setattr(
+        prefs, "_current", prefs.current().model_copy(update={"calendar_sync_enabled": False})
+    )
+    client = CalendarClient(settings, AIRPORTS, transport=icloud.transport)
+
+    assert await client.upsert(booking(), None) is None
+    assert icloud.requests == []
+
+    assert await client.delete(booking(calendar_event_uid="flighter-7@flighter.invalid"))
+    assert [request.method for request in icloud.requests] == ["DELETE"]
+
+
 async def test_friend_sync_is_skipped_but_cleanup_still_works(
     settings: Settings, icloud: FakeICloud
 ) -> None:

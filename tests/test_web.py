@@ -455,7 +455,7 @@ def test_the_email_page_says_which_email_was_set_aside_and_why(client: TestClien
     assert "Try again" in body
     assert "Ignore" in body
     # The quoted subject is distinguished from the service's own account of it.
-    assert '<span class="truncate italic">Your booking is confirmed</span>' in body
+    assert '<span class="truncate pe-0.5 italic">Your booking is confirmed</span>' in body
     # The email itself, in Mail, is where the other half of the decision is made.
     assert 'href="message://%3Cabc@icloud.invalid%3E"' in body
     assert 'title="Open in Mail" aria-label="Open in Mail"' in body
@@ -1961,7 +1961,11 @@ def test_disabling_friend_calendar_sync_removes_existing_events(
 
     response = client.post(
         "/settings",
-        data={"sync_friend_flights_to_calendar": "false", "tab": "preferences"},
+        data={
+            "sync_friend_flights_to_calendar": "false",
+            "calendar_sync_enabled": "true",
+            "tab": "preferences",
+        },
         follow_redirects=False,
     )
 
@@ -1969,6 +1973,57 @@ def test_disabling_friend_calendar_sync_removes_existing_events(
     assert deleted == [1]
     assert friend.calendar_event_uid is None
     assert not prefs.current().sync_friend_flights_to_calendar
+
+
+def test_the_notification_switches_are_drawn_and_saved(client: TestClient) -> None:
+    body = client.get("/settings").text
+    assert all(f'name="{field}"' in body for field, _ in web.NOTIFICATION_CHOICES)
+    assert 'name="notifications_enabled"' in body
+
+    client.post(
+        "/settings",
+        data={"notifications_enabled": "true", "notify_gate_changes": "true", "tab": "preferences"},
+    )
+
+    current = prefs.current()
+    assert current.notifications_enabled
+    assert current.notify_gate_changes
+    # Everything else on the card was posted empty, which on this form means off.
+    assert not current.notify_disruptions
+    assert not current.notify_imports
+
+
+def test_the_two_card_switches_start_on_and_can_be_turned_off(client: TestClient) -> None:
+    """A deployment nobody has configured still reads its mail and writes its calendar."""
+    assert prefs.current().email_import_enabled
+    assert prefs.current().calendar_sync_enabled
+
+    client.post("/settings", data={"tab": "preferences"})
+
+    assert not prefs.current().email_import_enabled
+    assert not prefs.current().calendar_sync_enabled
+
+
+def test_turning_calendar_sync_off_removes_every_flights_event(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not only the friends' ones: a calendar left holding flights nothing will ever
+    update again is worse than one holding none."""
+    mine = booking(calendar_event_uid="flighter-1@flighter.invalid")
+    client.session.rows["Booking"] = [mine]  # type: ignore[attr-defined]
+    deleted: list[int] = []
+
+    async def delete(_calendar: Any, row: Booking) -> bool:
+        deleted.append(row.id)
+        return True
+
+    monkeypatch.setattr(web.CalendarClient, "delete", delete)
+
+    client.post("/settings", data={"tab": "preferences"}, follow_redirects=False)
+
+    assert deleted == [mine.id]
+    assert mine.calendar_event_uid is None
+    assert not prefs.current().calendar_sync_enabled
 
 
 def test_a_save_comes_back_to_the_tab_it_was_made_on(client: TestClient) -> None:
@@ -2113,7 +2168,7 @@ def test_the_settings_page_still_opens_when_icloud_cannot_be_reached(
     options = client.get("/settings/calendars")
     assert options.status_code == 200
     # A sentence about what to do, not the repr of whatever was raised.
-    assert "iCloud did not answer" in options.text
+    assert "Check the iCloud connection under Accounts." in options.text
     assert "CalendarUnavailable" not in options.text
     # Marked so the picker stays shut rather than offering the failure as a choice.
     assert "data-error" in options.text

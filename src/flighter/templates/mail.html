@@ -41,7 +41,10 @@
     {# Aligned to the top of the card rather than centred on it, so the badge sits on the
        same line as the subject however many lines the words under it run to. #}
     <section class="min-w-0 self-start">
-      <h3 class="max-w-full"><span class="truncate italic">{{ v.subject }}</span></h3>
+      {# The subject is set in the sender's own words, so it is quoted rather than
+         restated. Italic overhangs its box on the last glyph, and `truncate` clips at
+         that box, so the slant is given the couple of pixels it leans into. #}
+      <h3 class="max-w-full"><span class="truncate pe-0.5 italic">{{ v.subject }}</span></h3>
       {% if v.account %}<p>{{ v.account }}</p>{% endif %}
     </section>
     <aside class="flex-col items-end gap-1 self-start">

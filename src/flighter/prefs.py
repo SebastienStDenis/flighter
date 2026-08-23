@@ -42,6 +42,12 @@ class Prefs(BaseModel):
     # carries a $100/month minimum, so the default leaves room under the $5 allowance.
     aeroapi_monthly_cap_usd: Decimal = Decimal("4.00")
 
+    # The two jobs the app runs against the mailbox and the calendar. Either can be put
+    # down without taking the account off the app: off, the mailbox is not watched and
+    # nothing is written to the calendar.
+    email_import_enabled: bool = True
+    calendar_sync_enabled: bool = True
+
     # The Apple Mail flag colour that means "import this".
     imap_flag_colour: str = "grey"
     # The collection URL of the iCloud calendar flights are written to, picked from the
@@ -49,6 +55,22 @@ class Prefs(BaseModel):
     # because a calendar renamed in the Calendar app is still the same collection, and
     # because a stored URL is a sync that costs one request instead of four.
     icloud_calendar_url: str = ""
+
+    # What the phone is told about. The master switch stops every push about a flight or
+    # an email; the rest choose between classes of news under it. All on by default,
+    # because a deployment nobody has configured should still say when a gate moves.
+    #
+    # The budget alarm is deliberately not among these: it is the one push that is about
+    # the service rather than about a trip, and it is how somebody finds out the board
+    # has stopped updating.
+    notifications_enabled: bool = True
+    notify_gate_changes: bool = True
+    notify_time_changes: bool = True
+    notify_departure_and_landing: bool = True
+    notify_baggage_claim: bool = True
+    notify_disruptions: bool = True
+    notify_imports: bool = True
+    notify_import_failures: bool = True
 
     sync_friend_flights_to_calendar: bool = False
     notify_for_friend_flights: bool = False

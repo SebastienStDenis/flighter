@@ -33,7 +33,7 @@ from typing import NamedTuple
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import notices
+from . import notices, prefs
 from .airports import UnknownAirport, airport_tz
 from .bookings import create_booking, find_duplicate, on_board_from_message
 from .config import Settings, get_settings
@@ -387,6 +387,11 @@ def wake() -> None:
     _wake.set()
 
 
+def watching(settings: Settings) -> bool:
+    """An account to sign into, and the import switched on."""
+    return settings.icloud_configured and prefs.current().email_import_enabled
+
+
 async def run_ingest_loop(stopping: asyncio.Event, *, settings: Settings | None = None) -> None:
     """Hold one IMAP connection open and import what is flagged on it, until asked to stop.
 
@@ -399,8 +404,8 @@ async def run_ingest_loop(stopping: asyncio.Event, *, settings: Settings | None 
     backoff = RECONNECT_MIN_SECONDS
 
     while not stopping.is_set():
-        if not settings.icloud_configured:
-            log.debug("iCloud is not configured; not watching for flagged mail")
+        if not watching(settings):
+            log.debug("the email import is off; not watching for flagged mail")
             await _pause(stopping, UNCONFIGURED_PAUSE_SECONDS)
             continue
 
@@ -410,8 +415,9 @@ async def run_ingest_loop(stopping: asyncio.Event, *, settings: Settings | None 
             backoff = RECONNECT_MIN_SECONDS
             # The flag colour and the sign-in were both read when the connection opened.
             # Changing either on the settings page drops out of here and connects again on
-            # the new one rather than waiting for a restart.
-            while not stopping.is_set() and mailbox.current:
+            # the new one rather than waiting for a restart, and switching the import off
+            # drops the connection rather than leaving one idling against the account.
+            while not stopping.is_set() and watching(settings) and mailbox.current:
                 await ingest_once(mailbox, settings, notifier)
                 await mailbox.wait_for_mail(IDLE_CYCLE_SECONDS, wake=_wake)
         except Exception:
@@ -447,8 +453,8 @@ async def import_flagged(*, settings: Settings | None = None) -> list[str]:
     connection for no longer than the sweep takes.
     """
     settings = settings or get_settings()
-    if not settings.icloud_configured:
-        log.warning("iCloud is not configured; there is no mail to sweep")
+    if not watching(settings):
+        log.warning("the email import is off; there is no mail to sweep")
         return []
 
     mailbox = Mailbox(settings)
