@@ -1397,7 +1397,7 @@ def test_without_a_flightaware_key_the_page_says_why_and_points_at_settings(
     with build_client(unconfigured, monkeypatch) as fresh:
         body = fresh.get("/f/new").text
 
-    assert "No FlightAware key" in body
+    assert "FlightAware connection not configured" in body
     assert 'href="/settings"' in body
     assert 'name="flight_number"' not in body
     assert "By hand" not in body
