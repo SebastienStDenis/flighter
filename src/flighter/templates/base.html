@@ -188,6 +188,46 @@
     replaced.click();
   });
 
+  // Only the icon changes, so the button keeps its size and nothing beside it moves.
+  function showCopyState(button, state) {
+    button.querySelectorAll("[data-state]").forEach(function (icon) {
+      icon.hidden = icon.dataset.state !== state;
+    });
+    var label = state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  }
+
+  async function copyText(button, id) {
+    var source = document.getElementById(id);
+    var text = (source.value === undefined ? source.textContent : source.value).trim();
+    var copied = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    } catch (error) {
+      // Browsers only offer the clipboard API on https or localhost, and this page is
+      // usually neither, so fall back to copying a selection the old way.
+      var scratch = document.createElement("textarea");
+      scratch.value = text;
+      scratch.setAttribute("readonly", "");
+      scratch.style.position = "fixed";
+      scratch.style.opacity = "0";
+      document.body.appendChild(scratch);
+      scratch.select();
+      try {
+        copied = document.execCommand("copy");
+      } catch (ignored) {
+        copied = false;
+      }
+      scratch.remove();
+    }
+    showCopyState(button, copied ? "copied" : "failed");
+    setTimeout(function () {
+      showCopyState(button, "idle");
+    }, 2000);
+  }
+
   // The shell is cached so the app opens from the home screen with no network, and the
   // last copy of each page is kept for when the server cannot be reached; see sw.js.
   if ("serviceWorker" in navigator) {
