@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "basecoat/tabs.html.jinja" as bc %}
+{% import "macros.html" as m %}
 {% block title %}Settings{% endblock %}
 {% block content %}
 
@@ -450,18 +451,6 @@
 </div>
 {% endmacro %}
 
-{% macro copy_button(target, text=False) %}
-<button class="btn gap-1.5" data-variant="outline" data-size="sm" type="button"
-        onclick="copyText(this, '{{ target }}')">
-  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-       stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <rect width="14" height="14" x="8" y="8" rx="2"/>
-    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
-  </svg>
-  <span data-label>Copy</span>
-</button>
-{% endmacro %}
-
 {% set widget %}
 <div class="card" data-size="sm">
   <header>
@@ -487,7 +476,7 @@
           <div class="relative mt-2">
             <textarea id="widget-script" class="h-24 w-full rounded-md bg-muted p-2 pr-20 font-mono text-xs"
                       readonly spellcheck="false">{{ widget_script }}</textarea>
-            <div class="absolute top-2 right-2">{{ copy_button('widget-script') }}</div>
+            <div class="absolute top-2 right-2">{{ m.copy_button('widget-script') }}</div>
           </div>
         </details>
       </div>
@@ -516,7 +505,7 @@
       <div class="relative mt-2">
         <pre id="widget-token"
              class="overflow-x-auto rounded-md bg-muted p-3 pr-20 font-mono text-xs">{{ widget_token }}</pre>
-        <div class="absolute top-1.5 right-2">{{ copy_button('widget-token') }}</div>
+        <div class="absolute top-1.5 right-2">{{ m.copy_button('widget-token') }}</div>
       </div>
       <form class="mt-3" method="post" action="/settings/widget/token"
             onsubmit="return confirm('Every phone will stop updating until it taps Connect again. Continue?')">
@@ -798,38 +787,6 @@
     event.stopPropagation();
     var form = document.getElementById(key + "-remove");
     form.requestSubmit(form.querySelector('button[name="forget"]'));
-  }
-
-  async function copyText(button, id) {
-    var source = document.getElementById(id);
-    var text = (source.value === undefined ? source.textContent : source.value).trim();
-    var copied = false;
-    try {
-      await navigator.clipboard.writeText(text);
-      copied = true;
-    } catch (error) {
-      // Browsers only offer the clipboard API on https or localhost, and this page is
-      // usually neither, so fall back to copying a selection the old way.
-      var scratch = document.createElement("textarea");
-      scratch.value = text;
-      scratch.setAttribute("readonly", "");
-      scratch.style.position = "fixed";
-      scratch.style.opacity = "0";
-      document.body.appendChild(scratch);
-      scratch.select();
-      try {
-        copied = document.execCommand("copy");
-      } catch (ignored) {
-        copied = false;
-      }
-      scratch.remove();
-    }
-    // Only the word changes, so the button keeps its width and nothing under it moves.
-    var label = button.querySelector("[data-label]");
-    label.textContent = copied ? "Copied" : "Failed";
-    setTimeout(function () {
-      label.textContent = "Copy";
-    }, 2000);
   }
 </script>
 

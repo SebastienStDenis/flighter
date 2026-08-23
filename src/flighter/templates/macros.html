@@ -221,25 +221,44 @@
 </a>
 {% endmacro %}
 
-{# A fact a person may change. The row is the control: tapping it opens the ticket
-   dialog on that box, so there is nothing to find and nothing to miss. #}
-{% macro detail(name, value, mono=false, carrier=none) %}
+{# A fact about a booking: its name on the left, its value on the right. Changing one is
+   the Edit button in the header, so the row itself is text rather than a control. #}
+{% macro detail(name, value, mono=false, carrier=none, friend=none, copy=none) %}
 <div class="item py-1" data-size="xs">
   <section><p>{{ name }}</p></section>
-  <aside class="gap-2 text-right font-medium{{ ' font-mono' if mono }}">
-    {%- if carrier %}{{ logo(carrier, "size-4") }}{% endif %}{{ value -}}
+  <aside class="gap-2 text-right {{ 'font-mono ' if mono }}{{ 'text-muted-foreground' if value == missing else 'font-medium' }}">
+    {%- if carrier %}{{ logo(carrier, "size-4") }}{% endif -%}
+    {%- if friend %}{{ friend_avatar(friend, "size-4", "text-[0.625rem]") }}{% endif -%}
+    {%- if copy %}<span id="{{ copy }}">{{ value }}</span>
+    {#- The button is taller than the line it sits on, so the row keeps the height of the
+        rows without one. #}
+    {{- copy_button(copy, size='icon-xs', classes='-my-0.5') }}
+    {%- else %}{{ value }}{% endif -%}
   </aside>
 </div>
 {% endmacro %}
 
-{% macro editable(name, value, field, mono=false, friend=none) %}
-<button class="item w-full py-1 text-left" data-size="xs" type="button"
-        onclick="editTicket('{{ field }}')" aria-label="Change {{ name|lower }}">
-  <section><p>{{ name }}</p></section>
-  <aside class="text-right {{ 'font-mono ' if mono }}{{ 'text-muted-foreground' if value == missing else 'font-medium' }}">
-    {%- if friend %}{{ friend_avatar(friend, "size-4", "text-[0.625rem]") }}{% endif %}
-    {{- value -}}
-  </aside>
+{# Icon only: it stands beside the thing it copies, where a word would push the value off
+   the line the two share. #}
+{% macro copy_button(target, size='icon-sm', classes='') %}
+<button class="btn{{ ' ' ~ classes if classes }}" data-variant="outline" data-size="{{ size }}" type="button"
+        title="Copy" aria-label="Copy" onclick="copyText(this, '{{ target }}')">
+  <svg data-state="idle" viewBox="0 0 24 24" width="14" height="14" fill="none"
+       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+       aria-hidden="true">
+    <rect width="14" height="14" x="8" y="8" rx="2"/>
+    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+  </svg>
+  <svg data-state="copied" viewBox="0 0 24 24" width="14" height="14" fill="none"
+       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+       aria-hidden="true" hidden>
+    <path d="M20 6 9 17l-5-5"/>
+  </svg>
+  <svg data-state="failed" viewBox="0 0 24 24" width="14" height="14" fill="none"
+       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+       aria-hidden="true" hidden>
+    <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+  </svg>
 </button>
 {% endmacro %}
 
