@@ -72,7 +72,7 @@ NOTIFICATION_CHOICES: Final = (
     ("notify_baggage_claim", "Baggage claim"),
     ("notify_disruptions", "Cancellations and diversions"),
     ("notify_imports", "Email imported"),
-    ("notify_import_failures", "Email that could not be read"),
+    ("notify_import_failures", "Email import errors"),
 )
 
 # Every preference the notifications card posts, master switch first.
