@@ -159,6 +159,14 @@
     @apply text-base font-semibold tracking-tight;
   }
 
+  /* The line under that title is supplementary to it, so it reads at the size everything
+     supplementary reads at - the same one the account rows describe themselves at.
+     Basecoat sets it at body size, which on a small card leaves a 14px line under a 16px
+     title and reads as a second heading rather than as a note on the first. */
+  .card > header > :is(p, [data-description], .card-description) {
+    @apply text-xs leading-snug;
+  }
+
   /* Basecoat cuts a row's text off at two lines because its rows are list entries. Here
      a row is as often a step of instructions, and a step cut off cannot be followed. */
   .item p {
