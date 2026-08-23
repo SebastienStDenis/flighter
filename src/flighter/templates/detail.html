@@ -102,16 +102,14 @@
 </div>
 
 {% set ticket_footer %}
-<button class="btn" type="submit" form="ticket-form">Save</button>
-<button class="btn" data-variant="outline" type="button"
-        onclick="this.closest('dialog').close()">Cancel</button>
+<button class="btn" id="ticket-save" type="submit" form="ticket-form">Save</button>
 {% endset %}
 {% call bc.dialog(
      id='ticket',
      title='Ticket',
      description='The flight itself is the airline\'s to state. If it is the wrong one, stop tracking it and add the right number.',
      footer=ticket_footer,
-     close_button=false) %}
+     header_attrs={'class': 'pe-8'}) %}
 <form id="ticket-form" method="post" action="/f/{{ id }}/ticket">
   <input type="hidden" name="return_tab" value="{{ return_tab }}">
   <fieldset class="fieldset gap-4">
@@ -174,8 +172,35 @@
     var isFriend = owner === "friend";
     field.hidden = !isFriend;
     input.disabled = !isFriend;
-    if (isFriend) input.focus();
+    if (!isFriend) return;
+    input.focus();
+    // Coming back to a name already typed, the caret goes after it rather than in front
+    // of it: the box is being returned to, not started.
+    input.setSelectionRange(input.value.length, input.value.length);
   }
+
+  // Save is off until the ticket would read differently. What the form would post is
+  // what counts: with Me picked the name is not sent at all, so switching owner is a
+  // change even though the box behind it still holds what it held.
+  (function () {
+    var form = document.getElementById("ticket-form");
+    var save = document.getElementById("ticket-save");
+    function state() {
+      var entered = new FormData(form);
+      return ["confirmation_code", "seat", "notes", "friend_name"]
+        .map(function (name) {
+          return (entered.get(name) || "").trim();
+        })
+        .join("\n");
+    }
+    var saved = state();
+    function showSaveState() {
+      save.disabled = state() === saved;
+    }
+    showSaveState();
+    form.addEventListener("input", showSaveState);
+    form.addEventListener("change", showSaveState);
+  })();
 </script>
 
 {% set stop_footer %}

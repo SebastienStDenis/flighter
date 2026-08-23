@@ -131,8 +131,13 @@ def _first_validation_message(exc: ValidationError) -> str:
     return f"{field.replace('_', ' ')}: {error['msg']}"
 
 
-def _posted_flag(value: Any) -> str | None:
-    """One switch as the form sent it, or None for a field this form does not carry.
+def _posted(value: Any) -> str | None:
+    """One field as the form sent it, or None for a field this form does not carry.
+
+    Read off the form rather than taken as a route parameter, because FastAPI hands an
+    empty form field back as the parameter's default - the same None a field nobody
+    posted arrives as - and a box somebody deliberately emptied is not a box that was
+    never on the form.
 
     Starlette hands back an UploadFile for a file part; nothing here posts one, and a
     preference is never read out of anything but a plain string.
@@ -141,14 +146,14 @@ def _posted_flag(value: Any) -> str | None:
 
 
 def _saved(tab: str) -> RedirectResponse:
-    """Back to the settings page, on the tab the form was on, with a save to announce.
+    """Back to the settings page, on the tab the form was on.
 
     A tab this does not know is the first one: the name is put straight into a Location
     header, so what goes into it can only ever be one of ours.
     """
     if tab not in SETTINGS_TABS:
         tab = SETTINGS_TABS[0]
-    return RedirectResponse(f"/settings?saved=1&tab={tab}", status_code=303)
+    return RedirectResponse(f"/settings?tab={tab}", status_code=303)
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -499,7 +504,6 @@ def create_app(settings: Settings) -> FastAPI:
             # import card promises. Whole minutes: nobody is timing it.
             "mail_sweep_minutes": round(IDLE_CYCLE_SECONDS / 60),
             "budget": await budget_status(session),
-            "saved": "saved" in request.query_params,
             "tab": request.query_params.get("tab"),
             # Which account row to come back open on. A save reloads the page so the row
             # redraws with what it now holds, and folding it shut on the way would hide
@@ -588,7 +592,6 @@ def create_app(settings: Settings) -> FastAPI:
     async def save_settings(
         request: Request,
         session: SessionDep,
-        public_base_url: Annotated[str | None, Form()] = None,
         log_level: Annotated[str | None, Form()] = None,
         aeroapi_monthly_cap_usd: Annotated[str | None, Form()] = None,
         imap_flag_colour: Annotated[str | None, Form()] = None,
@@ -607,10 +610,10 @@ def create_app(settings: Settings) -> FastAPI:
         """
         form = await request.form()
         entered: dict[str, str | None] = {
-            name: _posted_flag(form.get(name)) for name in NOTIFICATION_FLAGS
+            name: _posted(form.get(name)) for name in NOTIFICATION_FLAGS
         }
         entered |= {
-            "public_base_url": public_base_url,
+            "public_base_url": _posted(form.get("public_base_url")),
             "log_level": log_level.upper() if log_level is not None else None,
             "aeroapi_monthly_cap_usd": aeroapi_monthly_cap_usd,
             "imap_flag_colour": imap_flag_colour,
@@ -630,8 +633,9 @@ def create_app(settings: Settings) -> FastAPI:
         posted = {name: value.strip() for name, value in entered.items() if value is not None}
         previous = prefs.current()
         # A calendar is proved before it is stored rather than after, because the URL is
-        # all the check needs and nothing else on the form has to be undone to ask.
-        # Choosing to write to none is a choice, not a calendar that failed.
+        # all the check needs and nothing else on the form has to be undone to ask. A
+        # form carrying no calendar - none picked yet, or the picker never drawn - has
+        # nothing to prove.
         chosen = posted.get("icloud_calendar_url")
         if chosen and chosen != previous.icloud_calendar_url:
             result = await check_calendar(settings, chosen)

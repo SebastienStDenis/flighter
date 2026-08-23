@@ -4,7 +4,10 @@
 {% if error %}
 <option value="" data-error>{{ error }}</option>
 {% else %}
-<option value=""{{ ' selected' if not selected }}>Do not write to a calendar</option>
+{# Writing to none of them is what the card's own switch is for, so the picker only
+   offers calendars. Until one is picked it names what it wants rather than opening on
+   whichever calendar happens to be first. #}
+{% if not selected %}<option value="" disabled selected>Choose a calendar</option>{% endif %}
 {% for calendar in calendars %}
 <option value="{{ calendar.url }}"{{ ' selected' if calendar.url == selected }}>
   {{- calendar.name -}}</option>

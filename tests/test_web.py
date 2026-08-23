@@ -1587,6 +1587,18 @@ def test_the_address_a_page_was_opened_on_is_kept_for_the_work_that_has_no_reque
     ]
 
 
+def test_clearing_the_address_hands_it_back_to_the_one_in_use(client: TestClient) -> None:
+    """An empty override is how "work it out" is stored, so an emptied box has to reach
+    the row: a field somebody cleared arrives looking exactly like one nobody posted."""
+    client.post("/settings", data=SETTINGS_FORM | {"tab": "preferences"})
+    assert prefs.current().public_base_url == "https://flights.example.com"
+
+    client.post("/settings", data=SETTINGS_FORM | {"tab": "preferences", "public_base_url": ""})
+
+    assert prefs.current().public_base_url == ""
+    assert prefs.public_base_url("https://phone.example.com") == "https://phone.example.com"
+
+
 def test_the_schema_is_not_published(client: TestClient) -> None:
     """Nothing writes against these routes, so a map of them is only ever a gift."""
     for path in ("/docs", "/openapi.json"):
@@ -1644,8 +1656,8 @@ def test_regenerating_the_token_lands_back_on_the_widget_tab(
 
     assert minted == [True]
     assert response.status_code == 303
-    assert response.headers["location"] == "/settings?saved=1&tab=widget"
-    body = client.get("/settings?saved=1&tab=widget").text
+    assert response.headers["location"] == "/settings?tab=widget"
+    body = client.get("/settings?tab=widget").text
     assert re.search(
         r'id="settings-tabs-tab-3"\s+aria-controls="[^"]+"\s+aria-selected="true"', body
     )
@@ -2032,8 +2044,8 @@ def test_a_save_comes_back_to_the_tab_it_was_made_on(client: TestClient) -> None
         "/settings", data=SETTINGS_FORM | {"tab": "preferences"}, follow_redirects=False
     )
 
-    assert response.headers["location"] == "/settings?saved=1&tab=preferences"
-    body = client.get("/settings?saved=1&tab=preferences").text
+    assert response.headers["location"] == "/settings?tab=preferences"
+    body = client.get("/settings?tab=preferences").text
     assert re.search(
         r'id="settings-tabs-tab-2"\s+aria-controls="[^"]+"\s+aria-selected="true"', body
     )
@@ -2045,7 +2057,7 @@ def test_a_tab_nobody_drew_is_the_first_one(client: TestClient) -> None:
         "/settings", data=SETTINGS_FORM | {"tab": "../evil"}, follow_redirects=False
     )
 
-    assert response.headers["location"] == "/settings?saved=1&tab=connections"
+    assert response.headers["location"] == "/settings?tab=connections"
 
 
 def test_a_credential_comes_back_to_the_connections_tab(
@@ -2059,7 +2071,7 @@ def test_a_credential_comes_back_to_the_connections_tab(
         follow_redirects=False,
     )
 
-    assert response.headers["location"] == "/settings?saved=1&tab=connections"
+    assert response.headers["location"] == "/settings?tab=connections"
 
 
 def test_a_refused_preference_stays_on_the_tab_it_was_typed_on(client: TestClient) -> None:

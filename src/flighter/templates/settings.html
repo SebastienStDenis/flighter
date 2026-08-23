@@ -121,13 +121,13 @@
                   onclick="removeAccount(event, '{{ key }}')">Remove</button>
         </div>
       </summary>
-      <form method="post" action="/settings/credentials">
+      <form method="post" action="/settings/credentials" data-save-scope>
         <input type="hidden" name="service" value="{{ key }}">
         <fieldset class="fieldset gap-4">
           {% for field in fields %}{{ box(field, ready) }}{% endfor %}
         </fieldset>
         <div class="mt-4 flex items-center gap-2">
-          <button class="btn" data-size="sm" type="submit">Save</button>
+          <button class="btn" data-save data-size="sm" type="submit">Save</button>
           <button class="btn" data-variant="ghost" data-size="sm" type="button"
                   onclick="cancelEdit(this)">Cancel</button>
           <p class="save-error min-w-0 flex-1 text-xs text-stop" role="alert"></p>
@@ -144,14 +144,14 @@
               name="forget" value="1">Remove</button>
     </form>
     {% else %}
-    <form method="post" action="/settings/credentials">
+    <form method="post" action="/settings/credentials" data-save-scope>
       <input type="hidden" name="service" value="{{ key }}">
       <fieldset class="fieldset gap-4">
         {% for field in fields %}{{ box(field) }}{% endfor %}
       </fieldset>
       {{ caller() if caller }}
       <div class="mt-4 flex items-center gap-2">
-        <button class="btn" data-size="sm" type="submit">Save</button>
+        <button class="btn" data-save data-size="sm" type="submit">Save</button>
         <p class="save-error min-w-0 flex-1 text-xs text-stop" role="alert"></p>
       </div>
     </form>
@@ -264,7 +264,7 @@
            the flags start where a card's contents start; the bottom is topped up to the
            same 16px instead, so the row sits level between the heading and the sentence
            rather than pinned to the words under it. #}
-        <div class="mb-2.5 -mt-1.5 flex flex-wrap justify-center gap-2">
+        <div class="flag-row mb-2.5 -mt-1.5">
           {% for colour in flag_colours %}
           <label class="flag-target">
             <input type="radio" class="peer sr-only" name="imap_flag_colour"
@@ -287,7 +287,7 @@
         <strong class="flag-name" id="flag-name"
                 data-colour="{{ posted['imap_flag_colour'] }}">
           {{- posted['imap_flag_colour']|capitalize -}}</strong>
-        from any iCloud mailbox to import into Flighter. Run within
+        from any iCloud mailbox to import into Flighter. Processes within
         {{ mail_sweep_minutes }} mins.</p>
     </section>
   </div>
@@ -355,7 +355,7 @@
           {# The one preference that is not saved the moment it changes: an address being
              typed is half an address most of the way through, and every keystroke of it
              would be posted and followed. Save is what commits it. #}
-          <details class="reveal" id="address-setting" data-manual-save>
+          <details class="reveal" id="address-setting" data-manual-save data-save-scope>
             <summary>
               <span class="flex items-center justify-between gap-3">
                 <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
@@ -374,7 +374,7 @@
                    placeholder="{{ auto_base_url }}"
                    value="{{ posted['public_base_url'] }}">
             <div class="mt-3 flex items-center gap-2">
-              <button class="btn" data-size="sm" type="button"
+              <button class="btn" data-save data-size="sm" type="button"
                       onclick="saveField(this)">Save</button>
               <button class="btn" data-variant="ghost" data-size="sm" type="button"
                       onclick="cancelField(this)">Cancel</button>
@@ -392,7 +392,7 @@
         <div role="group" class="field">
           <label for="aeroapi_monthly_cap_usd">Monthly limit (USD)</label>
           {# A figure half typed is a different limit, so this one commits on Save too. #}
-          <details class="reveal" data-manual-save data-prefix="$">
+          <details class="reveal" data-manual-save data-prefix="$" data-save-scope>
             <summary>
               <span class="flex items-center justify-between gap-3">
                 <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
@@ -405,7 +405,7 @@
                    aria-describedby="cap-help"
                    value="{{ posted['aeroapi_monthly_cap_usd'] }}">
             <div class="mt-3 flex items-center gap-2">
-              <button class="btn" data-size="sm" type="button"
+              <button class="btn" data-save data-size="sm" type="button"
                       onclick="saveField(this)">Save</button>
               <button class="btn" data-variant="ghost" data-size="sm" type="button"
                       onclick="cancelField(this)">Cancel</button>
@@ -438,7 +438,7 @@
     <span class="step-number">{{ number }}</span>
     <div class="min-w-0 flex-1">
       <h4 class="text-sm font-semibold">{{ name }}</h4>
-      <p class="mt-0.5 text-xs text-muted-foreground">{{ what }}</p>
+      <p class="mt-0.5 text-xs text-muted-foreground">{{ what|safe }}</p>
     </div>
     {% if href %}
     <a class="btn shrink-0" data-variant="outline" data-size="sm" href="{{ href }}" {{ attrs|safe }}>
@@ -461,7 +461,7 @@
   <section>
     <div class="divide-y">
       {{ step(1, 'Install Scriptable', 'Free on the App Store.',
-              'https://apps.apple.com/app/scriptable/id1405459188', 'Get',
+              'https://apps.apple.com/app/scriptable/id1405459188', 'Install',
               'target="_blank" rel="noopener"') }}
       {% call step(2, 'Add the script',
                    'Open the download in Scriptable to import it as “Flighter”.',
@@ -481,10 +481,11 @@
         </details>
       </div>
       {% endcall %}
-      {{ step(3, 'Connect this phone', 'Hands Scriptable the address and the token.',
+      {{ step(3, 'Connect current device', 'Hands Scriptable configuration details.',
               widget_connect_url, 'Connect') }}
-      {{ step(4, 'Add the widget', 'Touch and hold the wallpaper, tap +, choose Scriptable,
-              then set Script to Flighter and When Interacting to Run Script.') }}
+      {{ step(4, 'Add the widget', 'Add a <strong>Scriptable</strong> widget and set
+              <strong>Script</strong> to <strong>Flighter</strong> and <strong>When
+              Interacting</strong> to <strong>Run Script</strong>.') }}
     </div>
   </section>
 </div>
@@ -500,12 +501,14 @@
         No phone has fetched flights yet.
         {%- endif -%}
       </p>
-      <p class="mt-3 text-xs text-muted-foreground">The bearer token for
-        <code>GET /api/widget</code>.</p>
+      <p class="mt-3 text-xs text-muted-foreground">Widget bearer token</p>
       <div class="relative mt-2">
         <pre id="widget-token"
              class="overflow-x-auto rounded-md bg-muted p-3 pr-20 font-mono text-xs">{{ widget_token }}</pre>
-        <div class="absolute top-1.5 right-2">{{ m.copy_button('widget-token') }}</div>
+        {# One line of token, so the button sits centred in it: the same air above it,
+           below it and beside it. #}
+        <div class="absolute top-1/2 right-1 -translate-y-1/2">
+          {{ m.copy_button('widget-token') }}</div>
       </div>
       <form class="mt-3" method="post" action="/settings/widget/token"
             onsubmit="return confirm('Every phone will stop updating until it taps Connect again. Continue?')">
@@ -531,20 +534,6 @@
      ]) }}
 </div>
 
-{% if saved %}
-<div class="toaster" data-align="center">
-  <div class="toast" role="status" aria-atomic="true">
-    <div class="toast-content">
-      <svg class="text-ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>
-      </svg>
-      <section><h2>Saved</h2></section>
-    </div>
-  </div>
-</div>
-{% endif %}
-
 <script>
   // isSecureContext is the browser's own answer to the question the service worker asks,
   // so it is right about localhost and about whatever the address is really being served
@@ -569,9 +558,7 @@
         name.textContent = colour.charAt(0).toUpperCase() + colour.slice(1);
         name.dataset.colour = colour;
       }
-      // A switch that takes effect as it is flicked is its own confirmation. Only the
-      // boxes with a Save button to press are worth a word back.
-      saveSettings(false);
+      saveSettings();
     });
   })();
 
@@ -587,7 +574,27 @@
     });
   })();
 
-  async function saveSettings(announce) {
+  // A Save that would post what is already on file has nothing to do, so it is off
+  // until a box holds something the server did not draw into it. An empty box is what
+  // "leave this one alone" is written as everywhere on this page - a stored secret is
+  // never rendered back - so emptying one is not a change either.
+  function showSaveState(scope) {
+    var save = scope.querySelector("[data-save]");
+    if (!save) return;
+    var boxes = scope.querySelectorAll("input:not([type=hidden])");
+    save.disabled = !Array.prototype.some.call(boxes, function (box) {
+      return box.value.trim() && box.value !== box.defaultValue;
+    });
+  }
+
+  document.querySelectorAll("[data-save-scope]").forEach(function (scope) {
+    showSaveState(scope);
+    scope.addEventListener("input", function () {
+      showSaveState(scope);
+    });
+  });
+
+  async function saveSettings() {
     var form = document.getElementById("settings-form");
     var response;
     try {
@@ -602,46 +609,8 @@
       form.submit();
       return false;
     }
-    if (announce) flashSaved();
     return true;
   }
-
-  function flashSaved() {
-    var already = document.querySelector(".toaster");
-    if (already) already.remove();
-    var toaster = document.createElement("div");
-    toaster.className = "toaster";
-    toaster.setAttribute("data-align", "center");
-    toaster.innerHTML =
-      '<div class="toast" role="status" aria-atomic="true"><div class="toast-content">' +
-      '<svg class="text-ok" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
-      ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-      '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>' +
-      "<section><h2>Saved</h2></section></div></div>";
-    document.body.appendChild(toaster);
-    setTimeout(function () {
-      toaster.remove();
-    }, 2000);
-  }
-
-  // A save says so and then gets out of the way.
-  (function () {
-    var toaster = document.querySelector(".toaster");
-    if (!toaster) return;
-    // The flag comes off the address at once, so reloading the page is not told about a
-    // save that already happened; the tab it came back on stays there to be reloaded on.
-    var address = new URL(location.href);
-    address.searchParams.delete("saved");
-    history.replaceState(null, "", address);
-    // Folded away, then taken off the page. A toast with nothing drawn in it still keeps
-    // its place over the heading underneath and still swallows a tap meant for it.
-    setTimeout(function () {
-      toaster.querySelector(".toast").setAttribute("aria-hidden", "true");
-      setTimeout(function () {
-        toaster.remove();
-      }, 300);
-    }, 2500);
-  })();
 
   // An empty override is what "work it out" is stored as, so handing the address back
   // is the same save as any other, with an empty box.
@@ -651,7 +620,7 @@
     event.stopPropagation();
     var box = document.getElementById("public_base_url");
     box.value = "";
-    if (!(await saveSettings(true))) return;
+    if (!(await saveSettings())) return;
     showAddressState();
   }
 
@@ -673,7 +642,7 @@
   }
 
   async function saveField(button) {
-    if (!(await saveSettings(true))) return;
+    if (!(await saveSettings())) return;
     var details = button.closest("details");
     var box = details.querySelector("input");
     if (details.id === "address-setting") {
@@ -686,6 +655,7 @@
           ? "$" + Number(typed || 0).toFixed(2)
           : typed || box.placeholder;
     }
+    showSaveState(details);
     details.open = false;
   }
 
@@ -695,6 +665,7 @@
     details.querySelectorAll("input").forEach(function (box) {
       box.value = box.defaultValue;
     });
+    showSaveState(details);
     details.open = false;
   }
 
@@ -750,7 +721,7 @@
       if (response.ok) {
         // Back on the row that was just saved, open, so what changed is what you see.
         var service = form.querySelector('input[name="service"]').value;
-        location.assign("/settings?saved=1&tab=connections&open=" + service);
+        location.assign("/settings?tab=connections&open=" + service);
         return;
       }
       var answer = await response.json().catch(function () {
@@ -775,6 +746,7 @@
     details.querySelectorAll("input").forEach(function (box) {
       box.value = box.defaultValue;
     });
+    showSaveState(details.querySelector("[data-save-scope]"));
     details.querySelector(".save-error").textContent = "";
     details.open = false;
   }

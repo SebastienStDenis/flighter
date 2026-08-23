@@ -137,6 +137,9 @@
     /* A countdown that reflows every second is unreadable, so no digit is ever allowed
        to be a different width from another. */
     @apply font-sans tabular-nums antialiased;
+    /* Narrower than this the cards start squeezing their own contents, so the page
+       stops shrinking and the window scrolls to it instead. */
+    min-width: 365px;
   }
 
   main {
@@ -303,6 +306,22 @@
     color: var(--flag);
   }
 
+  /* Six targets across, and where six do not fit, three and three. Left to wrap on its
+     own the row breaks wherever it runs out, which on the narrowest screen leaves five
+     flags on one line and the sixth under them. */
+  .flag-row {
+    @apply grid justify-center gap-2;
+    grid-template-columns: repeat(6, auto);
+  }
+
+  /* Six 44px targets and the five 8px gaps between them come to 304px, which is what
+     is left of a 368px screen once the page's padding and the card's own are off it. */
+  @media (width < 368px) {
+    .flag-row {
+      grid-template-columns: repeat(3, auto);
+    }
+  }
+
   /* The label is the 44px a thumb needs; the circle drawn inside it is smaller, so the
      mark around the chosen flag sits close to the glyph rather than around the target. */
   .flag-target {
@@ -428,6 +447,19 @@
     @apply hidden;
   }
 
+  /* Basecoat animates the height a disclosure opens to but leaves what is inside it
+     standing at full height, so a section folding away spills out of the box closing
+     over it: the frame shrinks, and then the contents disappear where they stand. */
+  details::details-content {
+    overflow: hidden;
+  }
+
+  /* Basecoat underlines a summary on hover, which is how it marks a link. These open
+     a section of the page they are already on, so the words stay as they are. */
+  .accordion > details > summary:hover {
+    @apply no-underline;
+  }
+
   /* Basecoat sizes its accordion for a page of prose. Here a disclosure sits inside a
      step or a card, where that much air reads as a gap rather than as grouping. */
   .accordion-tight > details > summary {
@@ -485,24 +517,6 @@
     @apply sticky bottom-0 z-10 -mx-4 mt-auto bg-background/85 px-4 pt-3 backdrop-blur;
     margin-bottom: calc(-1 * var(--page-end));
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
-  }
-
-  /* A save is worth a word rather than a banner, so it is said just under the header,
-     where the eye already is, and then takes itself away. Basecoat drops its toasts at
-     the foot of the screen, which is where this app keeps the button that was pressed. */
-  .toaster {
-    @apply top-0 bottom-auto flex-col items-center;
-    padding-top: calc(3.5rem + env(safe-area-inset-top) + 0.75rem);
-  }
-
-  /* As wide as the word it carries. A confirmation that spans the screen is the banner
-     this is here instead of. */
-  .toaster .toast {
-    @apply w-auto;
-  }
-
-  .toast-content {
-    @apply rounded-lg border bg-popover text-popover-foreground shadow-lg;
   }
 
   /* iOS sizes a native date control to its own picker and lets it run past a narrow

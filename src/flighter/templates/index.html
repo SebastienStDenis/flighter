@@ -41,11 +41,16 @@
     {% if set_up %}
     <p>Add a flight, or flag a booking confirmation.</p>
     {% else %}
-    <p>Nothing is connected yet. Start on the
-      <a class="btn" data-variant="link" href="/settings">settings page</a>, then flag a
-      booking confirmation.</p>
+    <p>Nothing is connected yet. Connect a service, then flag a booking confirmation.</p>
     {% endif %}
   </header>
+  {# Where to go next is a button rather than a word in the sentence: a button carries
+     its own padding, which inside a line of prose reads as a hole around the words. #}
+  {% if not set_up %}
+  <section class="mt-4">
+    <a class="btn" data-variant="outline" data-size="sm" href="/settings">Settings</a>
+  </section>
+  {% endif %}
 </section>
 {% endif %}
 {% endset %}
