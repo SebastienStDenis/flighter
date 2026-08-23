@@ -256,7 +256,8 @@
         </div>
       </fieldset>
       <p class="text-xs text-muted-foreground">Flag a booking email
-        <strong class="text-foreground">{{ posted['imap_flag_colour']|capitalize }}</strong>
+        <strong class="text-foreground" id="flag-name">
+          {{- posted['imap_flag_colour']|capitalize -}}</strong>
         in Mail and the flight appears on the board.</p>
     </section>
   </div>
@@ -518,6 +519,13 @@
     form.addEventListener("change", function (event) {
       // Everything commits as it changes except what says otherwise for itself.
       if (event.target.closest("[data-manual-save]")) return;
+      // The line under the flags names the one that is picked, and nothing reloads to
+      // redraw it.
+      if (event.target.name === "imap_flag_colour") {
+        var colour = event.target.value;
+        document.getElementById("flag-name").textContent =
+          colour.charAt(0).toUpperCase() + colour.slice(1);
+      }
       saveSettings();
     });
   })();
