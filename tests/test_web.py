@@ -26,6 +26,7 @@ from sqlalchemy.exc import IntegrityError
 from flighter import notices, prefs, web
 from flighter.aeroapi import BREAKER_KEY, BudgetExceeded, BudgetStatus
 from flighter.caldav import CalendarUnavailable, Collection
+from flighter.checks import CheckResult
 from flighter.config import Settings
 from flighter.db import get_session
 from flighter.lookup import Candidate
@@ -216,11 +217,21 @@ def build_client(
     async def same_session() -> AsyncIterator[FakeSession]:
         yield session
 
+    async def passing_check(_settings: Any, _service: str) -> CheckResult:
+        return CheckResult("stub", True, "stubbed")
+
+    async def passing_calendar(_settings: Any, _url: str | None = None) -> CheckResult:
+        return CheckResult("calendar", True, "stubbed")
+
     monkeypatch.setattr(web, "session_scope", same_session)
     monkeypatch.setattr(web.views, "get_airport", fake_get_airport)
     monkeypatch.setattr(web, "budget_status", fake_budget)
     monkeypatch.setattr(web.booking_repo, "list_bookings", no_bookings)
     monkeypatch.setattr(web.CalendarClient, "calendars", fake_calendars)
+    # Saving asks the service whether the details work. The suite stays off the network,
+    # and the tests that care about a refusal put their own answer in.
+    monkeypatch.setattr(web, "check_service", passing_check)
+    monkeypatch.setattr(web, "check_calendar", passing_calendar)
 
     app = web.create_app(settings)
     app.dependency_overrides[get_session] = lambda: session
@@ -1669,10 +1680,13 @@ def test_a_fresh_deployment_is_told_what_to_do_in_order(
     monkeypatch.setattr(prefs, "_current", prefs.Prefs())
     with build_client(unconfigured, monkeypatch) as fresh:
         body = fresh.get("/settings").text
-    assert "Start here" in body
-    for step, name in enumerate(("Apple ID", "FlightAware", "Pushover", "Calendar"), start=1):
-        assert name in body
-        assert f">{step}<" in body
+    # The badges are the signposting: every account says it is not connected, and they
+    # are drawn in the order they have to be done in.
+    at = [body.index(name) for name in ("FlightAware", "iCloud", "Pushover")]
+    assert at == sorted(at)
+    assert body.count("Not connected") >= 3
+    # The feed is the one there is no board without, so it asks louder than the rest.
+    assert "Required" in body
     # And the board says where to go rather than sitting there empty.
     assert "Nothing is connected yet" in fresh.get("/").text
 
@@ -1684,7 +1698,8 @@ def test_a_deployment_nobody_has_told_its_address_is_offered_this_one(
     monkeypatch.setattr(prefs, "_current", prefs.Prefs())
     with build_client(unconfigured, monkeypatch) as fresh:
         body = fresh.get("/settings").text
-    assert 'value="http://testserver"' in body
+    # The box is the override and stays empty; what was worked out is offered in it.
+    assert 'placeholder="http://testserver"' in body
     # The Connect link too: a phone handed the default would be told to ask itself.
     assert "api=http%3A%2F%2Ftestserver" in body
     assert "localhost:8000" not in body
@@ -1695,10 +1710,14 @@ def test_an_address_that_was_set_is_left_alone(client: TestClient) -> None:
     assert 'value="https://flights.example.com"' in client.get("/settings").text
 
 
-def test_the_first_run_signpost_goes_away_once_everything_is_set_up(
+def test_an_account_that_is_set_up_stops_asking_to_be_connected(
     client: TestClient,
 ) -> None:
-    assert "Start here" not in client.get("/settings").text
+    """The same badges, the other way round: nothing is left saying it needs doing."""
+    accounts = client.get("/settings").text.split('id="settings-tabs-panel-2"')[0]
+    assert accounts.count("Connected") >= 3
+    # The one the app cannot do without is no longer being asked for.
+    assert "Required" not in accounts
 
 
 def test_only_what_was_typed_in_is_written(
@@ -1733,6 +1752,135 @@ def test_forgetting_a_connection_clears_every_credential_it_needs(
     assert written == [{"pushover_token": "", "pushover_user_key": ""}]
 
 
+def test_details_the_service_will_not_take_are_not_kept(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Written to be tried, then put back: the check can only read what is on file."""
+    written = record_secrets(monkeypatch)
+
+    async def refuses(_settings: Any, _service: str) -> CheckResult:
+        return CheckResult("pushover", False, "token rejected")
+
+    monkeypatch.setattr(web, "check_service", refuses)
+
+    response = client.post(
+        "/settings/credentials",
+        data={"service": "pushover", "pushover_token": "wrong", "pushover_user_key": "u"},
+    )
+
+    assert response.status_code == 400
+    assert "Pushover: token rejected" in response.text
+    # What it tried, and then what was there before it tried.
+    assert written == [
+        {"pushover_token": "wrong", "pushover_user_key": "u"},
+        {"pushover_token": "app-token", "pushover_user_key": "user-key"},
+    ]
+
+
+def test_a_refusal_comes_back_as_a_reason_the_page_can_place(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Asked for over fetch, so the answer lands beside the button that was pressed."""
+    record_secrets(monkeypatch)
+
+    async def refuses(_settings: Any, _service: str) -> CheckResult:
+        return CheckResult("aeroapi", False, "key rejected")
+
+    monkeypatch.setattr(web, "check_service", refuses)
+
+    response = client.post(
+        "/settings/credentials",
+        data={"service": "flightaware", "aeroapi_key": "nope"},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "key rejected"}
+
+
+def test_a_save_that_works_says_so_without_a_page(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_secrets(monkeypatch)
+
+    response = client.post(
+        "/settings/credentials",
+        data={"service": "flightaware", "aeroapi_key": "k"},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+def test_details_the_service_takes_are_kept(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    written = record_secrets(monkeypatch)
+
+    response = client.post(
+        "/settings/credentials",
+        data={"service": "flightaware", "aeroapi_key": "k"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert written == [{"aeroapi_key": "k"}]
+
+
+def test_forgetting_is_never_refused(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A credential being thrown away does not have to work first."""
+    written = record_secrets(monkeypatch)
+
+    async def refuses(_settings: Any, _service: str) -> CheckResult:
+        raise AssertionError("a removal must not be checked")
+
+    monkeypatch.setattr(web, "check_service", refuses)
+
+    response = client.post(
+        "/settings/credentials",
+        data={"service": "pushover", "forget": "1"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert written == [{"pushover_token": "", "pushover_user_key": ""}]
+
+
+def test_a_calendar_that_does_not_answer_is_not_saved(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Proved before it is stored, so nothing has to be undone when it fails."""
+
+    async def refuses(_settings: Any, _url: str | None = None) -> CheckResult:
+        return CheckResult("calendar", False, "no longer on this account")
+
+    monkeypatch.setattr(web, "check_calendar", refuses)
+    before = prefs.current().icloud_calendar_url
+
+    response = client.post(
+        "/settings", data={"icloud_calendar_url": CALENDARS[1].url, "tab": "connections"}
+    )
+
+    assert response.status_code == 400
+    assert "Calendar: no longer on this account" in response.text
+    assert prefs.current().icloud_calendar_url == before
+
+
+def test_writing_to_no_calendar_is_a_choice_rather_than_a_failure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def refuses(_settings: Any, _url: str | None = None) -> CheckResult:
+        raise AssertionError("nothing to prove when nothing was picked")
+
+    monkeypatch.setattr(web, "check_calendar", refuses)
+
+    response = client.post("/settings", data={"icloud_calendar_url": "", "tab": "preferences"})
+
+    assert response.status_code == 200
+    assert prefs.current().icloud_calendar_url == ""
+
+
 def test_a_connection_that_does_not_exist_is_a_404(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1764,6 +1912,33 @@ def test_friend_integration_settings_are_visible_and_saved(client: TestClient) -
     assert current.sync_friend_flights_to_calendar
     assert current.notify_for_friend_flights
     assert current.show_friend_flights_in_widget
+
+
+def test_a_friend_setting_left_unticked_is_turned_off(client: TestClient) -> None:
+    """A cleared tickbox posts nothing, so the form it came from is what makes it mean off."""
+    client.post(
+        "/settings",
+        data={
+            "notify_for_friend_flights": "true",
+            "show_friend_flights_in_widget": "true",
+            "tab": "preferences",
+        },
+    )
+    assert prefs.current().notify_for_friend_flights
+
+    client.post("/settings", data={"tab": "preferences"})
+
+    assert not prefs.current().notify_for_friend_flights
+    assert not prefs.current().show_friend_flights_in_widget
+
+
+def test_a_form_without_the_tickboxes_on_it_leaves_them_alone(client: TestClient) -> None:
+    """Only the preferences form carries them, so only it may read one as unticked."""
+    client.post("/settings", data={"notify_for_friend_flights": "true", "tab": "preferences"})
+
+    client.post("/settings", data={"icloud_calendar_url": FLIGHTS_CALENDAR, "tab": "connections"})
+
+    assert prefs.current().notify_for_friend_flights
 
 
 def test_disabling_friend_calendar_sync_removes_existing_events(
@@ -1890,11 +2065,14 @@ def test_picking_a_calendar_turns_the_sync_on(client: TestClient) -> None:
     assert prefs.current().calendar_configured
 
 
-def test_the_settings_page_offers_the_calendars_the_account_has(client: TestClient) -> None:
-    body = client.get("/settings").text
+def test_the_picker_offers_the_calendars_the_account_has(client: TestClient) -> None:
+    """Fetched into the select after the page, so the page never waits on iCloud."""
+    body = client.get("/settings/calendars").text
     for calendar in CALENDARS:
         assert f'value="{calendar.url}"' in body
         assert f">{calendar.name}<" in body
+    # And the page itself carries the control but none of its options.
+    assert 'id="icloud_calendar_url"' in client.get("/settings").text
 
 
 def test_the_calendars_are_not_asked_for_until_there_is_an_account(
@@ -1911,15 +2089,17 @@ def test_the_calendars_are_not_asked_for_until_there_is_an_account(
     monkeypatch.setattr(web.CalendarClient, "calendars", counted)
     with build_client(unconfigured, monkeypatch) as fresh:
         body = fresh.get("/settings").text
+        options = fresh.get("/settings/calendars").text
 
     assert asked is False
-    assert "Connect the Apple ID above to pick a calendar." in body
+    assert "Connect iCloud under Accounts to pick a calendar." in body
+    assert CALENDARS[0].url not in options
 
 
 def test_the_settings_page_still_opens_when_icloud_cannot_be_reached(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Every other preference on the page is still editable, and the reason is on it."""
+    """Every other preference on the page is still editable, and the reason is in the picker."""
 
     async def unreachable(self: Any) -> list[Collection]:
         raise CalendarUnavailable("cannot reach caldav.icloud.com")
@@ -1928,10 +2108,15 @@ def test_the_settings_page_still_opens_when_icloud_cannot_be_reached(
 
     page = client.get("/settings")
     assert page.status_code == 200
-    # A sentence about what to do, not the repr of whatever was raised.
-    assert "iCloud did not answer" in page.text
-    assert "CalendarUnavailable" not in page.text
     assert 'name="imap_flag_colour"' in page.text
+
+    options = client.get("/settings/calendars")
+    assert options.status_code == 200
+    # A sentence about what to do, not the repr of whatever was raised.
+    assert "iCloud did not answer" in options.text
+    assert "CalendarUnavailable" not in options.text
+    # Marked so the picker stays shut rather than offering the failure as a choice.
+    assert "data-error" in options.text
 
 
 def test_a_diverted_flight_names_where_it_is_going_instead(

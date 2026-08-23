@@ -29,7 +29,7 @@ from . import bookings as booking_repo
 from . import ingest, lookup, prefs, views
 from .aeroapi import BudgetExceeded, budget_status, clear_breaker
 from .caldav import CalendarClient, CalendarUnavailable, Collection, macos_calendar_link
-from .checks import run_checks
+from .checks import check_calendar, check_service
 from .config import CREDENTIALS, SERVICES, Settings, mint_widget_token, write_secrets
 from .db import get_session, session_scope
 from .mail import FLAG_COLOURS, message_url
@@ -57,6 +57,13 @@ LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 # The settings page's tabs, in the order they are drawn. Every save comes back through a
 # redirect, and this is what carries the tab it was made on across it.
 SETTINGS_TABS = ("connections", "preferences", "widget")
+
+# The preferences a tickbox turns on, which is what makes an absent one meaningful.
+FRIEND_FLAGS = (
+    "sync_friend_flights_to_calendar",
+    "notify_for_friend_flights",
+    "show_friend_flights_in_widget",
+)
 
 # iOS reloads a widget on its own schedule, and a phone left face down for an afternoon
 # is not a broken one. A day without a fetch is.
@@ -441,12 +448,16 @@ def create_app(settings: Settings) -> FastAPI:
 
     async def settings_context(request: Request, session: AsyncSession) -> dict[str, Any]:
         current = prefs.current()
-        # Whatever the page was opened on is almost always the right answer, so a
-        # deployment nobody has told yet is shown that rather than the default, and the
-        # Connect link hands the phone the same address the form is showing.
-        address = prefs.public_base_url(str(request.base_url).rstrip("/"))
-        posted = current.model_dump(mode="json") | {"public_base_url": address}
-        calendars, calendar_error = await offered_calendars(settings.icloud_configured)
+        # Whatever the page was opened on is almost always the right answer, so the
+        # address is worked out rather than asked for, and the Connect link hands the
+        # phone the same one. The box is only the override, empty until somebody
+        # disagrees with what was worked out.
+        origin = str(request.base_url).rstrip("/")
+        address = prefs.public_base_url(origin)
+        override = current.public_base_url
+        posted = current.model_dump(mode="json") | {
+            "public_base_url": "" if override == prefs.DEFAULT_BASE_URL else override
+        }
         now = datetime.now(UTC)
         seen = await last_seen(session)
         return {
@@ -460,26 +471,31 @@ def create_app(settings: Settings) -> FastAPI:
             # The widget token is the other exception: it is handed to your own phone,
             # through the Connect link, and this page is where the phone gets it from.
             "widget_token": settings.widget_token,
+            "detected_base_url": address,
+            # What clearing the override would leave, which is not the same as what is
+            # in force while there is one.
+            "auto_base_url": prefs.automatic_base_url(origin),
             "widget_connect_url": connect_url(settings, address),
             "widget_script": script_source(),
             "widget_last_seen": views.ago(seen, now) if seen else None,
             "widget_connected": seen is not None and now - seen < WIDGET_QUIET_AFTER,
             "log_levels": LOG_LEVELS,
             "flag_colours": tuple(FLAG_COLOURS),
-            "calendars": calendars,
-            "calendar_error": calendar_error,
             "budget": await budget_status(session),
             "saved": "saved" in request.query_params,
             "tab": request.query_params.get("tab"),
+            # Which account row to come back open on. A save reloads the page so the row
+            # redraws with what it now holds, and folding it shut on the way would hide
+            # the very thing that just changed.
+            "opened": request.query_params.get("open"),
             "error": None,
         }
 
     async def offered_calendars(configured: bool) -> tuple[list[Collection], str | None]:
         """The account's calendars for the picker, or why there are none to offer.
 
-        Discovery is a network call on a page render, so it is only made once there are
-        credentials for it to use, and it is allowed to fail: a settings page that says
-        iCloud cannot be reached is worth far more than one that will not open.
+        Allowed to fail: a picker that says iCloud cannot be reached is worth far more
+        than a settings page that will not open.
         """
         if not configured:
             return [], None
@@ -491,6 +507,25 @@ def create_app(settings: Settings) -> FastAPI:
         except Exception:
             log.warning("could not list the iCloud calendars", exc_info=True)
             return [], "Something went wrong listing the calendars on this account."
+
+    @app.get("/settings/calendars")
+    async def list_calendars(request: Request) -> Response:
+        """The picker's options, fetched after the page rather than during it.
+
+        Discovery is four round trips to iCloud on a domestic connection, and putting
+        them in front of the render made every visit to settings wait on them - including
+        the visits that had nothing to do with the calendar.
+        """
+        calendars, error = await offered_calendars(settings.icloud_configured)
+        return page(
+            request,
+            "calendars.html",
+            {
+                "calendars": calendars,
+                "error": error,
+                "selected": prefs.current().icloud_calendar_url,
+            },
+        )
 
     @app.get("/settings")
     async def settings_page(request: Request, session: SessionDep) -> Response:
@@ -525,8 +560,26 @@ def create_app(settings: Settings) -> FastAPI:
             "notify_for_friend_flights": notify_for_friend_flights,
             "show_friend_flights_in_widget": show_friend_flights_in_widget,
         }
+        # A cleared checkbox posts nothing at all, which everywhere else on this route
+        # means "leave it alone". The preferences form carries all three every time, so
+        # on that form alone an absent one is a box somebody unticked.
+        if tab == "preferences":
+            for name in FRIEND_FLAGS:
+                entered[name] = entered[name] or "false"
         posted = {name: value.strip() for name, value in entered.items() if value is not None}
         previous = prefs.current()
+        # A calendar is proved before it is stored rather than after, because the URL is
+        # all the check needs and nothing else on the form has to be undone to ask.
+        # Choosing to write to none is a choice, not a calendar that failed.
+        chosen = posted.get("icloud_calendar_url")
+        if chosen and chosen != previous.icloud_calendar_url:
+            result = await check_calendar(settings, chosen)
+            if not result.ok:
+                context = await settings_context(request, session)
+                context["error"] = f"Calendar: {result.detail}"
+                context["posted"] = context["posted"] | posted
+                context["tab"] = tab
+                return page(request, "settings.html", context, status_code=400)
         try:
             updated = await prefs.save(session, posted)
         except ValidationError as exc:
@@ -563,6 +616,8 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.post("/settings/credentials")
     async def save_credentials(
+        request: Request,
+        session: SessionDep,
         service: Annotated[str, Form()],
         forget: Annotated[str, Form()] = "",
         icloud_email: Annotated[str, Form()] = "",
@@ -577,6 +632,11 @@ def create_app(settings: Settings) -> FastAPI:
         Saved one service at a time so that the boxes on the page and the values on file
         can never disagree: nothing is shown back, so a form covering all of them would
         have no way to say which blank boxes were meant.
+
+        What was typed has to work before it is kept. The credentials are the only thing
+        the check can read, so they are written, exercised, and put back as they were if
+        the service will not have them - which is what stops a typo from being saved and
+        then only noticed the next time a flight quietly fails to appear.
         """
         found = next((candidate for candidate in SERVICES if candidate.key == service), None)
         if found is None:
@@ -589,19 +649,32 @@ def create_app(settings: Settings) -> FastAPI:
             "pushover_token": pushover_token,
             "pushover_user_key": pushover_user_key,
         }
+        # The page asks over fetch so the answer can land beside the button that was
+        # pressed. A browser with no script posts the form and gets the page back.
+        wants_json = "application/json" in request.headers.get("accept", "")
         changed = _merged(found.fields, entered, forget=bool(forget))
-        if changed:
-            write_secrets(changed)
-        return _saved("connections")
+        if not changed:
+            return JSONResponse({"ok": True}) if wants_json else _saved("connections")
+        restore = {name: getattr(settings, name) for name in found.fields}
+        write_secrets(changed)
+        # Forgetting is never refused: a credential you are throwing away does not have
+        # to work first.
+        if not forget:
+            result = await check_service(settings, service)
+            if result is not None and not result.ok:
+                write_secrets(restore)
+                if wants_json:
+                    return JSONResponse({"error": result.detail}, status_code=400)
+                context = await settings_context(request, session)
+                context["error"] = f"{found.name}: {result.detail}"
+                context["tab"] = "connections"
+                return page(request, "settings.html", context, status_code=400)
+        return JSONResponse({"ok": True}) if wants_json else _saved("connections")
 
     @app.post("/settings/widget/token")
     async def rotate_widget_token() -> Response:
         mint_widget_token()
         return _saved("widget")
-
-    @app.post("/settings/checks")
-    async def run_checks_now(request: Request) -> Response:
-        return page(request, "checks.html", {"results": await run_checks(settings)})
 
     # A service worker may only control paths below its own, so this one is served from
     # the root even though it lives with the rest of the static files.

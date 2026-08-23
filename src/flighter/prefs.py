@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any, Final
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -94,19 +95,43 @@ def last_seen_origin() -> str | None:
     return _last_seen_origin
 
 
-def public_base_url(origin: str | None = None) -> str:
-    """The saved address, or the best evidence of one until there is one.
+DEFAULT_BASE_URL: Final = Prefs.model_fields["public_base_url"].default
 
-    The default only ever resolves on the machine serving the page, and nothing that
-    carries this address is read there. A request that reached this server came in on
-    an address that demonstrably works from the outside, which is the better guess until
-    somebody saves one: the request in hand when there is one, otherwise the last one
-    the app was reached on. The default is the answer only before either has happened.
+# The addresses that only resolve on the machine serving the page. A request that came
+# in on one of these proves nothing about what a phone can reach.
+LOOPBACK_HOSTS: Final = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
+
+
+def is_loopback(origin: str) -> bool:
+    return urlsplit(origin).hostname in LOOPBACK_HOSTS
+
+
+def automatic_base_url(origin: str | None = None) -> str:
+    """What the address would be with nobody having set one.
+
+    Kept apart from `public_base_url` because the settings page has to offer it while an
+    override is still in force: it is both what the box says it would fall back to and
+    what clearing the box actually gets you.
+    """
+    return origin or _last_seen_origin or DEFAULT_BASE_URL
+
+
+def public_base_url(origin: str | None = None) -> str:
+    """The address somebody set, or the best evidence of one when nobody has.
+
+    Nothing that carries this address is read on the machine serving the page, so the
+    default is never the right answer for long. A request that reached this server came
+    in on an address that demonstrably works from wherever it was typed, which is the
+    better guess: the request in hand when there is one, otherwise the last one the app
+    was reached on.
+
+    An empty setting and the default both mean "work it out", so a deployment nobody has
+    told its address follows the one it is actually being opened on.
     """
     saved = _current.public_base_url
-    if saved != Prefs.model_fields["public_base_url"].default:
+    if saved and saved != DEFAULT_BASE_URL:
         return saved
-    return origin or _last_seen_origin or saved
+    return automatic_base_url(origin)
 
 
 async def load(session: AsyncSession) -> Prefs:
@@ -124,8 +149,16 @@ async def load(session: AsyncSession) -> Prefs:
 
 
 async def remember_origin(session: AsyncSession, origin: str) -> None:
-    """Keep the address a request came in on, for the paths that have no request."""
+    """Keep the address a request came in on, for the paths that have no request.
+
+    Opening the board on the machine that serves it is not evidence of an address a
+    phone can reach, so a loopback address never displaces one that is not. Without
+    that, one visit to localhost would point every calendar entry, push and widget at
+    a host only the server itself can resolve.
+    """
     global _last_seen_origin
+    if is_loopback(origin) and _last_seen_origin and not is_loopback(_last_seen_origin):
+        return
     await session.merge(KV(key=LAST_SEEN_ORIGIN_KEY, value={"origin": origin}))
     await session.flush()
     _last_seen_origin = origin

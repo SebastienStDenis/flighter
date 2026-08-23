@@ -9,7 +9,9 @@
 {% set history = imports|rejectattr("waiting")|list %}
 
 {% if not imports %}
-<section class="empty mt-8">
+{# Basecoat's empty state grows to fill its parent and centres in it. Here the parent is
+   the page's own flex column, so without this it sits halfway down the screen. #}
+<section class="empty mt-8 flex-none">
   <header>
     <figure>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
