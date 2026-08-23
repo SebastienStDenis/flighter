@@ -22,242 +22,186 @@
 
 {# A status is a word first. The badge only colours the word it is already carrying. #}
 {% macro status(ready, done='Connected', todo='Not connected') %}
-<span class="badge" data-variant="{{ 'ok' if ready else 'quiet' }}">
+<span class="badge shrink-0" data-variant="{{ 'ok' if ready else 'quiet' }}">
   {{- done if ready else todo -}}</span>
 {% endmacro %}
 
-{# A box that is empty because nothing is stored looks exactly like a box that is empty
-   because what is stored is not being shown. Only the placeholder can tell them apart. #}
-{% macro secret(name, stored, hint='') %}
-<input type="password" id="{{ name }}" name="{{ name }}" class="font-mono" autocomplete="off"
-       aria-describedby="{{ name }}-help"
-       placeholder="{{ 'Stored. Type a new one to replace it' if stored else hint }}">
+{% macro chevron() %}
+<svg class="chevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path d="m6 9 6 6 6-6"/>
+</svg>
 {% endmacro %}
 
-{% macro step(number, name, ready, what) %}
-<div class="item" data-size="xs">
-  <aside class="w-6 shrink-0 text-center font-mono font-bold {{ 'text-ok' if ready else 'text-muted-foreground' }}">
-    {{- '&check;'|safe if ready else number -}}
-  </aside>
-  <section>
-    <h4>{{ name }}</h4>
-    <p>{{ what }}</p>
-  </section>
-  <aside>{{ status(ready, 'Done', 'To do') }}</aside>
+{# Why a setting exists, rather than what to put in it. The native attribute carries it,
+   so it opens on a tap rather than on a hover a phone cannot perform. #}
+{% macro info(id, label) %}
+<button class="btn size-6 shrink-0 p-0 text-muted-foreground" data-variant="ghost"
+        type="button" popovertarget="{{ id }}" aria-label="{{ label }}">
+  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+       stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+  </svg>
+</button>
+<div id="{{ id }}" popover>{{ caller() }}</div>
+{% endmacro %}
+
+{# A stored credential is never shown back, so the box carries dots rather than a
+   sentence: something is saved, and what you type replaces it. #}
+{% macro secret(name, label, stored, hint='', help='') %}
+<div role="group" class="field">
+  <label for="{{ name }}">{{ label }}</label>
+  <input type="password" id="{{ name }}" name="{{ name }}" class="font-mono" autocomplete="off"
+         {% if help %}aria-describedby="{{ name }}-help"{% endif %}
+         placeholder="{{ '••••••••' if stored else hint }}">
+  {% if help %}<p id="{{ name }}-help" class="text-xs">{{ help|safe }}</p>{% endif %}
 </div>
 {% endmacro %}
 
-{% macro save_row(forgettable) %}
-<div class="mt-4 flex">
-  <button class="btn" type="submit">Save</button>
-  {% if forgettable %}
-  <button class="btn ml-auto" data-variant="ghost" type="submit" name="forget" value="1">
-    Forget</button>
-  {% endif %}
-</div>
+{# One row per account, closed until there is a reason to open it: the name, whether it
+   works, and the form behind it. Each stays its own form, because nothing is rendered
+   back and only a form scoped to one service can say which empty box was meant. #}
+{% macro account(key, name, ready, detail='', todo='Not connected') %}
+<details class="setting">
+  <summary>
+    <span class="min-w-0 flex-1">
+      <span class="block font-medium">{{ name }}</span>
+      {% if detail %}
+      <span class="block truncate text-xs text-muted-foreground">{{ detail }}</span>
+      {% endif %}
+    </span>
+    {{ status(ready, 'Connected', todo) }}
+    {{ chevron() }}
+  </summary>
+  <form class="pb-4" method="post" action="/settings/credentials">
+    <input type="hidden" name="service" value="{{ key }}">
+    <fieldset class="fieldset gap-4">{{ caller() }}</fieldset>
+    <div class="mt-4 flex items-center">
+      <button class="btn" data-size="sm" type="submit">Save</button>
+      {% if ready %}
+      <button class="btn ml-auto text-stop" data-variant="ghost" data-size="sm"
+              type="submit" name="forget" value="1">Remove</button>
+      {% endif %}
+    </div>
+  </form>
+</details>
 {% endmacro %}
 
-{# One card, one service, one form: nothing is shown back, so each form covers exactly
-   the credentials somebody is looking at when they press its button, and an empty box in
-   it can only mean "leave this alone". #}
 {% set connections %}
-{% if not (icloud_ready and flightaware_ready and pushover_ready and calendar_ready) %}
-<div class="card mb-3" data-size="sm">
-  <header>
-    <h3>Start here</h3>
-    <p>Four things, in this order. Then flag a booking email
-      {{ prefs.imap_flag_colour }} and the flight appears on the board.</p>
-  </header>
+{# No heading on this one: the tab above it is already the word "Accounts". #}
+<div class="card py-1" data-size="sm">
   <section>
-    <div class="item-group -mx-2.5 w-auto">
-      {{ step(1, 'Apple ID', icloud_ready, 'The mailbox this reads and the calendar it writes') }}
-      {{ step(2, 'FlightAware', flightaware_ready, 'Where the gate, the delay and the diversion come from') }}
-      {{ step(3, 'Pushover', pushover_ready, 'How your phone is told when any of that changes') }}
-      {{ step(4, 'Calendar', calendar_ready, 'Which iCloud calendar to write to, in the card below') }}
+    <div class="divide-y">
+      {% call account('icloud', 'iCloud', icloud_ready, icloud_email) %}
+      <div role="group" class="field">
+        <label for="icloud_email">Apple ID</label>
+        <input type="email" id="icloud_email" name="icloud_email" class="font-mono"
+               autocomplete="username" placeholder="you@icloud.com" value="{{ icloud_email }}">
+      </div>
+      {{ secret('icloud_app_password', 'App-specific password',
+                connected['icloud_app_password'], 'xxxx-xxxx-xxxx-xxxx',
+                'Create one at <a href="https://appleid.apple.com" target="_blank"
+                 rel="noopener">appleid.apple.com</a>.') }}
+      {% endcall %}
+
+      {% call account('flightaware', 'FlightAware', flightaware_ready) %}
+      {{ secret('aeroapi_key', 'AeroAPI key', connected['aeroapi_key'], '',
+                'Free to $5 a month on the <a
+                 href="https://www.flightaware.com/aeroapi/signup/personal" target="_blank"
+                 rel="noopener">Personal tier</a>.') }}
+      <p class="text-xs {{ 'text-stop' if budget.tripped else 'text-muted-foreground' }}">
+        ${{ '%.2f'|format(budget.spend_usd) }} of ${{ '%.2f'|format(budget.cap_usd) }} this
+        month{{ ', so updates are paused' if budget.tripped }}.</p>
+      {% endcall %}
+
+      {% call account('pushover', 'Pushover', pushover_ready) %}
+      {{ secret('pushover_token', 'Application token', connected['pushover_token'], '',
+                'Register an app at <a href="https://pushover.net/apps/build"
+                 target="_blank" rel="noopener">pushover.net</a>.') }}
+      {{ secret('pushover_user_key', 'User key', connected['pushover_user_key'], '',
+                'On your <a href="https://pushover.net" target="_blank"
+                 rel="noopener">dashboard</a>.') }}
+      {% endcall %}
+
+      <details class="setting">
+        <summary>
+          <span class="min-w-0 flex-1">
+            <span class="block font-medium">Calendar</span>
+            <span class="block truncate text-xs text-muted-foreground">
+              {{- 'Flights are written to iCloud' if calendar_ready else 'Not writing to a calendar' -}}
+            </span>
+          </span>
+          {{ status(calendar_ready, 'On', 'Off') }}
+          {{ chevron() }}
+        </summary>
+        <div class="pb-4">
+          {% if not icloud_ready %}
+          <p class="text-sm text-muted-foreground">Connect the Apple ID above to pick a calendar.</p>
+          {% elif calendar_error %}
+          <p class="text-sm text-muted-foreground">{{ calendar_error }}</p>
+          {% else %}
+          <form method="post" action="/settings">
+            <input type="hidden" name="tab" value="connections">
+            <div role="group" class="field">
+              <label for="icloud_calendar_url" class="sr-only">Calendar</label>
+              <select id="icloud_calendar_url" name="icloud_calendar_url"
+                      aria-describedby="calendar-help">
+                <option value=""{{ ' selected' if not posted['icloud_calendar_url'] }}>
+                  Do not write to a calendar</option>
+                {% for calendar in calendars %}
+                <option value="{{ calendar.url }}"
+                        {{- ' selected' if calendar.url == posted['icloud_calendar_url'] }}>
+                  {{- calendar.name -}}</option>
+                {% endfor %}
+              </select>
+              <p id="calendar-help" class="text-xs">Make the calendar in the Calendar app
+                first. Giving flights one of their own means a bad sync is undone by
+                deleting it.</p>
+            </div>
+            <div class="mt-4"><button class="btn" data-size="sm" type="submit">Save</button></div>
+          </form>
+          {% endif %}
+        </div>
+      </details>
+
+      {% call account('anthropic', 'Anthropic', connected['anthropic_api_key'],
+                      'Reads airlines that send no structured data', 'Optional') %}
+      {{ secret('anthropic_api_key', 'API key', connected['anthropic_api_key'], '',
+                'From <a href="https://console.anthropic.com" target="_blank"
+                 rel="noopener">console.anthropic.com</a>. Only flagged email is sent.') }}
+      {% endcall %}
     </div>
+    <p class="mt-3 text-xs text-muted-foreground">An empty box keeps what is already
+      saved. <strong>Remove</strong> clears it.</p>
   </section>
 </div>
-{% endif %}
-
-<div class="card" data-size="sm">
-  <header>
-    <h3>iCloud</h3>
-    <div class="card-action">{{ status(icloud_ready) }}</div>
-    <p>One app-specific password reaches both the mailbox flights are imported from and
-      the calendar they are written to.</p>
-  </header>
-  <section>
-    <form method="post" action="/settings/credentials">
-      <input type="hidden" name="service" value="icloud">
-      <fieldset class="fieldset gap-4">
-        <div role="group" class="field">
-          <label for="icloud_email">Apple ID</label>
-          <input type="email" id="icloud_email" name="icloud_email" class="font-mono"
-                 autocomplete="username" placeholder="you@icloud.com"
-                 value="{{ icloud_email }}">
-        </div>
-        <div role="group" class="field">
-          <label for="icloud_app_password">App-specific password</label>
-          {{ secret('icloud_app_password', connected['icloud_app_password'],
-                    'xxxx-xxxx-xxxx-xxxx') }}
-          <p id="icloud_app_password-help">Make one at
-            <a href="https://appleid.apple.com" target="_blank" rel="noopener">appleid.apple.com</a>
-            under <strong>Sign-In and Security &rarr; App-Specific Passwords</strong>. Make a
-            new one and paste it here whenever you change your Apple ID password.</p>
-        </div>
-      </fieldset>
-      {{ save_row(icloud_ready) }}
-    </form>
-  </section>
-  <section class="border-t pt-4">
-    {% if not icloud_ready %}
-    <p class="text-sm text-muted-foreground">Connect the Apple ID above to pick a calendar.</p>
-    {% elif calendar_error %}
-    <p class="text-sm text-muted-foreground">{{ calendar_error }} Whichever calendar was
-      picked before is still being written to.</p>
-    {% else %}
-    <form method="post" action="/settings">
-      <input type="hidden" name="tab" value="connections">
-      <div role="group" class="field">
-        <label for="icloud_calendar_url">Calendar</label>
-        <select id="icloud_calendar_url" name="icloud_calendar_url"
-                aria-describedby="calendar-help">
-          <option value=""{{ ' selected' if not posted['icloud_calendar_url'] }}>
-            Do not write to a calendar</option>
-          {% for calendar in calendars %}
-          <option value="{{ calendar.url }}"
-                  {{- ' selected' if calendar.url == posted['icloud_calendar_url'] }}>
-            {{- calendar.name -}}</option>
-          {% endfor %}
-        </select>
-        <p id="calendar-help">Make one in the Calendar app first and give flights that one:
-          iCloud does not let this app create a calendar, and a bad sync is then undone by
-          deleting a calendar rather than by hunting among appointments.</p>
-      </div>
-      <div class="mt-4"><button class="btn" type="submit">Save calendar</button></div>
-    </form>
-    {% endif %}
-  </section>
-</div>
-
-<form class="card mt-3" data-size="sm" method="post" action="/settings/credentials">
-  <input type="hidden" name="service" value="flightaware">
-  <header>
-    <h3>FlightAware</h3>
-    <div class="card-action">{{ status(flightaware_ready) }}</div>
-    <p>Where every gate, delay, diversion and baggage belt comes from.</p>
-  </header>
-  <section>
-    <div role="group" class="field">
-      <label for="aeroapi_key">AeroAPI key</label>
-      {{ secret('aeroapi_key', connected['aeroapi_key']) }}
-      <p id="aeroapi_key-help">Sign up for the <strong>Personal</strong> tier at
-        <a href="https://www.flightaware.com/aeroapi/signup/personal" target="_blank"
-           rel="noopener">flightaware.com/aeroapi</a>, which is free up to $5 a month.</p>
-    </div>
-    <p class="mt-3 text-sm {{ 'text-stop' if budget.tripped else 'text-muted-foreground' }}">
-      ${{ '%.2f'|format(budget.spend_usd) }} of ${{ '%.2f'|format(budget.cap_usd) }} this
-      month{{ ', so updates are paused' if budget.tripped }}.</p>
-  </section>
-  <footer class="border-t">
-    <button class="btn" type="submit">Save</button>
-    {% if flightaware_ready %}
-    <button class="btn ml-auto" data-variant="ghost" type="submit" name="forget" value="1">
-      Forget</button>
-    {% endif %}
-  </footer>
-</form>
-
-<form class="card mt-3" data-size="sm" method="post" action="/settings/credentials">
-  <input type="hidden" name="service" value="pushover">
-  <header>
-    <h3>Pushover</h3>
-    <div class="card-action">{{ status(pushover_ready) }}</div>
-    <p>How the phone is told: what was imported, what changed, and what went wrong.</p>
-  </header>
-  <section>
-    <fieldset class="fieldset gap-4">
-      <div role="group" class="field">
-        <label for="pushover_token">Application token</label>
-        {{ secret('pushover_token', connected['pushover_token']) }}
-        <p id="pushover_token-help">Register this service as an application at
-          <a href="https://pushover.net/apps/build" target="_blank"
-             rel="noopener">pushover.net/apps/build</a> and copy the API token.</p>
-      </div>
-      <div role="group" class="field">
-        <label for="pushover_user_key">User key</label>
-        {{ secret('pushover_user_key', connected['pushover_user_key']) }}
-        <p id="pushover_user_key-help">On the dashboard at
-          <a href="https://pushover.net" target="_blank" rel="noopener">pushover.net</a>.
-          Install the Pushover app on the phone and sign in as the same user.</p>
-      </div>
-    </fieldset>
-  </section>
-  <footer class="border-t">
-    <button class="btn" type="submit">Save</button>
-    {% if pushover_ready %}
-    <button class="btn ml-auto" data-variant="ghost" type="submit" name="forget" value="1">
-      Forget</button>
-    {% endif %}
-  </footer>
-</form>
-
-<form class="card mt-3" data-size="sm" method="post" action="/settings/credentials">
-  <input type="hidden" name="service" value="anthropic">
-  <header>
-    <h3>Anthropic</h3>
-    <div class="card-action">{{ status(connected['anthropic_api_key'], 'Connected', 'Optional') }}</div>
-    <p>The fallback for airlines that embed no structured data. Leaving it empty costs you
-      only those emails.</p>
-  </header>
-  <section>
-    <div role="group" class="field">
-      <label for="anthropic_api_key">API key</label>
-      {{ secret('anthropic_api_key', connected['anthropic_api_key']) }}
-      <p id="anthropic_api_key-help">From
-        <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a>.
-        Only an email you flagged is ever sent.</p>
-    </div>
-  </section>
-  <footer class="border-t">
-    <button class="btn" type="submit">Save</button>
-    {% if connected['anthropic_api_key'] %}
-    <button class="btn ml-auto" data-variant="ghost" type="submit" name="forget" value="1">
-      Forget</button>
-    {% endif %}
-  </footer>
-</form>
 
 <div class="card mt-3" data-size="sm">
-  <header>
-    <h3>Checks</h3>
-    <p>Tries every connection in turn and names the one that is broken. The Pushover check
-      sends a real push.</p>
-  </header>
+  <header><h3 class="text-base font-semibold tracking-tight">Checks</h3></header>
   <section>
     <button class="btn w-full" data-variant="outline" type="button"
             onclick="runChecks(this)">Run checks</button>
+    <p class="mt-2 text-xs text-muted-foreground">Tries every account and names the one
+      that is broken. Pushover sends a real push.</p>
     <div id="checks"></div>
   </section>
 </div>
-
-<p class="mt-3 text-xs text-muted-foreground">Nothing typed here is ever shown back: an
-  empty box leaves what is stored alone, and <strong>Forget</strong> is what clears it.</p>
 {% endset %}
 
 {% set preferences %}
 <form id="settings-form" method="post" action="/settings">
   <input type="hidden" name="tab" value="preferences">
+
   <div class="card" data-size="sm">
-    <header><h3>Address</h3></header>
+    <header><h3 class="text-base font-semibold tracking-tight">Address</h3></header>
     <section>
       <div role="group" class="field">
-        <label for="public_base_url">Public base URL</label>
+        <label for="public_base_url" class="sr-only">Public base URL</label>
         <input type="url" id="public_base_url" name="public_base_url" required
                class="font-mono" aria-describedby="url-help"
                value="{{ posted['public_base_url'] }}">
-        <p id="url-help">The address your phone opens, from calendar entries, pushes and
-          the widget. It has to work when you are not at home.</p>
+        <p id="url-help" class="text-xs">What the calendar, the pushes and the widget
+          link to. It has to work away from home.</p>
       </div>
       {# Browsers refuse a service worker anywhere but https and localhost, and refuse it
          silently, so an http address means the board never opens without a connection
@@ -269,92 +213,86 @@
         </svg>
         <strong>The board will not open offline</strong>
         <section>
-          <p>You opened this over <code>http://</code>, and browsers only run a service
-            worker on <code>https://</code>, so nothing is kept for when there is no
-            connection. Serve it over <code>https://</code> and it works on its own.</p>
+          <p class="text-xs">Browsers only run a service worker on <code>https://</code>.</p>
         </section>
       </div>
     </section>
   </div>
 
   <div class="card mt-3" data-size="sm">
-    <header><h3>Import flag</h3></header>
+    <header>
+      <h3 class="text-base font-semibold tracking-tight">Import flag</h3>
+      <div class="card-action">
+        {% call info('flag-info', 'Why red is missing') %}
+        <p>Red is the one colour Apple sends with no marker, so it cannot be told apart
+          from an ordinary flag. iOS Mail also refuses to flag anything it filed under
+          Promotions, Updates or Transactions, and airline confirmations are
+          Transactions; List View has no such restriction.</p>
+        {% endcall %}
+      </div>
+    </header>
     <section>
-      <fieldset class="fieldset">
+      <fieldset>
         <legend class="sr-only">Import flag colour</legend>
-        <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <div class="flex flex-wrap justify-between gap-1">
           {% for colour in flag_colours %}
-          <label class="flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-sm has-checked:border-primary has-checked:bg-accent">
-            <input type="radio" name="imap_flag_colour" value="{{ colour }}"
-                   {{- ' checked' if colour == posted['imap_flag_colour'] }}>
-            <span class="swatch" data-colour="{{ colour }}" aria-hidden="true"></span>
-            {{ colour|capitalize }}
+          <label>
+            <input type="radio" class="peer sr-only" name="imap_flag_colour"
+                   value="{{ colour }}"{{ ' checked' if colour == posted['imap_flag_colour'] }}>
+            <span class="flag-pick" data-colour="{{ colour }}">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                   stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+                <path d="M4 22v-7" fill="none"/>
+              </svg>
+            </span>
+            <span class="sr-only">{{ colour|capitalize }}</span>
           </label>
           {% endfor %}
         </div>
-        <p class="text-sm text-muted-foreground">Give a booking email this colour of flag
-          and the flight appears on the board. Keep the colour for this and nothing else.</p>
       </fieldset>
-      <div class="accordion mt-3">
-        <details>
-          <summary>
-            Why not red?
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m6 9 6 6 6-6"/>
-            </svg>
-          </summary>
-          <p class="text-sm text-muted-foreground">Red is the one colour Apple sends with
-            no marker at all, so it cannot be told apart from an ordinary flag. Apple also
-            documents that iOS Mail will not flag anything in the Promotions, Updates or
-            Transactions categories, and airline confirmations are Transactions; List View
-            has no such restriction.</p>
-        </details>
-      </div>
+      <p class="mt-2 text-xs text-muted-foreground">Flag a booking email
+        <strong class="text-foreground">{{ posted['imap_flag_colour']|capitalize }}</strong>
+        in Mail and the flight appears on the board.</p>
     </section>
   </div>
 
   <div class="card mt-3" data-size="sm">
     <header>
-      <h3>Friends</h3>
-      <p>Choose where flights you are following for someone else should appear.</p>
+      <h3 class="text-base font-semibold tracking-tight">Friends</h3>
+      <p class="text-[0.8125rem] leading-snug">Where flights you follow for someone else
+        turn up.</p>
     </header>
-    <section class="fieldset gap-4">
-      {% set friend_options = [
-        ('sync_friend_flights_to_calendar', 'Calendar', 'Create calendar events for friends flights.'),
-        ('notify_for_friend_flights', 'Notifications', 'Send status notifications for friends flights.'),
-        ('show_friend_flights_in_widget', 'Widget', 'Include friends flights alongside yours in the widget.'),
-      ] %}
-      {% for field, label, help in friend_options %}
-      <div role="group" class="field">
-        <label for="{{ field }}">{{ label }}</label>
-        <select id="{{ field }}" name="{{ field }}" aria-describedby="{{ field }}-help">
-          <option value="false"{{ ' selected' if not posted[field] }}>Mine only</option>
-          <option value="true"{{ ' selected' if posted[field] }}>Mine and friends</option>
-        </select>
-        <p id="{{ field }}-help">{{ help }}</p>
+    <section>
+      <div class="-mt-3 divide-y border-y">
+        {% set friend_options = [
+          ('sync_friend_flights_to_calendar', 'Calendar'),
+          ('notify_for_friend_flights', 'Notifications'),
+          ('show_friend_flights_in_widget', 'Widget'),
+        ] %}
+        {% for field, label in friend_options %}
+        <div role="group" class="field py-3" data-orientation="horizontal">
+          <label for="{{ field }}" class="font-normal">{{ label }}</label>
+          <input type="checkbox" id="{{ field }}" name="{{ field }}"
+                 value="true"{{ ' checked' if posted[field] }}>
+        </div>
+        {% endfor %}
       </div>
-      {% endfor %}
     </section>
   </div>
 
   <div class="accordion mt-3 rounded-lg border px-3">
     <details>
-      <summary>
-        Advanced
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="m6 9 6 6 6-6"/>
-        </svg>
-      </summary>
+      <summary>Advanced {{ chevron() }}</summary>
       <fieldset class="fieldset gap-4 pb-3">
         <div role="group" class="field">
           <label for="aeroapi_monthly_cap_usd">Monthly limit (USD)</label>
           <input type="text" inputmode="decimal" class="font-mono" required
                  id="aeroapi_monthly_cap_usd" name="aeroapi_monthly_cap_usd"
                  aria-describedby="cap-help" value="{{ posted['aeroapi_monthly_cap_usd'] }}">
-          <p id="cap-help">Updates stop for the rest of the month once FlightAware costs
-            reach this.</p>
+          <p id="cap-help" class="text-xs">Updates stop for the rest of the month at this
+            much FlightAware spend.</p>
         </div>
         <div role="group" class="field">
           <label for="log_level">Log level</label>
@@ -374,121 +312,114 @@
 </form>
 {% endset %}
 
-{# A step with a button on it. The buttons only work on the phone: two of them open
-   Scriptable, and a desktop has nowhere to send them. #}
-{% macro action_step(number, name, what, href=None, action=None, attrs='') %}
-<div class="item items-start" data-size="xs">
-  <aside class="w-6 shrink-0 text-center font-mono font-bold leading-snug text-muted-foreground">
-    {{- number -}}
-  </aside>
-  <section class="min-w-0">
-    <h4>{{ name }}</h4>
-    <p>{{ what }}</p>
-    {{ caller() if caller }}
-  </section>
-  {% if href %}
-  <aside class="-mt-1.5">
-    <a class="btn" data-variant="outline" data-size="sm" href="{{ href }}" {{ attrs|safe }}>
+{# A step is a number, an imperative, and at most one line saying what the tap does. The
+   buttons only work on the phone: two of them open Scriptable. #}
+{% macro step(number, name, what, href=None, action=None, attrs='') %}
+<div class="py-3">
+  <div class="flex items-start gap-3">
+    <span class="step-number">{{ number }}</span>
+    <div class="min-w-0 flex-1">
+      <h4 class="text-sm font-semibold">{{ name }}</h4>
+      <p class="mt-0.5 text-xs text-muted-foreground">{{ what }}</p>
+    </div>
+    {% if href %}
+    <a class="btn shrink-0" data-variant="outline" data-size="sm" href="{{ href }}" {{ attrs|safe }}>
       {{- action -}}</a>
-  </aside>
-  {% endif %}
+    {% endif %}
+  </div>
+  {# Whatever a step opens onto starts where its own words start and runs the full width
+     of the card, so a step with a button beside it lines up with one without. #}
+  {% if caller %}<div class="mt-2 ml-9">{{ caller() }}</div>{% endif %}
 </div>
 {% endmacro %}
 
-{% macro chevron() %}
-<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-  <path d="m6 9 6 6 6-6"/>
-</svg>
+{% macro copy_button(target, text=False) %}
+<button class="btn gap-1.5" data-variant="outline" data-size="sm" type="button"
+        onclick="copyText(this, '{{ target }}')">
+  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+       stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <rect width="14" height="14" x="8" y="8" rx="2"/>
+    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+  </svg>
+  <span data-label>Copy</span>
+</button>
 {% endmacro %}
 
 {% set widget %}
 <div class="card" data-size="sm">
   <header>
-    <h3>Widget</h3>
+    <h3 class="text-base font-semibold tracking-tight">Widget</h3>
     <div class="card-action">{{ status(widget_connected) }}</div>
-    <p>The next flight's status and the time to its next milestone on the Lock Screen and
-      home screen, refreshed each minute. Open this page on the phone and work down the
-      list; nothing is typed.</p>
+    <p class="text-[0.8125rem] leading-snug">The next flight and its countdown, on the
+      Lock Screen. Work down this list on the phone.</p>
   </header>
   <section>
-    <div class="item-group -mx-2.5 w-auto">
-      {{ action_step(1, 'Get Scriptable', 'Free, on the App Store. It is what runs the widget.',
-                     'https://apps.apple.com/app/scriptable/id1405459188', 'App Store',
-                     'target="_blank" rel="noopener"') }}
-      {% call action_step(2, 'Install the script',
-                          'Opening the download imports it into Scriptable as “Flighter”.',
-                          '/widget/Flighter.scriptable', 'Install') %}
-      <div class="accordion mt-2">
+    <div class="-mt-3 divide-y border-y">
+      {{ step(1, 'Install Scriptable', 'Free on the App Store.',
+              'https://apps.apple.com/app/scriptable/id1405459188', 'Get',
+              'target="_blank" rel="noopener"') }}
+      {% call step(2, 'Add the script', 'Imports into Scriptable as “Flighter”.',
+                   '/widget/Flighter.scriptable', 'Install') %}
+      <div class="accordion">
         <details>
-          <summary>Or copy it instead {{ chevron() }}</summary>
-          <p class="text-sm text-muted-foreground">In Scriptable, tap <strong>+</strong>,
-            paste, and name the script <strong>Flighter</strong>. The name matters: the
-            Connect button below runs it by name.</p>
-          <textarea id="widget-script" class="mt-2 h-24 w-full rounded-md bg-muted p-2 font-mono text-xs"
-                    readonly spellcheck="false">{{ widget_script }}</textarea>
-          <button class="btn mt-2" data-variant="outline" data-size="sm" type="button"
-                  onclick="copyText(this, document.getElementById('widget-script').value)">
-            Copy the script</button>
+          <summary class="text-xs">Copy it manually {{ chevron() }}</summary>
+          <p class="mt-2 text-xs text-muted-foreground">In Scriptable tap <strong>+</strong>,
+            paste, and name it <strong>Flighter</strong>. The name is what step 3 runs.</p>
+          <div class="relative mt-2">
+            <textarea id="widget-script" class="h-24 w-full rounded-md bg-muted p-2 pr-20 font-mono text-xs"
+                      readonly spellcheck="false">{{ widget_script }}</textarea>
+            <div class="absolute top-2 right-2">{{ copy_button('widget-script') }}</div>
+          </div>
         </details>
       </div>
       {% endcall %}
-      {{ action_step(3, 'Connect this phone',
-                     'Hands Scriptable this address and the token. Tap it again whenever the token changes.',
-                     widget_connect_url, 'Connect') }}
-      {% call action_step(4, 'Add the widget', 'Long press the wallpaper or the Lock Screen.') %}
-      <div class="accordion mt-2">
+      {{ step(3, 'Connect this phone', 'Hands Scriptable the address and the token.',
+              widget_connect_url, 'Connect') }}
+      {% call step(4, 'Add the widget', 'Touch and hold the wallpaper, tap +, choose Scriptable.') %}
+      <div class="accordion">
         <details>
-          <summary>Home Screen {{ chevron() }}</summary>
-          <p class="text-sm text-muted-foreground">Long press the wallpaper, tap
-            <strong>+</strong>, choose Scriptable and a size. Tap the placed widget and set
+          <summary class="text-xs">Home Screen {{ chevron() }}</summary>
+          <p class="mt-2 text-xs text-muted-foreground">Tap the placed widget and set
             <strong>Script</strong> to Flighter and <strong>When Interacting</strong> to
-            <strong>Run Script</strong>. Medium and large show up to three flights, each
-            one tappable; small shows the next flight with its status and the time to its
-            next milestone.</p>
+            <strong>Run Script</strong>. Medium and large show three flights.</p>
         </details>
         <details>
-          <summary>Lock Screen {{ chevron() }}</summary>
-          <p class="text-sm text-muted-foreground">Long press the Lock Screen, tap
-            <strong>Customise</strong>, then the area under the clock. Choose Scriptable,
-            pick the rectangular widget and set <strong>Script</strong> to Flighter. Needs
-            iOS 16 or later.</p>
+          <summary class="text-xs">Lock Screen {{ chevron() }}</summary>
+          <p class="mt-2 text-xs text-muted-foreground">Touch and hold the Lock Screen, tap
+            <strong>Customise</strong>, then the area under the clock. Needs iOS 16.</p>
         </details>
       </div>
       {% endcall %}
     </div>
-  </section>
-  <section class="border-t pt-4">
-    <p class="text-sm text-muted-foreground">
+    <p class="mt-3 text-xs text-muted-foreground">
       {%- if widget_last_seen -%}
       Last fetched by a phone <strong>{{ widget_last_seen }}</strong>.
       {%- else -%}
-      No phone has fetched flights yet. Once a widget is on a screen, this updates within
-      a few minutes.
+      No phone has fetched flights yet.
       {%- endif -%}
     </p>
-    <div class="accordion mt-3 rounded-lg border px-3">
+  </section>
+  <footer class="border-t">
+    <div class="accordion w-full">
       <details>
-        <summary>Advanced {{ chevron() }}</summary>
-        <div class="pb-3">
-          <p class="text-sm text-muted-foreground">The token, for trying the endpoint by
-            hand: <code>GET /api/widget</code> with it as a bearer.</p>
-          <pre id="widget-token"
-               class="mt-2 overflow-x-auto rounded-md bg-muted p-3 font-mono text-sm">{{ widget_token }}</pre>
-          <div class="mt-3 flex">
-            <button class="btn" data-variant="outline" data-size="sm" type="button"
-                    onclick="copyText(this, document.getElementById('widget-token').textContent.trim())">
-              Copy</button>
-            <form class="ml-auto" method="post" action="/settings/widget/token"
-                  onsubmit="return confirm('Every phone will stop updating until it taps Connect again. Continue?')">
-              <button class="btn" data-variant="ghost" data-size="sm" type="submit">
-                Regenerate</button>
-            </form>
+        <summary class="text-xs">Advanced {{ chevron() }}</summary>
+        <div class="pb-1">
+          <p class="mt-2 text-xs text-muted-foreground">The bearer token for
+            <code>GET /api/widget</code>.</p>
+          <div class="relative mt-2">
+            <pre id="widget-token"
+                 class="overflow-x-auto rounded-md bg-muted p-3 pr-20 font-mono text-xs">{{ widget_token }}</pre>
+            <div class="absolute top-1.5 right-2">{{ copy_button('widget-token') }}</div>
           </div>
+          <form class="mt-3" method="post" action="/settings/widget/token"
+                onsubmit="return confirm('Every phone will stop updating until it taps Connect again. Continue?')">
+            <button class="btn text-stop" data-variant="ghost" data-size="sm" type="submit">
+              Regenerate token</button>
+          </form>
         </div>
       </details>
     </div>
-  </section>
+  </footer>
 </div>
 {% endset %}
 
@@ -499,7 +430,7 @@
      tablist_attrs={'class': 'w-full'},
      default_tab_index={'connections': 1, 'preferences': 2, 'widget': 3}.get(tab, 1),
      tabsets=[
-       {'tab': 'Connections', 'panel': connections},
+       {'tab': 'Accounts', 'panel': connections},
        {'tab': 'Preferences', 'panel': preferences},
        {'tab': 'Widget', 'panel': widget},
      ]) }}
@@ -555,7 +486,9 @@
     }
   }
 
-  async function copyText(button, text) {
+  async function copyText(button, id) {
+    var source = document.getElementById(id);
+    var text = (source.value === undefined ? source.textContent : source.value).trim();
     var copied = false;
     try {
       await navigator.clipboard.writeText(text);
@@ -577,7 +510,12 @@
       }
       scratch.remove();
     }
-    button.textContent = copied ? "Copied" : "Could not copy";
+    // Only the word changes, so the button keeps its width and nothing under it moves.
+    var label = button.querySelector("[data-label]");
+    label.textContent = copied ? "Copied" : "Failed";
+    setTimeout(function () {
+      label.textContent = "Copy";
+    }, 2000);
   }
 </script>
 

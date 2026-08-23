@@ -253,18 +253,89 @@
   }
 
   /* The Apple Mail flag colours, drawn as Mail draws them. This is the one place in the
-     app where the colour is the information rather than the emphasis. */
+     app where the colour is the information rather than the emphasis, so the control is
+     a row of the flags themselves rather than a row of dots that have to be named. */
   .swatch {
     @apply inline-block size-3.5 shrink-0 rounded-full ring-1 ring-black/15;
     background: var(--flag);
   }
 
-  .swatch[data-colour='orange'] { --flag: #ff9500; }
-  .swatch[data-colour='yellow'] { --flag: #ffcc00; }
-  .swatch[data-colour='green']  { --flag: #34c759; }
-  .swatch[data-colour='blue']   { --flag: #007aff; }
-  .swatch[data-colour='purple'] { --flag: #af52de; }
-  .swatch[data-colour='grey']   { --flag: #8e8e93; }
+  .flag-pick {
+    @apply grid size-11 cursor-pointer place-items-center rounded-full transition-colors;
+    color: var(--flag);
+  }
+
+  .flag-pick:hover {
+    background-color: color-mix(in oklab, var(--flag) 12%, transparent);
+  }
+
+  /* Selection is a shape change rather than a colour change, so it survives both
+     schemes and a light flag like yellow. The inner gap is what keeps the ring off
+     the glyph at 24px. */
+  input:checked + .flag-pick {
+    background-color: color-mix(in oklab, var(--flag) 16%, transparent);
+    box-shadow:
+      0 0 0 2px var(--card),
+      0 0 0 4px var(--flag);
+  }
+
+  input:focus-visible + .flag-pick {
+    @apply outline-2 outline-offset-2;
+    outline-color: var(--ring);
+  }
+
+  [data-colour='orange'] { --flag: #ff9500; }
+  [data-colour='yellow'] { --flag: #d99e00; }
+  [data-colour='green']  { --flag: #34c759; }
+  [data-colour='blue']   { --flag: #007aff; }
+  [data-colour='purple'] { --flag: #af52de; }
+  [data-colour='grey']   { --flag: #8e8e93; }
+
+  @media (prefers-color-scheme: dark) {
+    [data-colour='yellow'] { --flag: #ffcc00; }
+  }
+
+  /* A settings row that opens onto its own form. Closed, it is a name, what it is set
+     to, and whether it is working; nothing about a service you are not changing is on
+     screen. The whole row is the target, so it clears the 44px a thumb needs. */
+  .setting > summary {
+    @apply flex cursor-pointer list-none items-center gap-3 py-3 text-sm;
+  }
+
+  .setting > summary::-webkit-details-marker {
+    @apply hidden;
+  }
+
+  .setting > summary .chevron {
+    @apply size-4 shrink-0 text-muted-foreground transition-transform;
+  }
+
+  .setting[open] > summary .chevron {
+    @apply rotate-180;
+  }
+
+  /* The step's number, on a rail of its own so every step's text starts at the same
+     place whether its number is one digit or its title wraps. */
+  .step-number {
+    @apply grid size-6 shrink-0 place-items-center rounded-full bg-secondary
+      font-mono text-xs font-semibold text-muted-foreground;
+  }
+
+  /* Why a setting exists, rather than what to type into it: supplementary by
+     definition, so it is behind a tap and never in the way. A browser that does not
+     know the attribute leaves it closed rather than printing it inline. */
+  [popover] {
+    @apply hidden;
+  }
+
+  [popover]:popover-open {
+    @apply m-auto block w-[min(20rem,calc(100vw-2rem))] rounded-lg border bg-popover
+      p-3 text-sm text-popover-foreground shadow-lg;
+  }
+
+  [popover]::backdrop {
+    @apply bg-black/20;
+  }
 
   /* The main action of every screen, inside the thumb's reach and clear of the home
      indicator. It is the last thing on the page, so it takes the page's own end margin

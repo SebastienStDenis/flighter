@@ -58,6 +58,13 @@ LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 # redirect, and this is what carries the tab it was made on across it.
 SETTINGS_TABS = ("connections", "preferences", "widget")
 
+# The preferences a tickbox turns on, which is what makes an absent one meaningful.
+FRIEND_FLAGS = (
+    "sync_friend_flights_to_calendar",
+    "notify_for_friend_flights",
+    "show_friend_flights_in_widget",
+)
+
 # iOS reloads a widget on its own schedule, and a phone left face down for an afternoon
 # is not a broken one. A day without a fetch is.
 WIDGET_QUIET_AFTER = timedelta(days=1)
@@ -525,6 +532,12 @@ def create_app(settings: Settings) -> FastAPI:
             "notify_for_friend_flights": notify_for_friend_flights,
             "show_friend_flights_in_widget": show_friend_flights_in_widget,
         }
+        # A cleared checkbox posts nothing at all, which everywhere else on this route
+        # means "leave it alone". The preferences form carries all three every time, so
+        # on that form alone an absent one is a box somebody unticked.
+        if tab == "preferences":
+            for name in FRIEND_FLAGS:
+                entered[name] = entered[name] or "false"
         posted = {name: value.strip() for name, value in entered.items() if value is not None}
         previous = prefs.current()
         try:

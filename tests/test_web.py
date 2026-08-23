@@ -1669,10 +1669,11 @@ def test_a_fresh_deployment_is_told_what_to_do_in_order(
     monkeypatch.setattr(prefs, "_current", prefs.Prefs())
     with build_client(unconfigured, monkeypatch) as fresh:
         body = fresh.get("/settings").text
-    assert "Start here" in body
-    for step, name in enumerate(("Apple ID", "FlightAware", "Pushover", "Calendar"), start=1):
-        assert name in body
-        assert f">{step}<" in body
+    # The badges are the signposting: every account says it is not connected, and they
+    # are drawn in the order they have to be done in.
+    at = [body.index(name) for name in ("iCloud", "FlightAware", "Pushover", "Calendar")]
+    assert at == sorted(at)
+    assert body.count("Not connected") >= 3
     # And the board says where to go rather than sitting there empty.
     assert "Nothing is connected yet" in fresh.get("/").text
 
@@ -1695,10 +1696,13 @@ def test_an_address_that_was_set_is_left_alone(client: TestClient) -> None:
     assert 'value="https://flights.example.com"' in client.get("/settings").text
 
 
-def test_the_first_run_signpost_goes_away_once_everything_is_set_up(
+def test_an_account_that_is_set_up_stops_asking_to_be_connected(
     client: TestClient,
 ) -> None:
-    assert "Start here" not in client.get("/settings").text
+    """The same badges, the other way round: nothing is left saying it needs doing."""
+    accounts = client.get("/settings").text.split('id="settings-tabs-panel-2"')[0]
+    assert "Not connected" not in accounts
+    assert accounts.count("Connected") >= 3
 
 
 def test_only_what_was_typed_in_is_written(
@@ -1764,6 +1768,33 @@ def test_friend_integration_settings_are_visible_and_saved(client: TestClient) -
     assert current.sync_friend_flights_to_calendar
     assert current.notify_for_friend_flights
     assert current.show_friend_flights_in_widget
+
+
+def test_a_friend_setting_left_unticked_is_turned_off(client: TestClient) -> None:
+    """A cleared tickbox posts nothing, so the form it came from is what makes it mean off."""
+    client.post(
+        "/settings",
+        data={
+            "notify_for_friend_flights": "true",
+            "show_friend_flights_in_widget": "true",
+            "tab": "preferences",
+        },
+    )
+    assert prefs.current().notify_for_friend_flights
+
+    client.post("/settings", data={"tab": "preferences"})
+
+    assert not prefs.current().notify_for_friend_flights
+    assert not prefs.current().show_friend_flights_in_widget
+
+
+def test_a_form_without_the_tickboxes_on_it_leaves_them_alone(client: TestClient) -> None:
+    """Only the preferences form carries them, so only it may read one as unticked."""
+    client.post("/settings", data={"notify_for_friend_flights": "true", "tab": "preferences"})
+
+    client.post("/settings", data={"icloud_calendar_url": FLIGHTS_CALENDAR, "tab": "connections"})
+
+    assert prefs.current().notify_for_friend_flights
 
 
 def test_disabling_friend_calendar_sync_removes_existing_events(
