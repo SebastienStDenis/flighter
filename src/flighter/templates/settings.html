@@ -93,20 +93,30 @@
 
 {# What is already set is put back in the box, except where it is a secret: those are
    never rendered into the page, so the dots stand for them and an empty box means
-   "leave it alone". #}
+   "leave it alone".
+
+   Until there is a connection there is nothing to leave alone: an empty credential box
+   on a connection nobody has made is a connection nobody is making, so the browser says
+   so rather than the page taking a save that connects nothing. #}
 {% macro box(field, ready=False) %}
 <div role="group" class="field">
-  <label for="{{ field.name }}">{{ field.label }}</label>
+  {# What is on file is never printed back, so the box for it opens empty on a value
+     that is already there. The label says what leaving it that way means. #}
+  <label for="{{ field.name }}">{{ field.label }}
+    {%- if ready and not field.value and not field.empty %}
+    <span class="text-xs font-normal text-muted-foreground">
+      (leave blank to keep saved value)</span>
+    {%- endif %}</label>
   {# A box somebody may deliberately empty says so, because everywhere else on this
      page an empty box is one that was left alone. #}
   <input type="{{ field.type|default('password') }}" id="{{ field.name }}"
          name="{{ field.name }}" class="font-mono"
+         {% if not ready and not field.empty %}required{% endif %}
          autocomplete="{{ field.autocomplete|default('off') }}"
          {% if field.inputmode %}inputmode="{{ field.inputmode }}"{% endif %}
          {% if field.empty %}data-allow-empty{% endif %}
          {% if field.help %}aria-describedby="{{ field.name }}-help"{% endif %}
-         value="{{ field.value|default('') }}"
-         placeholder="{{ field.hint or ('••••••••••' if ready and not field.value else '') }}">
+         value="{{ field.value|default('') }}">
   {% if field.help %}
   <p id="{{ field.name }}-help" class="text-xs">{{ field.help|safe }}</p>
   {% endif %}
@@ -209,7 +219,7 @@
                      target="_blank" rel="noopener">flightaware.com</a>.'},
            {'name': 'aeroapi_monthly_cap_usd', 'label': 'Monthly spend limit',
             'type': 'text', 'inputmode': 'decimal', 'prefix': '$', 'empty': 'No limit',
-            'hint': 'No limit', 'value': posted['aeroapi_monthly_cap_usd'] or '',
+            'value': posted['aeroapi_monthly_cap_usd'] or '',
             'help': 'First $5 on FlightAware is free every month, then the next tier
                      is $100. We recommend setting below $5 to avoid hitting the
                      threshold. Leave empty for no limit.'},
@@ -217,9 +227,8 @@
 
       {{ account('icloud', 'iCloud', icloud_ready, [
            {'name': 'icloud_email', 'label': 'Apple ID', 'type': 'email',
-            'autocomplete': 'username', 'hint': 'you@icloud.com', 'value': icloud_email},
+            'autocomplete': 'username', 'value': icloud_email},
            {'name': 'icloud_app_password', 'label': 'App-specific password',
-            'hint': 'xxxx-xxxx-xxxx-xxxx',
             'help': 'Create one at <a href="https://appleid.apple.com" target="_blank"
                      rel="noopener">appleid.apple.com</a>.'},
          ], 'Import flights from email, synchronize them to your calendar') }}

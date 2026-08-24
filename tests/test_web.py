@@ -1625,6 +1625,34 @@ def test_a_connection_already_made_stays_folded_away(client: TestClient) -> None
     assert [" open" in row for row in rows] == [False, False, False, True]
 
 
+def test_a_connection_not_made_yet_cannot_be_saved_without_its_credentials(
+    unconfigured: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty box means "leave it alone" only once there is something to leave: on a
+    connection nobody has made, saving one that is still empty connects nothing."""
+    with build_client(unconfigured, monkeypatch) as fresh:
+        body = fresh.get("/settings").text
+
+    for name in ("aeroapi_key", "icloud_app_password", "pushover_token"):
+        assert re.search(rf'<input[^>]*id="{name}"[^>]*required', body)
+    # The limit is not a credential, and empty is a setting it can be left on.
+    limit = re.search(r'<input[^>]*id="aeroapi_monthly_cap_usd"[^>]*>', body)
+    assert limit is not None
+    assert "required" not in limit.group()
+
+
+def test_a_credential_on_file_says_what_leaving_its_box_empty_means(
+    client: TestClient,
+) -> None:
+    body = client.get("/settings").text
+
+    # The four secrets on file: the AeroAPI key, the app-specific password, and
+    # Pushover's two. The Apple ID is shown back, and Anthropic is not connected.
+    assert body.count("(leave blank to keep saved value)") == 4
+    # Nothing is asked for again on a connection that is already made.
+    assert not re.search(r'<input[^>]*id="icloud_app_password"[^>]*required', body)
+
+
 def test_the_settings_page_shows_what_is_connected(client: TestClient) -> None:
     body = client.get("/settings").text
     # The Apple ID names the account rather than proving anything, so it is shown back.
