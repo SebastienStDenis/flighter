@@ -20,7 +20,10 @@
 // A word is not a date, though. The label beside a countdown is frozen at the moment it was
 // drawn, so "Departs in" would still be there while the count ticked upwards past zero. The
 // server asks for a reload at that instant rather than at its usual cadence, which is as
-// close to changing the word on the spot as a widget gets.
+// close to changing the word on the spot as a widget gets - and because that is a hint iOS
+// is free to sit on, every drawing of a count whose instant has already gone by puts the
+// server's word for it where the figure would have been instead. The two are never allowed
+// to disagree: the count runs upwards only under a label that has caught up with it.
 //
 // There is nothing to edit here. The server's address and the token arrive through the
 // Connect button on the settings page, which runs this script with both in the URL, and
@@ -489,7 +492,21 @@ function milestoneWord(container, flight, size) {
 // app and part-way along it on the home screen, which is the same widget disagreeing with
 // itself. Right is the end the spacer was put there to hold it against.
 function countdown(container, flight, size) {
-  const date = container.addDate(new Date(flight.milestone_at));
+  const at = new Date(flight.milestone_at);
+  // Where the label has not caught up, the figure is the one that gives. A count is drawn
+  // once and then ticks on its own, so one started while the flight was still ahead goes on
+  // climbing after its instant with "Departs in" sat beside it - three minutes overdue
+  // drawn as three minutes to go, which is the one reading worse than no reading. The
+  // server hands over a word for exactly this, and it holds the place until a reload rolls
+  // the label and the figure over together.
+  if (flight.milestone_due && at <= new Date()) {
+    const due = container.addText(flight.milestone_due);
+    due.font = Font.boldMonospacedSystemFont(size);
+    due.rightAlignText();
+    due.lineLimit = 1;
+    return due;
+  }
+  const date = container.addDate(at);
   date.applyTimerStyle();
   // Bold rather than semibold. The two are the same weight to look at when a Mac draws
   // an iPhone's widget, so the count reads as heavier than the row on a mirrored screen

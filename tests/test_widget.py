@@ -113,6 +113,7 @@ def test_upcoming_flight(settings: Settings) -> None:
         # footer for one either.
         "milestone_label": None,
         "milestone_at": None,
+        "milestone_due": None,
     }
 
 
@@ -624,6 +625,43 @@ def test_a_count_already_past_zero_is_not_asked_about_again(settings: Settings) 
     flight = payload([(booking(), overdue)], settings)
     assert counting(flight["flights"][0])[0] == "Due to depart"
     assert flight["refresh_seconds"] == 600
+
+
+# --- what the count does when the label cannot follow it --------------------------------
+
+
+def test_a_count_still_ahead_carries_the_word_for_when_it_is_not(settings: Settings) -> None:
+    """The reload asked for at the instant is a hint iOS may sit on, so the payload has
+    to say what the phone should draw if it is still showing this one afterwards.
+
+    A label is a word and words do not tick: whatever "Departs in" said when this was
+    built is what it says until something reloads the widget. A figure that goes on
+    climbing beside it draws three minutes overdue as three minutes to go, so the figure
+    is the one that gives.
+    """
+    ahead = snapshot(scheduled_out=NOW + timedelta(minutes=4))
+    flight = payload([(booking(), ahead)], settings)["flights"][0]
+    assert counting(flight) == ("Departs in", "2026-09-12T18:04:00Z")
+    assert flight["milestone_due"] == "Due"
+
+
+def test_a_count_whose_label_has_caught_up_is_free_to_run_upwards(settings: Settings) -> None:
+    """Once the label itself says "Due to depart" there is nothing left to disagree with,
+    and how far past due a flight is is worth knowing."""
+    overdue = snapshot(scheduled_out=NOW - timedelta(minutes=3))
+    flight = payload([(booking(), overdue)], settings)["flights"][0]
+    assert counting(flight)[0] == "Due to depart"
+    assert flight["milestone_due"] is None
+
+
+def test_the_script_stands_the_count_down_rather_than_let_it_pass_its_label() -> None:
+    """The phone draws the server's word where the figure would have gone, and only ever
+    ticks a count upwards under a label that has caught up with it."""
+    source = script_source()
+    timer = source[source.index("function countdown(") : source.index("function pill(")]
+    guard = timer[: timer.index("applyTimerStyle()")]
+    assert "flight.milestone_due && at <= new Date()" in guard
+    assert "addText(flight.milestone_due)" in guard
 
 
 def test_no_flights(settings: Settings) -> None:

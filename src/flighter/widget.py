@@ -64,6 +64,15 @@ POLL_STALE_AFTER: Final = timedelta(minutes=45)
 
 PHASES_IMMINENT: Final = frozenset({DAY_OF, TAXIING, AIRBORNE, DIVERTED})
 
+# What stands where the count is, once the count's instant has gone by and nothing has
+# reloaded the widget to catch its label up. The board rolls the two over together - the
+# words become "Due to depart" the same minute the figure starts saying "ago" - because a
+# page has a script ticking every minute to do it with. A widget has only the date, which
+# WidgetKit ticks and nothing else, so the label stays exactly as it was drawn. One of the
+# two therefore has to give, and it is the figure: a word that is merely coarse beats a
+# number that is precisely wrong.
+MILESTONE_DUE_WORD: Final = "Due"
+
 # The script is served from here rather than fetched from a repository, so the phone
 # always runs the version that matches the server answering it.
 SCRIPT_FILE: Final = Path(__file__).parent / "static" / "flights-widget.js"
@@ -104,6 +113,11 @@ class WidgetFlight(BaseModel):
     # instant that goes over rather than a figure that would be stale on arrival.
     milestone_label: str | None
     milestone_at: str | None
+    # The word to draw in the count's place if its instant goes by before this payload is
+    # replaced. Absent once the label has caught up on its own - a payload built after the
+    # instant already says "Due to depart", and a figure climbing beside that is the useful
+    # one, because how far past due a flight is is worth knowing.
+    milestone_due: str | None
 
 
 class WidgetPayload(BaseModel):
@@ -353,6 +367,7 @@ def _flight(
         ),
         milestone_label=counting_to[0] if counting_to else None,
         milestone_at=_iso_z(counting_to[1]) if counting_to else None,
+        milestone_due=_due_word(counting_to, now),
     )
 
 
@@ -381,6 +396,19 @@ def _milestone(
     if next_up is None:
         return None
     return views.milestone_label(next_up, now), next_up.target
+
+
+def _due_word(counting_to: tuple[str, datetime] | None, now: datetime) -> str | None:
+    """The word to hand the phone for the moment the count would start lying.
+
+    Nothing here knows when iOS will next reload the widget - the reload asked for at the
+    instant itself is a hint it may sit on - so the payload has to carry what the phone
+    should do if it is still drawing this one afterwards. Nothing at all once the label
+    has caught up already, which is the case where the count is meant to run upwards.
+    """
+    if counting_to is None or counting_to[1] <= now:
+        return None
+    return MILESTONE_DUE_WORD
 
 
 def _detail(

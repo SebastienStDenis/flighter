@@ -135,10 +135,28 @@ moves, and whoever reads it measures it against their own clock.
 A word is not a date, though, and that is the one thing the phone cannot repair for
 itself. `Departs in` is drawn once and stays drawn while the count beside it ticks up
 past zero, which reads as three minutes to go when the flight is three minutes overdue.
-So the server does not ask for its usual cadence when a rung is closer than that: it
-asks for the reload at the instant the wording changes, and the row is wrong only for as
-long as iOS makes it wait. Otherwise the cadence is the server's own polling cadence for
-the closest flight on the list.
+
+Two things are done about it. The server does not ask for its usual cadence when a rung
+is closer than that: it asks for the reload at the instant the wording changes, so the
+label and the figure roll over together. And because that is a hint iOS is free to sit
+on, the payload also carries the word to put **where the figure goes** if it does -
+`Due`. Any drawing of a count whose instant has already passed, while the label beside
+it still says the flight has not left, puts that word in the figure's place instead of a
+number:
+
+```
+Departs in  02:14   →   Departs in  Due   →   Due to depart  03:47
+   ahead of time         its time, no          reloaded: both rolled
+                         reload yet            over, counting up
+```
+
+The count only ever runs upwards under a label that has caught up with it, and how far
+past due a flight is is worth knowing once it has. Outside that, the cadence is the
+server's own polling cadence for the closest flight on the list.
+
+The one case nothing reaches is a widget iOS never redraws at all: no script runs, so
+there is nothing to swap the figure out. The word is drawn at the next redraw, whenever
+that is - which is also the first moment anything on the widget could have changed.
 
 The bottom of the widget always says how old what is drawn is - `Updated 04:12 ago`,
 counting up as you look at it. The last good response is cached to the Scriptable
