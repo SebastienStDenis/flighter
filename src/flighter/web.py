@@ -538,10 +538,10 @@ def create_app(settings: Settings) -> FastAPI:
             return await CalendarClient(settings).calendars(), None
         except CalendarUnavailable:
             log.warning("could not list the iCloud calendars", exc_info=True)
-            return [], "Check the iCloud connection under Accounts."
+            return [], "Check the iCloud connection under Connections."
         except Exception:
             log.warning("could not list the iCloud calendars", exc_info=True)
-            return [], "Check the iCloud connection under Accounts."
+            return [], "Check the iCloud connection under Connections."
 
     @app.get("/settings/calendars")
     async def list_calendars(request: Request) -> Response:

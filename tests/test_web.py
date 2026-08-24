@@ -1607,6 +1607,24 @@ def test_the_schema_is_not_published(client: TestClient) -> None:
 # --- Settings ------------------------------------------------------------------------
 
 
+def test_a_connection_that_is_not_made_yet_opens_on_the_way_in(
+    unconfigured: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rows worth doing something about are the ones that are not done."""
+    with build_client(unconfigured, monkeypatch) as fresh:
+        rows = re.findall(r'<details class="setting"([^>]*)>', fresh.get("/settings").text)
+
+    assert rows and all(" open" in row for row in rows)
+
+
+def test_a_connection_already_made_stays_folded_away(client: TestClient) -> None:
+    body = client.get("/settings").text
+    rows = re.findall(r'<details class="setting"([^>]*)>', body)
+
+    # Anthropic is the one this deployment has not connected.
+    assert [" open" in row for row in rows] == [False, False, False, True]
+
+
 def test_the_settings_page_shows_what_is_connected(client: TestClient) -> None:
     body = client.get("/settings").text
     # The Apple ID names the account rather than proving anything, so it is shown back.
@@ -2311,7 +2329,7 @@ def test_the_settings_page_still_opens_when_icloud_cannot_be_reached(
     options = client.get("/settings/calendars")
     assert options.status_code == 200
     # A sentence about what to do, not the repr of whatever was raised.
-    assert "Check the iCloud connection under Accounts." in options.text
+    assert "Check the iCloud connection under Connections." in options.text
     assert "CalendarUnavailable" not in options.text
     # Marked so the picker stays shut rather than offering the failure as a choice.
     assert "data-error" in options.text

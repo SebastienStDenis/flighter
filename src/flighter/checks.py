@@ -47,7 +47,7 @@ async def _check_aeroapi(settings: Settings) -> CheckResult:
     one call path able to run the bill past the cap.
     """
     if not settings.aeroapi_configured:
-        return CheckResult("aeroapi", False, "add a FlightAware key under Accounts")
+        return CheckResult("aeroapi", False, "add a FlightAware key under Connections")
     try:
         payload = await shared_client().flight_info("UAL4", ident_type="designator")
     except BudgetExceeded as exc:
@@ -68,7 +68,7 @@ async def _check_aeroapi(settings: Settings) -> CheckResult:
 
 async def _check_pushover(settings: Settings) -> CheckResult:
     if not settings.pushover_configured:
-        return CheckResult("pushover", False, "add a Pushover token and user key under Accounts")
+        return CheckResult("pushover", False, "add a Pushover token and user key under Connections")
     try:
         await Notifier(settings).check()
     except Exception as exc:
@@ -84,7 +84,7 @@ async def _check_mail(settings: Settings) -> CheckResult:
     """
     if not settings.icloud_configured:
         return CheckResult(
-            "mail", False, "add an Apple ID and app-specific password under Accounts"
+            "mail", False, "add an Apple ID and app-specific password under Connections"
         )
     from .mail import Mailbox
 
@@ -138,7 +138,7 @@ async def check_calendar(settings: Settings, url: str | None = None) -> CheckRes
 async def _check_anthropic(settings: Settings) -> CheckResult:
     """Lists the models, which proves the key without spending a token to do it."""
     if not settings.anthropic_api_key:
-        return CheckResult("anthropic", False, "add an Anthropic key under Accounts")
+        return CheckResult("anthropic", False, "add an Anthropic key under Connections")
     from anthropic import AsyncAnthropic
 
     client = AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)

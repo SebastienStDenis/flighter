@@ -43,7 +43,7 @@
     <path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/>
   </svg>
   <span>Connect {{ service }} in <a class="btn align-middle" data-variant="outline"
-      data-size="xs" href="/settings?tab=connections">Accounts</a> to {{ what }}.</span>
+      data-size="xs" href="/settings?tab=connections">Connections</a> to {{ what }}.</span>
 </p>
 {% endmacro %}
 
@@ -117,8 +117,10 @@
    what is on file and keeps the boxes behind a button, so the common case is something
    to read rather than a form to be careful around. Each stays its own form, because
    only a form scoped to one service can say which empty box was meant. #}
+{# An account that is not connected is the one thing on this tab there is something to
+   do about, so it opens on the way in rather than waiting to be found. #}
 {% macro account(key, name, ready, fields, detail='', todo='Not connected', tone='quiet') %}
-<details class="setting"{{ ' open' if opened == key }}>
+<details class="setting"{{ ' open' if opened == key or not ready }}>
   <summary>
     <span class="min-w-0 flex-1">
       <span class="block font-medium">{{ name }}</span>
@@ -191,7 +193,7 @@
 {% endmacro %}
 
 {% set connections %}
-{# No heading on this one: the tab above it is already the word "Accounts". #}
+{# No heading on this one: the tab above it is already the word "Connections". #}
 <div class="card py-1" data-size="sm">
   <section>
     <div class="divide-y">
@@ -206,11 +208,9 @@
            {'name': 'aeroapi_monthly_cap_usd', 'label': 'Monthly spend limit',
             'type': 'text', 'inputmode': 'decimal', 'prefix': '$', 'empty': 'No limit',
             'hint': 'No limit', 'value': posted['aeroapi_monthly_cap_usd'] or '',
-            'help': 'Updates stop for the rest of the month at this much spend. The
-                     first $5 a month is free on FlightAware\'s Personal tier and the
-                     tier above it starts at $100 a month, so a limit under $5 is what
-                     keeps a deployment inside the free allowance. Leave empty for no
-                     limit.'},
+            'help': 'First $5 on FlightAware is free every month, then the next tier
+                     is $100. We recommend setting below $5 to avoid hitting the
+                     threshold. Leave empty for no limit.'},
          ], 'Source for flight details', 'Required', 'stop') }}
 
       {{ account('icloud', 'iCloud', icloud_ready, [
@@ -293,7 +293,7 @@
 
   <div class="card mt-3" data-size="sm">
     <header>
-      <h3>Email import</h3>
+      <h3>Email Import</h3>
       <div class="card-action">
         {{ toggle('email_import_enabled', 'Email import', 'import-settings',
                   icloud_ready) }}
@@ -438,8 +438,8 @@
              while nobody has set one, so that is the sentence that comes and goes. #}
           <p id="url-help" class="text-xs">Used for linking to Flighter from the widget
             and calendar events.
-            <span data-when="auto"{{ ' hidden' if manual }}>Set from the latest address
-              used to access Flighter.</span></p>
+            <span data-when="auto"{{ ' hidden' if manual }}>Automatically set from the
+              latest address used to access Flighter.</span></p>
         </div>
         <div role="group" class="field">
           <label for="log_level">Log level</label>
@@ -574,7 +574,7 @@
      tablist_attrs={'class': 'w-full'},
      default_tab_index={'connections': 1, 'preferences': 2, 'widget': 3}.get(tab, 1),
      tabsets=[
-       {'tab': 'Accounts', 'panel': connections},
+       {'tab': 'Connections', 'panel': connections},
        {'tab': 'Preferences', 'panel': preferences},
        {'tab': 'Widget', 'panel': widget},
      ]) }}
