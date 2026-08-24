@@ -13,11 +13,16 @@
 {# The rule between two airports, with the aircraft at the fraction of the way it has
    actually flown. Until it leaves there is no fraction, so the rule carries how long
    the hop is instead. The list and the flight page both draw it, so it is one piece. #}
+{# The aircraft is coloured by who says it is there: the feed's own figure, or wheels-up
+   and a landing estimate, are drawn in the tone the app uses for a flight under way. A
+   place worked out from the ticket alone - nothing has been seen of this flight yet - is
+   drawn in the tone of the dashes it sits on, which is what the rest of the card says
+   about an unconfirmed thing. #}
 {% macro route_line(v) %}
 {% set progress = v.progress_percent %}
 {% set window = v.airborne_window %}
 {% set length = v.block_time %}
-<div class="route-line {{ 'text-plan' if progress else 'text-muted-foreground/50' }}"
+<div class="route-line {{ 'text-plan' if progress and v.progress_confirmed else 'text-muted-foreground/50' }}"
      style="--progress: {{ progress or 0 }}%"{% if window %} data-off="{{ window[0].isoformat() }}" data-on="{{ window[1].isoformat() }}"{% endif %}>
   {% if length %}
   <span class="route-mark left-1/2 bg-card px-1.5 font-mono text-[0.6875rem] whitespace-nowrap text-muted-foreground">

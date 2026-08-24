@@ -430,6 +430,71 @@ def test_a_flight_that_has_landed_is_drawn_all_the_way_there() -> None:
     assert view(booking(scheduled_departure_utc=leaves), airborne).progress_percent < 100
 
 
+def test_a_flight_imported_mid_air_is_drawn_where_the_ticket_puts_it() -> None:
+    """The one state with no observation at all: a flight added while it is already
+    flying has no snapshot until the poller's first look, and a spent budget or a number
+    FlightAware cannot resolve can leave it that way. Pinned to the origin under a rule
+    saying how long the hop will take, the card says a flight three hours out of Montreal
+    has not left. The ticket is what is left to go on, and it is what every other figure
+    on the card is already using.
+    """
+    leaves, lands = now_ish(hours=-3), now_ish(hours=4)
+    v = view(booking(scheduled_departure_utc=leaves, scheduled_arrival_utc=lands), None)
+    assert v.progress_percent == 43
+    # Nobody saw it: the aircraft is drawn in the tone of the dashes rather than as a
+    # flight the feed is following.
+    assert v.progress_confirmed is False
+    # And the rule carries the aircraft rather than the length of a hop already begun.
+    assert v.block_time is None
+    assert v.airborne_window == (leaves, lands)
+
+
+def test_a_flight_not_yet_due_out_keeps_the_length_of_the_hop() -> None:
+    """The other side of that line: nothing is claimed about where an aircraft is until
+    the flight is due to have gone."""
+    leaves, lands = now_ish(hours=2), now_ish(hours=9)
+    v = view(booking(scheduled_departure_utc=leaves, scheduled_arrival_utc=lands), None)
+    assert v.block_time == lands - leaves
+    assert v.progress_percent is None
+    assert v.airborne_window is None
+
+
+def test_a_diverted_flight_moves_along_the_rule_like_any_other() -> None:
+    """It is filed under the diversion because where it lands is the point, and that is
+    no reason for the aircraft on it to stop where the last poll left it."""
+    leaves, lands = now_ish(hours=-3), now_ish(hours=1)
+    diverted = snapshot(
+        actual_out=leaves,
+        actual_off=leaves,
+        estimated_on=lands,
+        diverted=True,
+        destination_iata="YOW",
+        progress_percent=61,
+    )
+    v = view(booking(scheduled_departure_utc=leaves), diverted)
+    assert v.phase == DIVERTED
+    assert v.progress_percent == 75
+    assert v.progress_confirmed is True
+    assert v.airborne_window == (leaves, lands)
+
+
+def test_a_diverted_flight_that_has_landed_is_all_the_way_there() -> None:
+    """The rule ends at the airport it was sent to, and that is where it is."""
+    leaves = now_ish(hours=-5)
+    down = snapshot(
+        actual_out=leaves,
+        actual_off=leaves,
+        actual_on=now_ish(minutes=-10),
+        diverted=True,
+        destination_iata="YOW",
+        progress_percent=88,
+    )
+    v = view(booking(scheduled_departure_utc=leaves), down)
+    assert v.phase == DIVERTED
+    assert v.progress_percent == 100
+    assert v.airborne_window is None
+
+
 def test_a_cancelled_flight_is_drawn_at_the_origin() -> None:
     """The poller closes a cancelled booking too, but the aircraft never left."""
     closed = booking(scheduled_departure_utc=now_ish(days=-1), status=BookingStatus.COMPLETED)
