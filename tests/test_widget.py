@@ -992,19 +992,17 @@ def test_a_small_widget_holds_two_flights_of_four_lines() -> None:
     assert "widget.addSpacer(SMALL_GAP * 2)" in drawn
 
 
-def test_the_small_size_spends_its_last_line_on_a_flight() -> None:
-    """Eight lines of flight and an age do not both fit on a square that size, and the
-    lock screen already answers that the same way. What is actually wrong with the data -
-    a spent budget, a feed that has stopped - is not the age, and keeps its line on every
-    size: it is worth a flight's line."""
+def test_every_home_screen_size_says_how_old_what_it_is_showing_is() -> None:
+    """Including the small one, holding two flights of four lines. Only the lock screen
+    goes without, where three lines is the whole widget and the age is said in the
+    message instead."""
     source = script_source()
     drawn = source[
         source.index("async function buildWidget(") : source.index("function newWidget(")
     ]
-    assert 'footer(widget, data, family === "small" ? null : result);' in drawn
-    footer = source[source.index("function footer(") : source.index('// "Updated')]
-    assert "data.degraded" in footer
-    assert "if (result) {\n    updatedLine(widget, result);" in footer
+    assert "footer(widget, data, result);" in drawn
+    assert 'family === "small" ? null' not in drawn
+    assert "isAccessory ? staleNote(result) : null" in drawn
 
 
 def test_the_count_is_drawn_bigger_than_the_row_it_is_read_off() -> None:

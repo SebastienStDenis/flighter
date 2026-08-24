@@ -308,11 +308,11 @@ async function buildWidget(result) {
     renderList(widget, flights, logos);
   }
   widget.addSpacer();
-  // Four lines a flight and two flights is the whole of a small widget's height, so the
-  // age goes there the way it goes on the lock screen: the sizes with room for it carry
-  // it. What is actually wrong with the data is not the age, and that keeps its line on
-  // every size - a widget that has stopped being told anything is worth a flight's line.
-  footer(widget, data, family === "small" ? null : result);
+  // On every home screen size, two flights of four lines included. The height this was
+  // held off the small one for is height the small one turns out to have: the figures
+  // here are worked out from the point sizes, and the phone is what says how tall a
+  // line of them really is.
+  footer(widget, data, result);
   return widget;
 }
 
@@ -573,8 +573,6 @@ function pill(container, flight) {
 // The bottom of the widget: why the numbers might be wrong, when there is a reason, and
 // under it how old the numbers are, always. Two lines rather than one because a budget
 // breaker's sentence and a running clock do not share a row on a small widget.
-// `result` is what the age is read off, and the size with no line to spare for one is
-// handed none.
 function footer(widget, data, result) {
   if (data.degraded) {
     const text = widget.addText(data.degraded_reason || "Status may be out of date");
@@ -583,9 +581,7 @@ function footer(widget, data, result) {
     text.lineLimit = 1;
     text.minimumScaleFactor = 0.7;
   }
-  if (result) {
-    updatedLine(widget, result);
-  }
+  updatedLine(widget, result);
 }
 
 // "Updated 04:12 ago", counted by WidgetKit rather than worked out here.
