@@ -986,7 +986,7 @@ def test_a_small_widget_holds_two_flights_of_four_lines() -> None:
     drawn = source[source.index("function renderSmall(") : source.index("function renderList(")]
     assert "titleRow(widget, flight, logos, 11, true)" in drawn
     assert "pill(state, flight)" in drawn
-    assert "milestoneWord(line, flight, 10)" in drawn
+    assert "milestoneWord(line, flight, 9)" in drawn
     # Every line of a flight is the same distance under the one above it, and the only
     # wider gap is the one that separates two flights.
     assert drawn.count("widget.addSpacer(SMALL_GAP)") == 3

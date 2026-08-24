@@ -331,10 +331,11 @@ function newWidget() {
     widget.setPadding(2, 2, 2, 2);
   } else {
     widget.backgroundColor = BACKGROUND;
-    // The small size holds two flights of four lines each, with the count on them set at
-    // the size every other widget draws it, so it gives up most of its margin to keep the
-    // last of those lines on screen.
-    const inset = family === "small" ? 7 : 14;
+    // A little tighter on the small size, which holds two flights of four lines each with
+    // the count on them set at the size every other widget draws it. Tighter, and not as
+    // tight as it will go: a widget whose words start against its own rounded corner
+    // reads as one that ran out of room, whatever it is holding.
+    const inset = family === "small" ? 11 : 14;
     widget.setPadding(inset, inset, inset, inset);
   }
   return widget;
@@ -410,7 +411,11 @@ function renderSmall(widget, flights, logos) {
       widget.addSpacer(SMALL_GAP);
       const line = widget.addStack();
       line.centerAlignContent();
-      milestoneWord(line, flight, 10);
+      // A point under the words on the lines above it, because this one shares its line
+      // with a figure set twice its size: at the wider margins the two of them together
+      // are the whole of the line, and the words are the half of it that can afford to
+      // be quieter.
+      milestoneWord(line, flight, 9);
       line.addSpacer();
       // No slack on this one: the words naming the count share its line, and at this
       // width the widest reading a count can take is already most of what there is.
