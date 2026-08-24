@@ -66,6 +66,12 @@ const RECONNECT_TEXT = "Open the settings page on this phone and tap Connect.";
 // a class, unlike a function, does not exist until its line does.
 class TokenRejected extends Error {}
 
+// What a small widget holds: two flights, and the same distance under every line of
+// them. It is the one size with no room to spare, so the figures it does have room for
+// are the ones the board leads with.
+const SMALL_FLIGHTS = 2;
+const SMALL_GAP = 3;
+
 const family = config.widgetFamily || "medium";
 const isAccessory = family.startsWith("accessory");
 // Per-element tap targets exist only on medium and large. Everywhere else the whole
@@ -297,7 +303,7 @@ async function buildWidget(result) {
   }
   const logos = await loadLogos(flights);
   if (family === "small") {
-    renderSmall(widget, flights[0], logos);
+    renderSmall(widget, flights.slice(0, SMALL_FLIGHTS), logos);
   } else {
     renderList(widget, flights, logos);
   }
@@ -314,9 +320,9 @@ function newWidget() {
     widget.setPadding(2, 2, 2, 2);
   } else {
     widget.backgroundColor = BACKGROUND;
-    // The small size is six lines tall once the route has its own line, so it gives up
-    // a little margin to keep the last of them on screen.
-    const inset = family === "small" ? 12 : 14;
+    // The small size holds two flights of three lines each, so it gives up a little
+    // margin to keep the last of them on screen.
+    const inset = family === "small" ? 10 : 14;
     widget.setPadding(inset, inset, inset, inset);
   }
   return widget;
@@ -354,48 +360,59 @@ function renderAccessory(widget, flight, result) {
   }
 }
 
-function renderSmall(widget, flight, logos) {
-  // Small widgets get a single tap target, set on the widget rather than a row.
-  widget.url = flight.detail_url;
+function renderSmall(widget, flights, logos) {
+  // One tap target, set on the widget rather than a row: a small widget has only the one
+  // to give, and the flight at the top is the one it is being looked at for.
+  widget.url = flights[0].detail_url;
 
-  // Too narrow for the number and the route on one line at a size anyone can read, so
-  // the route takes the line under the number instead of shrinking beside it.
-  titleRow(widget, flight, logos, 13, false);
-  const route = widget.addText(flight.route);
-  route.font = Font.regularMonospacedSystemFont(11);
-  route.textColor = MUTED;
-  route.lineLimit = 1;
+  flights.forEach((flight, index) => {
+    if (index > 0) {
+      // The one distance here that is not SMALL_GAP. Every line of a flight is the same
+      // distance from the line above it, so the only gap that reads as a break is the
+      // one between two flights.
+      widget.addSpacer(SMALL_GAP * 2);
+    }
+    // The number and the route on one line. The two do not fit at the size the rest of
+    // this widget is read at, so the route is the half that gives: it shrinks against
+    // the number rather than taking a line of its own - which is the line the second
+    // flight is now standing in.
+    titleRow(widget, flight, logos, 12, true);
 
-  widget.addSpacer(6);
-  const line = widget.addStack();
-  pill(line, flight);
-  line.addSpacer();
+    // Where it is, and what it is counting to. The two ends of the board's own footer,
+    // and at this width they are the whole line: a pill and a count leave nothing
+    // between them for the words that name the count, so the pill is what says which
+    // rung this is counting to. The bigger sizes still spell it out.
+    widget.addSpacer(SMALL_GAP);
+    const line = widget.addStack();
+    line.centerAlignContent();
+    pill(line, flight);
+    line.addSpacer();
+    if (flight.milestone_at) {
+      // A point smaller than the other sizes take, and the width is why rather than the
+      // height: a pill and the widest reading a count can turn into - the better part of
+      // a day, in hours, minutes and seconds - are the whole of a line this narrow.
+      countdown(line, flight, 13).textColor = TEXT;
+    }
 
-  if (flight.detail) {
-    widget.addSpacer(4);
-    // The width here is one column, so the line wraps rather than being cut: the
-    // gate and the seat are worth a second line when there is nothing else on screen.
-    // Two of them and no more, because the footer under it now always takes a line.
-    const detail = widget.addText(flight.detail);
-    detail.font = Font.systemFont(12);
-    detail.textColor = TEXT;
-    detail.lineLimit = 2;
-    detail.minimumScaleFactor = 0.8;
-  }
-
-  // The one column has no right-hand side, so what the board puts at the two ends of
-  // its footer goes at the two ends of the last line here.
-  if (flight.milestone_at) {
-    widget.addSpacer(4);
-    const footer = widget.addStack();
-    footer.centerAlignContent();
-    milestoneWord(footer, flight, 11);
-    footer.addSpacer();
-    countdown(footer, flight, 12).textColor = TEXT;
-  }
+    // Where to be, on the line under it, because that is the line with room for it.
+    if (flight.detail) {
+      widget.addSpacer(SMALL_GAP);
+      const detail = widget.addText(flight.detail);
+      detail.font = Font.systemFont(10);
+      detail.textColor = TEXT;
+      // One line and no shrinking: what a narrow widget loses is the end of the line -
+      // the seat - rather than the size of every word on it.
+      detail.lineLimit = 1;
+    }
+  });
 }
 
 function renderList(widget, flights, logos) {
+  // The count is the figure the row is looked at for, so it takes whatever height the
+  // widget has spare: everything else on its line is a label for it. A large widget has
+  // the room whatever it is holding, and a medium one has it until a third flight
+  // arrives - at which point the height is the rows' and the count gives it back.
+  const size = family === "large" ? 18 : flights.length < 3 ? 16 : 13;
   flights.forEach((flight, index) => {
     if (index > 0) {
       widget.addSpacer(family === "large" ? 12 : 8);
@@ -430,7 +447,7 @@ function renderList(widget, flights, logos) {
     }
     line.addSpacer();
     if (flight.milestone_at) {
-      countdown(line, flight, 12).textColor = TEXT;
+      countdown(line, flight, size).textColor = TEXT;
     }
   });
 }
@@ -506,15 +523,26 @@ function countdown(container, flight, size) {
     due.lineLimit = 1;
     return due;
   }
-  const date = container.addDate(at);
+  // Boxed to the width of the reading it is about to show. A timer is the one element
+  // WidgetKit cannot measure before it draws it, so left to itself it is handed all the
+  // room the spacer left - and what it does not use it keeps, off the end of the line
+  // where the gate and the seat are being cut short to make it. Scriptable measures a
+  // snapshot and hands it the digits, which is why the same row reads differently in the
+  // app and on the home screen.
+  const box = container.addStack();
+  box.size = new Size(timerWidth(at, size), 0);
+  const date = box.addDate(at);
   date.applyTimerStyle();
   // Bold rather than semibold. The two are the same weight to look at when a Mac draws
   // an iPhone's widget, so the count reads as heavier than the row on a mirrored screen
   // and no different from it on the phone itself - and the phone is the screen this is
   // for. The weight is the point: the count is what the row is looked at for.
   date.font = Font.boldMonospacedSystemFont(size);
+  // Held against the end of its box, which is the end of the row: what the box has over
+  // is the difference between the reading and the widest one it could turn into.
   date.rightAlignText();
   date.lineLimit = 1;
+  date.minimumScaleFactor = 0.7;
   return date;
 }
 
@@ -572,16 +600,24 @@ function updatedLine(widget, result) {
   if (!result.fetchedAt) {
     return;
   }
-  const age = line.addDate(result.fetchedAt);
+  // A timer is the one element WidgetKit cannot measure before it draws it, so it is
+  // handed whatever room is going: in Scriptable, which measures a snapshot, that is the
+  // width of the digits, and on the home screen it is the rest of the line. Held against
+  // either end of that room the slack lands inside the sentence - a gap after "Updated"
+  // or a gap in front of "ago" - so the count is given a box the width of the reading it
+  // is about to show and drawn from the left of it. What is left over then falls after
+  // "ago", at the end of a line nothing else is on, where there is nothing to read it as.
+  const box = line.addStack();
+  box.size = new Size(timerWidth(result.fetchedAt, size), 0);
+  const age = box.addDate(result.fetchedAt);
   age.applyTimerStyle();
   age.font = Font.regularMonospacedSystemFont(size);
   age.textColor = MUTED;
-  // A timer is given room for the longest reading it could ever show - hours, when it
-  // has been minutes all day - so the slack has to fall somewhere. Right-aligned it
-  // falls after "Updated", where it reads as spacing; left-aligned it falls in front of
-  // "ago", where it reads as a mistake.
-  age.rightAlignText();
+  age.leftAlignText();
   age.lineLimit = 1;
+  // The box is sized for the reading and not for the widget, so a phone that has not
+  // been asked to redraw this for an hour shrinks the digits rather than losing them.
+  age.minimumScaleFactor = 0.7;
 
   const ago = line.addText("ago");
   ago.font = Font.systemFont(size);
@@ -589,6 +625,20 @@ function updatedLine(widget, result) {
   ago.lineLimit = 1;
   // Holds the three of them at the left of the widget rather than spread across it.
   line.addSpacer();
+}
+
+// How wide a counting timer is about to be, whichever way it runs. WidgetKit counts in
+// hours, minutes and seconds, so a reading is "59:59" inside the hour, "9:59:59" inside
+// the day and "23:59:59" over one - and nothing here counts further than a day, because
+// a flight further off than that is not being counted to at all. The face is monospaced,
+// its glyphs about six tenths of its point size, and the hour is called ten minutes
+// early on both sides: the box is drawn once, and the count goes on running inside it
+// long after iOS last looked at this widget.
+function timerWidth(at, size) {
+  const away = Math.abs(Date.now() - new Date(at).getTime()) + 10 * 60 * 1000;
+  const hours = away / (60 * 60 * 1000);
+  const glyphs = hours < 1 ? 5 : hours < 10 ? 7 : 8;
+  return Math.ceil(glyphs * size * 0.62);
 }
 
 function footerSize() {

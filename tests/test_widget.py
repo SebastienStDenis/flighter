@@ -946,6 +946,68 @@ def test_the_footer_ages_itself_rather_than_stating_a_figure() -> None:
     )
 
 
+def test_a_count_is_boxed_to_the_reading_it_is_about_to_show() -> None:
+    """A timer is the one element WidgetKit cannot measure before it draws it, so left to
+    itself it is handed every point the spacer left and keeps what it does not use. That
+    room comes off the line beside it: the gate and the seat are cut short to make space
+    a count never fills. Boxed to its own reading, the count takes what it needs and the
+    line keeps the rest - and it is the same line in Scriptable, which measures a
+    snapshot, as on the home screen, which cannot."""
+    source = script_source()
+    for name, ends in (("countdown(", "function pill("), ("updatedLine(", "function timerWidth(")):
+        drawn = source[source.index(f"function {name}") : source.index(ends)]
+        assert "box.size = new Size(timerWidth(" in drawn, name
+        assert "applyTimerStyle()" in drawn, name
+
+
+def test_the_age_is_read_from_the_left_so_the_slack_falls_after_the_sentence() -> None:
+    """ "Updated 04:12 ago" is a sentence, and the room a timer does not use has to fall
+    somewhere in it. Against the right of its box it opens a gap after "Updated"; against
+    the left it opens one in front of "ago". Boxed to the reading, there is no gap in
+    either place, and what the box does not take falls past "ago" where the line ends."""
+    source = script_source()
+    line = source[source.index("function updatedLine(") : source.index("function timerWidth(")]
+    assert "leftAlignText()" in line
+    assert "rightAlignText()" not in line
+
+
+def test_a_small_widget_holds_two_flights_with_the_route_beside_the_number() -> None:
+    """The route took a line to itself, which is the line a second flight now stands in.
+    It shrinks against the number instead - `titleRow`'s own scale factor is what lets
+    it - and the words that name a count give way to the pill, because a pill and a
+    count are the whole of a line this narrow."""
+    source = script_source()
+    assert "const SMALL_FLIGHTS = 2;" in source
+    assert "flights.slice(0, SMALL_FLIGHTS)" in source
+    drawn = source[source.index("function renderSmall(") : source.index("function renderList(")]
+    assert "titleRow(widget, flight, logos, 12, true)" in drawn
+    assert "milestoneWord(" not in drawn
+    # Every line of a flight is the same distance from the one above it, and the only
+    # bigger gap is the one that separates two flights.
+    assert drawn.count("widget.addSpacer(SMALL_GAP)") == 2
+    assert "widget.addSpacer(SMALL_GAP * 2)" in drawn
+
+
+def test_the_count_is_drawn_bigger_than_the_row_it_is_read_off() -> None:
+    """It is the figure the widget is looked at for. The room is there on every size but
+    a medium widget holding three flights, where the height belongs to the rows."""
+    source = script_source()
+    sizes = {}
+    for name, ends in (
+        ("renderSmall(", "function renderList("),
+        ("renderList(", "function titleRow("),
+    ):
+        drawn = source[source.index(f"function {name}") : source.index(ends)]
+        found = re.search(r"countdown\([a-z]+, flight, (\w+)\)", drawn)
+        assert found, name
+        sizes[name] = found.group(1)
+    assert sizes["renderSmall("] == "13"
+    # Sized against what the widget is holding rather than fixed: three flights on a
+    # medium widget is the one case where the rows need the height back.
+    assert sizes["renderList("] == "size"
+    assert 'const size = family === "large" ? 18 : flights.length < 3 ? 16 : 13;' in source
+
+
 def test_a_widget_reload_takes_the_servers_newer_script_quietly() -> None:
     """The phone follows the server without anyone opening the app, and a widget has
     nobody to tell when it does."""
