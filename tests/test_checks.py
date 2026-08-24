@@ -145,7 +145,7 @@ async def test_a_database_that_will_not_open_is_reported_as_itself(
 async def test_aeroapi_is_not_probed_until_there_is_a_key(unconfigured: Settings) -> None:
     result = await checks._check_aeroapi(unconfigured)
 
-    assert (result.ok, result.detail) == (False, "add a FlightAware key under Accounts")
+    assert (result.ok, result.detail) == (False, "add a FlightAware key under Connections")
 
 
 async def test_a_rejected_aeroapi_key_says_so_rather_than_showing_a_status_code(

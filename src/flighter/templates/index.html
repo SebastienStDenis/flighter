@@ -38,13 +38,8 @@
       </svg>
     </figure>
     <h2>Nothing on the board</h2>
-    {% if set_up %}
-    <p>Add a flight, or flag a booking confirmation.</p>
-    {% else %}
-    <p>Nothing is connected yet. Start on the
-      <a class="btn" data-variant="link" href="/settings">settings page</a>, then flag a
-      booking confirmation.</p>
-    {% endif %}
+    <p>Add one above or flag a flight confirmation email to import
+      {%- if not icloud_ready %} {{ m.requires_icloud() }}{% endif %}.</p>
   </header>
 </section>
 {% endif %}
@@ -66,7 +61,7 @@
       </svg>
     </figure>
     <h2>No friends flying soon</h2>
-    <p>Open any flight and change its owner to a friend.</p>
+    <p>Edit an existing flight to set its owner to a friend's name.</p>
   </header>
 </section>
 {% endif %}
@@ -89,7 +84,7 @@
       </svg>
     </figure>
     <h2>No flown flights yet</h2>
-    <p>Past flights, yours and friends', will collect here.</p>
+    <p>Go on vacation! &#127796;</p>
   </header>
 </section>
 {% endif %}
@@ -104,4 +99,19 @@
        {'tab': 'Friends', 'panel': friends_panel},
        {'tab': 'Flown', 'panel': flown_panel},
      ]) }}
+<script>
+  // The tab is in the address, so a link to this page opens on the tab it was sent from
+  // and a reload comes back to it. Replaced rather than pushed: the tabs are one screen
+  // with three faces, and Back should leave the page rather than walk through them.
+  (function () {
+    var names = ["mine", "friends", "flown"];
+    document.querySelectorAll('#flight-tabs [role="tab"]').forEach(function (tab, index) {
+      tab.addEventListener("click", function () {
+        var address = new URL(location.href);
+        address.searchParams.set("tab", names[index]);
+        history.replaceState(null, "", address);
+      });
+    });
+  })();
+</script>
 {% endblock %}

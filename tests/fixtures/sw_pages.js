@@ -8,7 +8,12 @@ const caches = {
     if (!stores.has(name)) stores.set(name, new Map());
     const store = stores.get(name);
     return {
-      match: async (request) => store.get(request.url),
+      match: async (request, options) => {
+        const hit = store.get(request.url);
+        if (hit || !options || !options.ignoreSearch) return hit;
+        const path = request.url.split("?")[0];
+        for (const [url, response] of store) if (url.split("?")[0] === path) return response;
+      },
       put: async (request, response) => void store.set(request.url, response),
       delete: async (request) => store.delete(request.url),
     };
@@ -38,5 +43,11 @@ const { pageOrLastCopy } = worker(self, caches);
   const store = stores.get("pages-v1");
   store.get(request.url).headers.set("x-flighter-saved-at", String(Date.now() - 25 * 3600 * 1000));
   served.push(await (await pageOrLastCopy(request)).text());
-  console.log(JSON.stringify({ served, kept: store.has(request.url) }));
+  const kept = store.has(request.url);
+  // The same page under the tab it was left on: still that page's own copy.
+  reachable = true;
+  await pageOrLastCopy(request);
+  reachable = false;
+  const byTab = await (await pageOrLastCopy(new Request("http://flighter.test/?tab=flown"))).text();
+  console.log(JSON.stringify({ served, kept, byTab }));
 })();

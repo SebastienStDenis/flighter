@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "basecoat/tabs.html.jinja" as bc %}
+{% import "basecoat/dialog.html.jinja" as dlg %}
 {% import "macros.html" as m %}
 {% block title %}Settings{% endblock %}
 {% block content %}
@@ -31,6 +32,21 @@
   {{- done if ready else todo -}}</span>
 {% endmacro %}
 
+{# What a card cannot do until a connection is made. The icon is the one every other
+   warning on the page carries, and the way to the connection is a button rather than a
+   word in the sentence dressed up as one. #}
+{% macro waiting_on(service, what) %}
+<p class="flex items-start gap-2 text-sm text-muted-foreground">
+  <svg class="mt-0.5 size-4 shrink-0 text-foreground" viewBox="0 0 24 24" fill="none"
+       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+       aria-hidden="true">
+    <path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/>
+  </svg>
+  <span>Connect {{ service }} in <a class="btn align-middle" data-variant="outline"
+      data-size="xs" href="/settings?tab=connections">Connections</a> to {{ what }}.</span>
+</p>
+{% endmacro %}
+
 {% macro chevron() %}
 <svg class="chevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -40,11 +56,17 @@
 
 {# The switch that puts a whole card's job down. It sits in the card's header rather than
    among the settings it governs, because what it turns off is everything under them, and
-   the card folds away to the heading and this. #}
-{% macro toggle(field, label, governs) %}
+   the card folds away to the heading and this.
+
+   Both jobs run on the iCloud account, so without one there is nothing for the switch to
+   turn on: it is drawn off and cannot be flicked, and the card says what is missing.
+   Removing the account puts the stored preference down too, so the switch is off because
+   the job is off rather than because the page is hiding it. #}
+{% macro toggle(field, label, governs, ready=True) %}
 <label for="{{ field }}" class="sr-only">{{ label }}</label>
 <input class="input" type="checkbox" role="switch" id="{{ field }}" name="{{ field }}"
-       value="true" data-enables="{{ governs }}"{{ ' checked' if posted[field] }}>
+       value="true" data-enables="{{ governs }}"
+       {{- ' checked' if posted[field] and ready }}{{ ' disabled' if not ready }}>
 {% endmacro %}
 
 {# What is on file, shown rather than offered for editing. A stored secret is a block of
@@ -55,7 +77,11 @@
   <span class="shrink-0 text-sm font-medium">{{ field.label }}</span>
   {% if field.value %}
   <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
-    {{- field.value -}}</span>
+    {{- field.prefix }}{{ field.value -}}</span>
+  {% elif field.empty %}
+  {# Not a secret: an empty one is a setting somebody chose rather than a value being
+     withheld, so it says which setting it is. #}
+  <span class="min-w-0 truncate text-sm text-muted-foreground">{{ field.empty }}</span>
   {% else %}
   {# Nothing to print: the value is on file and is never rendered back, so what stands
      in for it is a bar rather than a string pretending to be one. #}
@@ -67,16 +93,30 @@
 
 {# What is already set is put back in the box, except where it is a secret: those are
    never rendered into the page, so the dots stand for them and an empty box means
-   "leave it alone". #}
+   "leave it alone".
+
+   Until there is a connection there is nothing to leave alone: an empty credential box
+   on a connection nobody has made is a connection nobody is making, so the browser says
+   so rather than the page taking a save that connects nothing. #}
 {% macro box(field, ready=False) %}
 <div role="group" class="field">
-  <label for="{{ field.name }}">{{ field.label }}</label>
+  {# What is on file is never printed back, so the box for it opens empty on a value
+     that is already there. The label says what leaving it that way means. #}
+  <label for="{{ field.name }}">{{ field.label }}
+    {%- if ready and not field.value and not field.empty %}
+    <span class="text-xs font-normal text-muted-foreground">
+      (leave empty to keep saved value)</span>
+    {%- endif %}</label>
+  {# A box somebody may deliberately empty says so, because everywhere else on this
+     page an empty box is one that was left alone. #}
   <input type="{{ field.type|default('password') }}" id="{{ field.name }}"
          name="{{ field.name }}" class="font-mono"
+         {% if not ready and not field.empty %}required{% endif %}
          autocomplete="{{ field.autocomplete|default('off') }}"
+         {% if field.inputmode %}inputmode="{{ field.inputmode }}"{% endif %}
+         {% if field.empty %}data-allow-empty{% endif %}
          {% if field.help %}aria-describedby="{{ field.name }}-help"{% endif %}
-         value="{{ field.value|default('') }}"
-         placeholder="{{ field.hint or ('••••••••••' if ready and not field.value else '') }}">
+         value="{{ field.value|default('') }}">
   {% if field.help %}
   <p id="{{ field.name }}-help" class="text-xs">{{ field.help|safe }}</p>
   {% endif %}
@@ -87,8 +127,12 @@
    what is on file and keeps the boxes behind a button, so the common case is something
    to read rather than a form to be careful around. Each stays its own form, because
    only a form scoped to one service can say which empty box was meant. #}
+{# An account that is not connected is the one thing on this tab there is something to
+   do about, so it opens on the way in rather than waiting to be found - and folds away
+   of its own accord once it is connected, which is the answer to the question it was
+   open to ask. #}
 {% macro account(key, name, ready, fields, detail='', todo='Not connected', tone='quiet') %}
-<details class="setting"{{ ' open' if opened == key }}>
+<details class="setting"{{ ' open' if not ready }}>
   <summary>
     <span class="min-w-0 flex-1">
       <span class="block font-medium">{{ name }}</span>
@@ -121,13 +165,13 @@
                   onclick="removeAccount(event, '{{ key }}')">Remove</button>
         </div>
       </summary>
-      <form method="post" action="/settings/credentials">
+      <form method="post" action="/settings/credentials" data-save-scope>
         <input type="hidden" name="service" value="{{ key }}">
         <fieldset class="fieldset gap-4">
           {% for field in fields %}{{ box(field, ready) }}{% endfor %}
         </fieldset>
         <div class="mt-4 flex items-center gap-2">
-          <button class="btn" data-size="sm" type="submit">Save</button>
+          <button class="btn" data-save data-size="sm" type="submit">Save</button>
           <button class="btn" data-variant="ghost" data-size="sm" type="button"
                   onclick="cancelEdit(this)">Cancel</button>
           <p class="save-error min-w-0 flex-1 text-xs text-stop" role="alert"></p>
@@ -144,41 +188,47 @@
               name="forget" value="1">Remove</button>
     </form>
     {% else %}
-    <form method="post" action="/settings/credentials">
+    <form method="post" action="/settings/credentials" data-save-scope>
       <input type="hidden" name="service" value="{{ key }}">
       <fieldset class="fieldset gap-4">
         {% for field in fields %}{{ box(field) }}{% endfor %}
       </fieldset>
-      {{ caller() if caller }}
       <div class="mt-4 flex items-center gap-2">
-        <button class="btn" data-size="sm" type="submit">Save</button>
+        <button class="btn" data-save data-size="sm" type="submit">Save</button>
         <p class="save-error min-w-0 flex-1 text-xs text-stop" role="alert"></p>
       </div>
     </form>
+    {{ caller() if caller }}
     {% endif %}
   </div>
 </details>
 {% endmacro %}
 
 {% set connections %}
-{# No heading on this one: the tab above it is already the word "Accounts". #}
+{# No heading on this one: the tab above it is already the word "Connections". #}
 <div class="card py-1" data-size="sm">
   <section>
     <div class="divide-y">
       {# First, and the only one the app cannot do without: with no feed there is
          nothing to put on the board. #}
+      {# What the feed may cost is not a credential, but it is about this account and
+         nothing else, so it is set where the key is and saved by the same button. #}
       {{ account('flightaware', 'FlightAware', flightaware_ready, [
            {'name': 'aeroapi_key', 'label': 'AeroAPI key',
-            'help': 'Free to $5 a month on the <a
-                     href="https://www.flightaware.com/aeroapi/signup/personal"
-                     target="_blank" rel="noopener">Personal tier</a>.'},
+            'help': 'Register at <a href="https://www.flightaware.com/aeroapi/signup/personal"
+                     target="_blank" rel="noopener">flightaware.com</a>.'},
+           {'name': 'aeroapi_monthly_cap_usd', 'label': 'Monthly spend limit',
+            'type': 'text', 'inputmode': 'decimal', 'prefix': '$', 'empty': 'No limit',
+            'value': posted['aeroapi_monthly_cap_usd'] or '',
+            'help': 'First $5 on FlightAware is free every month, then the next tier
+                     is $100. We recommend setting below $5 to avoid hitting the
+                     threshold. Leave empty for no limit.'},
          ], 'Source for flight details', 'Required', 'stop') }}
 
       {{ account('icloud', 'iCloud', icloud_ready, [
            {'name': 'icloud_email', 'label': 'Apple ID', 'type': 'email',
-            'autocomplete': 'username', 'hint': 'you@icloud.com', 'value': icloud_email},
+            'autocomplete': 'username', 'value': icloud_email},
            {'name': 'icloud_app_password', 'label': 'App-specific password',
-            'hint': 'xxxx-xxxx-xxxx-xxxx',
             'help': 'Create one at <a href="https://appleid.apple.com" target="_blank"
                      rel="noopener">appleid.apple.com</a>.'},
          ], 'Import flights from email, synchronize them to your calendar') }}
@@ -187,15 +237,14 @@
            {'name': 'pushover_token', 'label': 'Application token',
             'help': 'Register an app at <a href="https://pushover.net/apps/build"
                      target="_blank" rel="noopener">pushover.net</a>.'},
-           {'name': 'pushover_user_key', 'label': 'User key',
-            'help': 'On your <a href="https://pushover.net" target="_blank"
-                     rel="noopener">dashboard</a>.'},
+           {'name': 'pushover_user_key', 'label': 'User key'},
          ], 'Flight notifications') }}
 
       {{ account('anthropic', 'Anthropic', connected['anthropic_api_key'], [
            {'name': 'anthropic_api_key', 'label': 'API key',
             'help': 'From <a href="https://console.anthropic.com" target="_blank"
-                     rel="noopener">console.anthropic.com</a>. Only flagged email is sent.'},
+                     rel="noopener">console.anthropic.com</a>. Only flagged emails are
+                     processed.'},
          ], 'Extract flight details from email') }}
     </div>
   </section>
@@ -224,13 +273,18 @@
     <header>
       <h3>Calendar Sync</h3>
       <div class="card-action">
-        {{ toggle('calendar_sync_enabled', 'Calendar sync', 'calendar-settings') }}
+        {{ toggle('calendar_sync_enabled', 'Calendar sync', 'calendar-settings',
+                  icloud_ready) }}
       </div>
-      <p>Synchronize flights to your calendar.</p>
+      <p>Synchronize flights to your iCloud calendar.</p>
     </header>
-    <section id="calendar-settings"{{ ' hidden' if not posted['calendar_sync_enabled'] }}>
+    {# Only a card whose switch is on folds away. With no account the switch is off
+       because it has to be, and folding the card on that would take the sentence saying
+       so with it. #}
+    <section id="calendar-settings"
+             {{- ' hidden' if icloud_ready and not posted['calendar_sync_enabled'] }}>
       {% if not icloud_ready %}
-      <p class="text-sm text-muted-foreground">Connect iCloud under Accounts to pick a calendar.</p>
+      {{ waiting_on('iCloud', 'synchronize flights to your calendar') }}
       {% else %}
       {# The options arrive after the page does, so the control is present but held until
          iCloud has answered rather than the whole page waiting on it. The select stays a
@@ -250,13 +304,18 @@
 
   <div class="card mt-3" data-size="sm">
     <header>
-      <h3>Email import</h3>
+      <h3>Email Import</h3>
       <div class="card-action">
-        {{ toggle('email_import_enabled', 'Email import', 'import-settings') }}
+        {{ toggle('email_import_enabled', 'Email import', 'import-settings',
+                  icloud_ready) }}
       </div>
-      <p>Import flights from flagged emails.</p>
+      <p>Import flights from flagged iCloud emails.</p>
     </header>
-    <section id="import-settings"{{ ' hidden' if not posted['email_import_enabled'] }}>
+    <section id="import-settings"
+             {{- ' hidden' if icloud_ready and not posted['email_import_enabled'] }}>
+      {% if not icloud_ready %}
+      {{ waiting_on('iCloud', 'import flights from email') }}
+      {% else %}
       <fieldset>
         <legend class="sr-only">Import flag colour</legend>
         {# The 44px a thumb needs leaves 6px of air around the 32px circle drawn in it,
@@ -264,7 +323,7 @@
            the flags start where a card's contents start; the bottom is topped up to the
            same 16px instead, so the row sits level between the heading and the sentence
            rather than pinned to the words under it. #}
-        <div class="mb-2.5 -mt-1.5 flex flex-wrap justify-center gap-2">
+        <div class="flag-row mb-2.5 -mt-1.5">
           {% for colour in flag_colours %}
           <label class="flag-target">
             <input type="radio" class="peer sr-only" name="imap_flag_colour"
@@ -287,8 +346,9 @@
         <strong class="flag-name" id="flag-name"
                 data-colour="{{ posted['imap_flag_colour'] }}">
           {{- posted['imap_flag_colour']|capitalize -}}</strong>
-        from any iCloud mailbox to import into Flighter. Run within
+        from any iCloud mailbox to import into Flighter. Processes within
         {{ mail_sweep_minutes }} mins.</p>
+      {% endif %}
     </section>
   </div>
 
@@ -298,12 +358,16 @@
     <header>
       <h3>Notifications</h3>
       <div class="card-action">
-        {{ toggle('notifications_enabled', 'Notifications', 'notification-settings') }}
+        {{ toggle('notifications_enabled', 'Notifications', 'notification-settings',
+                  pushover_ready) }}
       </div>
-      <p>Send notifications about flight updates and email import.</p>
+      <p>Send Pushover notifications about flight updates and email import.</p>
     </header>
     <section id="notification-settings"
-             {{- ' hidden' if not posted['notifications_enabled'] }}>
+             {{- ' hidden' if pushover_ready and not posted['notifications_enabled'] }}>
+      {% if not pushover_ready %}
+      {{ waiting_on('Pushover', 'send notifications') }}
+      {% else %}
       <div class="divide-y">
         {% for field, label in notification_choices %}
         <div role="group" class="field py-3" data-orientation="horizontal">
@@ -313,6 +377,7 @@
         </div>
         {% endfor %}
       </div>
+      {% endif %}
     </section>
   </div>
 
@@ -355,7 +420,7 @@
           {# The one preference that is not saved the moment it changes: an address being
              typed is half an address most of the way through, and every keystroke of it
              would be posted and followed. Save is what commits it. #}
-          <details class="reveal" id="address-setting" data-manual-save>
+          <details class="reveal" id="address-setting" data-manual-save data-save-scope>
             <summary>
               <span class="flex items-center justify-between gap-3">
                 <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
@@ -374,46 +439,18 @@
                    placeholder="{{ auto_base_url }}"
                    value="{{ posted['public_base_url'] }}">
             <div class="mt-3 flex items-center gap-2">
-              <button class="btn" data-size="sm" type="button"
+              <button class="btn" data-save data-size="sm" type="button"
                       onclick="saveField(this)">Save</button>
               <button class="btn" data-variant="ghost" data-size="sm" type="button"
                       onclick="cancelField(this)">Cancel</button>
             </div>
           </details>
-          {# Both readings live here rather than in the script, so resetting can swap
-             them without the copy being written down twice. #}
-          <p id="url-help" class="text-xs">
-            <span data-when="manual"{{ ' hidden' if not manual }}>Set by hand. What the
-              calendar, the pushes and the widget link to.</span>
-            <span data-when="auto"{{ ' hidden' if manual }}>Followed from the address you
-              open this on. A localhost one never replaces one that is not.</span>
-          </p>
-        </div>
-        <div role="group" class="field">
-          <label for="aeroapi_monthly_cap_usd">Monthly limit (USD)</label>
-          {# A figure half typed is a different limit, so this one commits on Save too. #}
-          <details class="reveal" data-manual-save data-prefix="$">
-            <summary>
-              <span class="flex items-center justify-between gap-3">
-                <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
-                  ${{- '%.2f'|format(budget.cap_usd) -}}</span>
-                <span class="btn shrink-0" data-variant="outline" data-size="sm">Edit</span>
-              </span>
-            </summary>
-            <input type="text" inputmode="decimal" class="input font-mono"
-                   id="aeroapi_monthly_cap_usd" name="aeroapi_monthly_cap_usd"
-                   aria-describedby="cap-help"
-                   value="{{ posted['aeroapi_monthly_cap_usd'] }}">
-            <div class="mt-3 flex items-center gap-2">
-              <button class="btn" data-size="sm" type="button"
-                      onclick="saveField(this)">Save</button>
-              <button class="btn" data-variant="ghost" data-size="sm" type="button"
-                      onclick="cancelField(this)">Cancel</button>
-            </div>
-          </details>
-          <p id="cap-help" class="text-xs">Updates stop for the rest of the month at this
-            much FlightAware spend.
-            <span class="{{ 'text-stop' if budget.tripped else '' }}">${{ '%.2f'|format(budget.spend_usd) }} of ${{ '%.2f'|format(budget.cap_usd) }} this month{{ ', so updates are paused' if budget.tripped }}.</span></p>
+          {# What it is for holds either way; where it came from is only worth saying
+             while nobody has set one, so that is the sentence that comes and goes. #}
+          <p id="url-help" class="text-xs">Used for linking to Flighter from the widget
+            and calendar events.
+            <span data-when="auto"{{ ' hidden' if manual }}>Automatically set from the
+              latest address used to access Flighter.</span></p>
         </div>
         <div role="group" class="field">
           <label for="log_level">Log level</label>
@@ -438,7 +475,7 @@
     <span class="step-number">{{ number }}</span>
     <div class="min-w-0 flex-1">
       <h4 class="text-sm font-semibold">{{ name }}</h4>
-      <p class="mt-0.5 text-xs text-muted-foreground">{{ what }}</p>
+      <p class="mt-0.5 text-xs text-muted-foreground">{{ what|safe }}</p>
     </div>
     {% if href %}
     <a class="btn shrink-0" data-variant="outline" data-size="sm" href="{{ href }}" {{ attrs|safe }}>
@@ -456,12 +493,12 @@
   <header>
     <h3>Widget</h3>
     <div class="card-action">{{ status(widget_connected) }}</div>
-    <p>Configure Flighter widgets on iOS</p>
+    <p>Configure Flighter widgets on iOS.</p>
   </header>
   <section>
     <div class="divide-y">
       {{ step(1, 'Install Scriptable', 'Free on the App Store.',
-              'https://apps.apple.com/app/scriptable/id1405459188', 'Get',
+              'https://apps.apple.com/app/scriptable/id1405459188', 'Install',
               'target="_blank" rel="noopener"') }}
       {% call step(2, 'Add the script',
                    'Open the download in Scriptable to import it as “Flighter”.',
@@ -471,8 +508,8 @@
       <div class="accordion accordion-inline -mb-1 mt-2">
         <details>
           <summary class="text-xs">Or copy it manually {{ chevron() }}</summary>
-          <p class="text-xs text-muted-foreground">In Scriptable tap <strong>+</strong>,
-            paste, and name it <strong>Flighter</strong>. The name is what step 3 runs.</p>
+          <p class="text-xs text-muted-foreground">In Scriptable tap <code>+</code>,
+            paste, and name it <code>Flighter</code> (required for step 3).</p>
           <div class="relative mt-2">
             <textarea id="widget-script" class="h-24 w-full rounded-md bg-muted p-2 pr-20 font-mono text-xs"
                       readonly spellcheck="false">{{ widget_script }}</textarea>
@@ -481,10 +518,11 @@
         </details>
       </div>
       {% endcall %}
-      {{ step(3, 'Connect this phone', 'Hands Scriptable the address and the token.',
+      {{ step(3, 'Connect current device', 'Hands Scriptable configuration details.',
               widget_connect_url, 'Connect') }}
-      {{ step(4, 'Add the widget', 'Touch and hold the wallpaper, tap +, choose Scriptable,
-              then set Script to Flighter and When Interacting to Run Script.') }}
+      {{ step(4, 'Add the widget', 'Add a Scriptable widget and set <code>Script</code>
+              to <code>Flighter</code> and <code>When Interacting</code> to
+              <code>Run Script</code>.') }}
     </div>
   </section>
 </div>
@@ -493,32 +531,50 @@
   <details>
     <summary class="text-base font-semibold tracking-tight">Advanced {{ chevron() }}</summary>
     <div class="pb-3">
-      <p class="text-xs text-muted-foreground">
-        {%- if widget_last_seen -%}
-        Last fetched by a phone <strong>{{ widget_last_seen }}</strong>.
-        {%- else -%}
-        No phone has fetched flights yet.
-        {%- endif -%}
-      </p>
-      <p class="mt-3 text-xs text-muted-foreground">The bearer token for
-        <code>GET /api/widget</code>.</p>
+      <p class="text-sm font-medium">Widget bearer token</p>
       <div class="relative mt-2">
         <pre id="widget-token"
              class="overflow-x-auto rounded-md bg-muted p-3 pr-20 font-mono text-xs">{{ widget_token }}</pre>
         {# Centred against the line rather than measured down from the top: the token is
            one line in a box taller than the button, and a figure that happens to land
-           near the middle is not the middle. #}
-        <div class="absolute top-1/2 right-2 -translate-y-1/2">
+           near the middle is not the middle. What is left beside it is what centring
+           leaves above and below it. #}
+        <div class="absolute top-1/2 right-1 -translate-y-1/2">
           {{ m.copy_button('widget-token') }}</div>
       </div>
-      <form class="mt-3" method="post" action="/settings/widget/token"
-            onsubmit="return confirm('Every phone will stop updating until it taps Connect again. Continue?')">
-        <button class="btn text-stop" data-variant="ghost" data-size="sm" type="submit">
+      {# When a phone last asked belongs beside the button that would stop them all
+         asking, rather than above the token it says nothing about. #}
+      <div class="mt-3 flex items-center gap-3">
+        <button class="btn shrink-0 text-stop" data-variant="ghost" data-size="sm"
+                type="button"
+                onclick="document.getElementById('regenerate-token').showModal()">
           Regenerate token</button>
-      </form>
+        <p class="min-w-0 flex-1 text-xs text-muted-foreground">
+          {%- if widget_last_seen -%}
+          Last fetched by a widget <strong>{{ widget_last_seen }}</strong>.
+          {%- else -%}
+          No widget has fetched flights yet.
+          {%- endif -%}
+        </p>
+      </div>
     </div>
   </details>
 </div>
+
+{% set regenerate_footer %}
+<form method="post" action="/settings/widget/token">
+  <button class="btn" data-variant="destructive" type="submit">Regenerate</button>
+</form>
+{% endset %}
+{# Asked in the app rather than in the browser's own box, which is the one dialog on the
+   page a person cannot read as ours. Backing out is the X, as it is everywhere else. #}
+{{ dlg.dialog(
+     id='regenerate-token',
+     title='Regenerate the widget token?',
+     description='Every phone will stop updating until it taps Connect again.',
+     footer=regenerate_footer,
+     header_attrs={'class': 'pe-8'},
+     footer_attrs={'class': 'flex-row justify-end'}) }}
 {% endset %}
 
 {# Saving comes back through a redirect, so the tab the form was on is carried in the
@@ -529,27 +585,26 @@
      tablist_attrs={'class': 'w-full'},
      default_tab_index={'connections': 1, 'preferences': 2, 'widget': 3}.get(tab, 1),
      tabsets=[
-       {'tab': 'Accounts', 'panel': connections},
+       {'tab': 'Connections', 'panel': connections},
        {'tab': 'Preferences', 'panel': preferences},
        {'tab': 'Widget', 'panel': widget},
      ]) }}
 </div>
 
-{% if saved %}
-<div class="toaster" data-align="center">
-  <div class="toast" role="status" aria-atomic="true">
-    <div class="toast-content">
-      <svg class="text-ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>
-      </svg>
-      <section><h2>Saved</h2></section>
-    </div>
-  </div>
-</div>
-{% endif %}
-
 <script>
+  // The tab is in the address, so a link to this page opens on the tab it was sent from,
+  // and a save that comes back through a redirect lands where it was made.
+  (function () {
+    var names = ["connections", "preferences", "widget"];
+    document.querySelectorAll('#settings-tabs [role="tab"]').forEach(function (tab, index) {
+      tab.addEventListener("click", function () {
+        var address = new URL(location.href);
+        address.searchParams.set("tab", names[index]);
+        history.replaceState(null, "", address);
+      });
+    });
+  })();
+
   // isSecureContext is the browser's own answer to the question the service worker asks,
   // so it is right about localhost and about whatever the address is really being served
   // through, in a way that reading the scheme is not.
@@ -573,9 +628,23 @@
         name.textContent = colour.charAt(0).toUpperCase() + colour.slice(1);
         name.dataset.colour = colour;
       }
-      // A switch that takes effect as it is flicked is its own confirmation. Only the
-      // boxes with a Save button to press are worth a word back.
-      saveSettings(false);
+      saveSettings();
+    });
+  })();
+
+  // Asking for notifications is asking for all of them. A class left off inside a card
+  // that was itself off is not a choice anybody remembers making, so turning the card
+  // back on turns every class on with it; the save that follows carries them.
+  (function () {
+    var master = document.getElementById("notifications_enabled");
+    if (!master) return;
+    master.addEventListener("change", function () {
+      if (!master.checked) return;
+      document
+        .querySelectorAll("#notification-settings input[type=checkbox]")
+        .forEach(function (box) {
+          box.checked = true;
+        });
     });
   })();
 
@@ -591,7 +660,34 @@
     });
   })();
 
-  async function saveSettings(announce) {
+  // A Save that would post what is already on file has nothing to do, so it is off
+  // until a box holds something the server did not draw into it. An empty box is what
+  // "leave this one alone" is written as everywhere on this page - a stored secret is
+  // never rendered back - so emptying one is not a change either.
+  function showSaveState(scope) {
+    var save = scope.querySelector("[data-save]");
+    if (!save) return;
+    var changed = false;
+    var fillable = true;
+    scope.querySelectorAll("input:not([type=hidden])").forEach(function (box) {
+      // What the browser would refuse on the way out is what it is off for on the way
+      // in: a box that has to be filled and is not, or an address that is not one. A
+      // box on a connection already made asks for nothing, so an empty one is fine.
+      if (!box.validity.valid) fillable = false;
+      if (box.value === box.defaultValue) return;
+      if (box.value.trim() || box.hasAttribute("data-allow-empty")) changed = true;
+    });
+    save.disabled = !changed || !fillable;
+  }
+
+  document.querySelectorAll("[data-save-scope]").forEach(function (scope) {
+    showSaveState(scope);
+    scope.addEventListener("input", function () {
+      showSaveState(scope);
+    });
+  });
+
+  async function saveSettings() {
     var form = document.getElementById("settings-form");
     var response;
     try {
@@ -606,46 +702,8 @@
       form.submit();
       return false;
     }
-    if (announce) flashSaved();
     return true;
   }
-
-  function flashSaved() {
-    var already = document.querySelector(".toaster");
-    if (already) already.remove();
-    var toaster = document.createElement("div");
-    toaster.className = "toaster";
-    toaster.setAttribute("data-align", "center");
-    toaster.innerHTML =
-      '<div class="toast" role="status" aria-atomic="true"><div class="toast-content">' +
-      '<svg class="text-ok" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
-      ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-      '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>' +
-      "<section><h2>Saved</h2></section></div></div>";
-    document.body.appendChild(toaster);
-    setTimeout(function () {
-      toaster.remove();
-    }, 2000);
-  }
-
-  // A save says so and then gets out of the way.
-  (function () {
-    var toaster = document.querySelector(".toaster");
-    if (!toaster) return;
-    // The flag comes off the address at once, so reloading the page is not told about a
-    // save that already happened; the tab it came back on stays there to be reloaded on.
-    var address = new URL(location.href);
-    address.searchParams.delete("saved");
-    history.replaceState(null, "", address);
-    // Folded away, then taken off the page. A toast with nothing drawn in it still keeps
-    // its place over the heading underneath and still swallows a tap meant for it.
-    setTimeout(function () {
-      toaster.querySelector(".toast").setAttribute("aria-hidden", "true");
-      setTimeout(function () {
-        toaster.remove();
-      }, 300);
-    }, 2500);
-  })();
 
   // An empty override is what "work it out" is stored as, so handing the address back
   // is the same save as any other, with an empty box.
@@ -655,7 +713,7 @@
     event.stopPropagation();
     var box = document.getElementById("public_base_url");
     box.value = "";
-    if (!(await saveSettings(true))) return;
+    if (!(await saveSettings())) return;
     showAddressState();
   }
 
@@ -671,13 +729,11 @@
       : box.placeholder;
     document.getElementById("address-edit-label").textContent = manual ? "Edit" : "Override";
     document.getElementById("address-reset").hidden = !manual;
-    var help = document.getElementById("url-help");
-    help.querySelector('[data-when="manual"]').hidden = !manual;
-    help.querySelector('[data-when="auto"]').hidden = manual;
+    document.querySelector('#url-help [data-when="auto"]').hidden = manual;
   }
 
   async function saveField(button) {
-    if (!(await saveSettings(true))) return;
+    if (!(await saveSettings())) return;
     var details = button.closest("details");
     var box = details.querySelector("input");
     if (details.id === "address-setting") {
@@ -690,6 +746,7 @@
           ? "$" + Number(typed || 0).toFixed(2)
           : typed || box.placeholder;
     }
+    showSaveState(details);
     details.open = false;
   }
 
@@ -699,6 +756,7 @@
     details.querySelectorAll("input").forEach(function (box) {
       box.value = box.defaultValue;
     });
+    showSaveState(details);
     details.open = false;
   }
 
@@ -725,6 +783,12 @@
     select.disabled = !!failed;
     select.removeAttribute("aria-busy");
     document.getElementById("calendar-spinner").hidden = true;
+    // With nothing picked yet the picker opens on the first calendar the account offers,
+    // and saving it is what makes that the calendar in force rather than only the one on
+    // screen. Flicking the switch on posts this form anyway, so it is only worth doing
+    // here while sync is already running.
+    var sync = document.getElementById("calendar_sync_enabled");
+    if (select.querySelector("[data-default]") && sync.checked) saveSettings();
   })();
 
   // Saving an account goes and asks the service whether the details work, which takes
@@ -752,9 +816,9 @@
         headers: { Accept: "application/json" },
       });
       if (response.ok) {
-        // Back on the row that was just saved, open, so what changed is what you see.
-        var service = form.querySelector('input[name="service"]').value;
-        location.assign("/settings?saved=1&tab=connections&open=" + service);
+        // Back on the tab it was saved from. Which rows are open is the page's own
+        // answer: the one just connected has nothing left to ask for.
+        location.assign("/settings?tab=connections");
         return;
       }
       var answer = await response.json().catch(function () {
@@ -779,6 +843,7 @@
     details.querySelectorAll("input").forEach(function (box) {
       box.value = box.defaultValue;
     });
+    showSaveState(details.querySelector("[data-save-scope]"));
     details.querySelector(".save-error").textContent = "";
     details.open = false;
   }

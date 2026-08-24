@@ -126,9 +126,11 @@ async function pageOrLastCopy(request) {
     if (response.ok && !response.redirected) await cache.put(request, stamped(response));
     return response;
   } catch {
-    const copy = await cache.match(request);
+    // Which tab a page was left on is in its address, and that is not a different page:
+    // the last copy of the board answers for the board whichever tab the address names.
+    const copy = await cache.match(request, { ignoreSearch: true });
     if (copy && Date.now() - Number(copy.headers.get(SAVED_AT)) < KEEP_MS) return copy;
-    if (copy) await cache.delete(request);
+    if (copy) await cache.delete(request, { ignoreSearch: true });
     return new Response(OFFLINE_PAGE, { headers: { "Content-Type": "text/html; charset=utf-8" } });
   }
 }

@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Final
 
 import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -60,6 +60,13 @@ LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 SETTINGS_TABS = ("connections", "preferences", "widget")
 
 # The preferences a tickbox turns on, which is what makes an absent one meaningful.
+# What each account is running, for when it is removed. Switched back on by hand: an
+# account connected again is not somebody asking for the job that used to run on it.
+PUT_DOWN_WITH: Final[dict[str, tuple[str, ...]]] = {
+    "icloud": ("calendar_sync_enabled", "email_import_enabled"),
+    "pushover": ("notifications_enabled",),
+}
+
 PREFERENCE_FLAGS = (
     "email_import_enabled",
     "calendar_sync_enabled",
@@ -131,8 +138,13 @@ def _first_validation_message(exc: ValidationError) -> str:
     return f"{field.replace('_', ' ')}: {error['msg']}"
 
 
-def _posted_flag(value: Any) -> str | None:
-    """One switch as the form sent it, or None for a field this form does not carry.
+def _posted(value: Any) -> str | None:
+    """One field as the form sent it, or None for a field this form does not carry.
+
+    Read off the form rather than taken as a route parameter, because FastAPI hands an
+    empty form field back as the parameter's default - the same None a field nobody
+    posted arrives as - and a box somebody deliberately emptied is not a box that was
+    never on the form.
 
     Starlette hands back an UploadFile for a file part; nothing here posts one, and a
     preference is never read out of anything but a plain string.
@@ -141,14 +153,14 @@ def _posted_flag(value: Any) -> str | None:
 
 
 def _saved(tab: str) -> RedirectResponse:
-    """Back to the settings page, on the tab the form was on, with a save to announce.
+    """Back to the settings page, on the tab the form was on.
 
     A tab this does not know is the first one: the name is put straight into a Location
     header, so what goes into it can only ever be one of ours.
     """
     if tab not in SETTINGS_TABS:
         tab = SETTINGS_TABS[0]
-    return RedirectResponse(f"/settings?saved=1&tab={tab}", status_code=303)
+    return RedirectResponse(f"/settings?tab={tab}", status_code=303)
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -261,10 +273,10 @@ def create_app(settings: Settings) -> FastAPI:
                 "past": past,
                 "tab": tab,
                 "budget": budget,
-                "raised_cap": budget.cap_usd + LIMIT_STEP,
-                # An empty board on a fresh deployment is not the same thing as an empty
-                # board on a working one, and only one of them is worth a signpost.
-                "set_up": settings.icloud_configured or settings.aeroapi_configured,
+                "raised_cap": None if budget.cap_usd is None else budget.cap_usd + LIMIT_STEP,
+                # An empty board says how to fill it, and importing from email is only
+                # one of the two ways while there is an account to read.
+                "icloud_ready": settings.icloud_configured,
             },
         )
 
@@ -279,17 +291,24 @@ def create_app(settings: Settings) -> FastAPI:
         """
         rows = await ingest.list_activity(session)
         imports = await views.build_mail_imports(session, rows)
-        return page(request, "mail.html", {"imports": imports})
+        return page(
+            request,
+            "mail.html",
+            {"imports": imports, "icloud_ready": settings.icloud_configured},
+        )
 
     @app.post("/limit")
     async def raise_limit(session: SessionDep) -> Response:
         """Raise the monthly limit and start polling again, from the board.
 
         The breaker latches so that a restart stays stopped, which means raising the cap
-        has to unlatch it too or nothing visibly happens.
+        has to unlatch it too or nothing visibly happens. There is nothing to raise when
+        there is no limit, and nothing to unlatch either: the breaker cannot have tripped.
         """
-        cap = prefs.current().aeroapi_monthly_cap_usd + LIMIT_STEP
-        await prefs.save(session, {"aeroapi_monthly_cap_usd": str(cap)})
+        current = prefs.current().aeroapi_monthly_cap_usd
+        if current is None:
+            return RedirectResponse("/", status_code=303)
+        await prefs.save(session, {"aeroapi_monthly_cap_usd": str(current + LIMIT_STEP)})
         await clear_breaker(session)
         return RedirectResponse("/", status_code=303)
 
@@ -499,12 +518,7 @@ def create_app(settings: Settings) -> FastAPI:
             # import card promises. Whole minutes: nobody is timing it.
             "mail_sweep_minutes": round(IDLE_CYCLE_SECONDS / 60),
             "budget": await budget_status(session),
-            "saved": "saved" in request.query_params,
             "tab": request.query_params.get("tab"),
-            # Which account row to come back open on. A save reloads the page so the row
-            # redraws with what it now holds, and folding it shut on the way would hide
-            # the very thing that just changed.
-            "opened": request.query_params.get("open"),
             "error": None,
         }
 
@@ -520,10 +534,10 @@ def create_app(settings: Settings) -> FastAPI:
             return await CalendarClient(settings).calendars(), None
         except CalendarUnavailable:
             log.warning("could not list the iCloud calendars", exc_info=True)
-            return [], "Check the iCloud connection under Accounts."
+            return [], "Check the iCloud connection under Connections."
         except Exception:
             log.warning("could not list the iCloud calendars", exc_info=True)
-            return [], "Check the iCloud connection under Accounts."
+            return [], "Check the iCloud connection under Connections."
 
     @app.get("/settings/calendars")
     async def list_calendars(request: Request) -> Response:
@@ -588,9 +602,7 @@ def create_app(settings: Settings) -> FastAPI:
     async def save_settings(
         request: Request,
         session: SessionDep,
-        public_base_url: Annotated[str | None, Form()] = None,
         log_level: Annotated[str | None, Form()] = None,
-        aeroapi_monthly_cap_usd: Annotated[str | None, Form()] = None,
         imap_flag_colour: Annotated[str | None, Form()] = None,
         icloud_calendar_url: Annotated[str | None, Form()] = None,
         email_import_enabled: Annotated[str | None, Form()] = None,
@@ -607,12 +619,11 @@ def create_app(settings: Settings) -> FastAPI:
         """
         form = await request.form()
         entered: dict[str, str | None] = {
-            name: _posted_flag(form.get(name)) for name in NOTIFICATION_FLAGS
+            name: _posted(form.get(name)) for name in NOTIFICATION_FLAGS
         }
         entered |= {
-            "public_base_url": public_base_url,
+            "public_base_url": _posted(form.get("public_base_url")),
             "log_level": log_level.upper() if log_level is not None else None,
-            "aeroapi_monthly_cap_usd": aeroapi_monthly_cap_usd,
             "imap_flag_colour": imap_flag_colour,
             "icloud_calendar_url": icloud_calendar_url,
             "email_import_enabled": email_import_enabled,
@@ -630,8 +641,9 @@ def create_app(settings: Settings) -> FastAPI:
         posted = {name: value.strip() for name, value in entered.items() if value is not None}
         previous = prefs.current()
         # A calendar is proved before it is stored rather than after, because the URL is
-        # all the check needs and nothing else on the form has to be undone to ask.
-        # Choosing to write to none is a choice, not a calendar that failed.
+        # all the check needs and nothing else on the form has to be undone to ask. A
+        # form carrying no calendar - none picked yet, or the picker never drawn - has
+        # nothing to prove.
         chosen = posted.get("icloud_calendar_url")
         if chosen and chosen != previous.icloud_calendar_url:
             result = await check_calendar(settings, chosen)
@@ -693,11 +705,37 @@ def create_app(settings: Settings) -> FastAPI:
         # The page asks over fetch so the answer can land beside the button that was
         # pressed. A browser with no script posts the form and gets the page back.
         wants_json = "application/json" in request.headers.get("accept", "")
+        # The limit is drawn in the FlightAware card and saved by its button, but it is a
+        # preference rather than a credential: it is read off the form, because an empty
+        # box means no limit here rather than "leave this one alone", and it is stored
+        # before the key is tried, because a key the service refuses says nothing about
+        # what somebody is willing to spend.
+        limit = _posted((await request.form()).get("aeroapi_monthly_cap_usd"))
+        if limit is not None:
+            try:
+                await prefs.save(session, {"aeroapi_monthly_cap_usd": limit.strip() or None})
+            except ValidationError:
+                refusal = "Monthly spend limit: a figure, or empty for no limit."
+                if wants_json:
+                    return JSONResponse({"error": refusal}, status_code=400)
+                context = await settings_context(request, session)
+                context["error"] = f"{found.name}: {refusal}"
+                context["tab"] = "connections"
+                return page(request, "settings.html", context, status_code=400)
+            # A limit that was in force and has been raised, or taken off altogether,
+            # leaves a breaker latched against a month it no longer applies to.
+            await clear_breaker(session)
         changed = _merged(found.fields, entered, forget=bool(forget))
         if not changed:
             return JSONResponse({"ok": True}) if wants_json else _saved("connections")
         restore = {name: getattr(settings, name) for name in found.fields}
         write_secrets(changed)
+        # Every job on the preferences page runs on one of these accounts, so throwing
+        # one away puts down what ran on it rather than leaving a switch on for work that
+        # has nothing left to do it with. Calendar entries already written stay where they
+        # are: the credentials that could take them back out are the ones just removed.
+        if forget and service in PUT_DOWN_WITH:
+            await prefs.save(session, dict.fromkeys(PUT_DOWN_WITH[service], False))
         # Forgetting is never refused: a credential you are throwing away does not have
         # to work first.
         if not forget:

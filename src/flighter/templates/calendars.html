@@ -4,9 +4,13 @@
 {% if error %}
 <option value="" data-error>{{ error }}</option>
 {% else %}
-<option value=""{{ ' selected' if not selected }}>Do not write to a calendar</option>
+{# Writing to none of them is what the card's own switch is for, so the picker offers
+   calendars and nothing else. With none picked it opens on the first the account
+   offers, marked so the page knows to store what it is showing. #}
 {% for calendar in calendars %}
-<option value="{{ calendar.url }}"{{ ' selected' if calendar.url == selected }}>
+<option value="{{ calendar.url }}"
+        {{- ' selected' if calendar.url == selected or (not selected and loop.first) }}
+        {{- ' data-default' if not selected and loop.first }}>
   {{- calendar.name -}}</option>
 {% endfor %}
 {% endif %}

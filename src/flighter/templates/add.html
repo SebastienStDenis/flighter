@@ -45,11 +45,12 @@
        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="10"/>
   </svg>
-  <strong>No FlightAware key</strong>
+  <strong>FlightAware connection not configured</strong>
   <section>
-    <p>A flight is read out of the airline's published schedule, which needs a key
-      entered on the <a class="btn" data-variant="link" href="/settings">settings page</a>.
-      Until then, flag a booking email instead.</p>
+    {# The way there is a button in the sentence rather than a word dressed as a link,
+       and at the size the line is: a full-height button in a line of prose sets it. #}
+    <p>Navigate to <a class="btn align-middle" data-variant="outline" data-size="xs"
+        href="/settings?tab=connections">Connections</a> to configure FlightAware.</p>
   </section>
 </div>
 {% endif %}

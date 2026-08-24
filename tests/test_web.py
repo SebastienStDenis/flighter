@@ -66,7 +66,6 @@ AIRPORTS = {
 SETTINGS_FORM = {
     "public_base_url": "https://flights.example.com",
     "log_level": "INFO",
-    "aeroapi_monthly_cap_usd": "4.00",
     "imap_flag_colour": "grey",
 }
 
@@ -1397,7 +1396,7 @@ def test_without_a_flightaware_key_the_page_says_why_and_points_at_settings(
     with build_client(unconfigured, monkeypatch) as fresh:
         body = fresh.get("/f/new").text
 
-    assert "No FlightAware key" in body
+    assert "FlightAware connection not configured" in body
     assert 'href="/settings"' in body
     assert 'name="flight_number"' not in body
     assert "By hand" not in body
@@ -1587,6 +1586,18 @@ def test_the_address_a_page_was_opened_on_is_kept_for_the_work_that_has_no_reque
     ]
 
 
+def test_clearing_the_address_hands_it_back_to_the_one_in_use(client: TestClient) -> None:
+    """An empty override is how "work it out" is stored, so an emptied box has to reach
+    the row: a field somebody cleared arrives looking exactly like one nobody posted."""
+    client.post("/settings", data=SETTINGS_FORM | {"tab": "preferences"})
+    assert prefs.current().public_base_url == "https://flights.example.com"
+
+    client.post("/settings", data=SETTINGS_FORM | {"tab": "preferences", "public_base_url": ""})
+
+    assert prefs.current().public_base_url == ""
+    assert prefs.public_base_url("https://phone.example.com") == "https://phone.example.com"
+
+
 def test_the_schema_is_not_published(client: TestClient) -> None:
     """Nothing writes against these routes, so a map of them is only ever a gift."""
     for path in ("/docs", "/openapi.json"):
@@ -1594,6 +1605,52 @@ def test_the_schema_is_not_published(client: TestClient) -> None:
 
 
 # --- Settings ------------------------------------------------------------------------
+
+
+def test_a_connection_that_is_not_made_yet_opens_on_the_way_in(
+    unconfigured: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rows worth doing something about are the ones that are not done."""
+    with build_client(unconfigured, monkeypatch) as fresh:
+        rows = re.findall(r'<details class="setting"([^>]*)>', fresh.get("/settings").text)
+
+    assert rows and all(" open" in row for row in rows)
+
+
+def test_a_connection_already_made_stays_folded_away(client: TestClient) -> None:
+    body = client.get("/settings").text
+    rows = re.findall(r'<details class="setting"([^>]*)>', body)
+
+    # Anthropic is the one this deployment has not connected.
+    assert [" open" in row for row in rows] == [False, False, False, True]
+
+
+def test_a_connection_not_made_yet_cannot_be_saved_without_its_credentials(
+    unconfigured: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty box means "leave it alone" only once there is something to leave: on a
+    connection nobody has made, saving one that is still empty connects nothing."""
+    with build_client(unconfigured, monkeypatch) as fresh:
+        body = fresh.get("/settings").text
+
+    for name in ("aeroapi_key", "icloud_app_password", "pushover_token"):
+        assert re.search(rf'<input[^>]*id="{name}"[^>]*required', body)
+    # The limit is not a credential, and empty is a setting it can be left on.
+    limit = re.search(r'<input[^>]*id="aeroapi_monthly_cap_usd"[^>]*>', body)
+    assert limit is not None
+    assert "required" not in limit.group()
+
+
+def test_a_credential_on_file_says_what_leaving_its_box_empty_means(
+    client: TestClient,
+) -> None:
+    body = client.get("/settings").text
+
+    # The four secrets on file: the AeroAPI key, the app-specific password, and
+    # Pushover's two. The Apple ID is shown back, and Anthropic is not connected.
+    assert body.count("(leave empty to keep saved value)") == 4
+    # Nothing is asked for again on a connection that is already made.
+    assert not re.search(r'<input[^>]*id="icloud_app_password"[^>]*required', body)
 
 
 def test_the_settings_page_shows_what_is_connected(client: TestClient) -> None:
@@ -1612,7 +1669,7 @@ def test_the_settings_page_shows_what_is_connected(client: TestClient) -> None:
 
 def test_the_widget_tab_says_whether_a_phone_has_fetched(client: TestClient) -> None:
     body = client.get("/settings").text
-    assert "No phone has fetched flights yet" in body
+    assert "No widget has fetched flights yet" in body
     assert "Not connected" in body
 
     recent = datetime.now(UTC) - timedelta(minutes=4)
@@ -1620,7 +1677,7 @@ def test_the_widget_tab_says_whether_a_phone_has_fetched(client: TestClient) -> 
         KV(key=LAST_SEEN_KEY, value={"at": recent.strftime("%Y-%m-%dT%H:%M:%SZ")})
     ]
     body = client.get("/settings").text
-    assert "Last fetched by a phone <strong>4m ago</strong>" in body
+    assert "Last fetched by a widget <strong>4m ago</strong>" in body
 
 
 def test_a_phone_not_heard_from_in_a_day_is_not_connected(client: TestClient) -> None:
@@ -1630,7 +1687,7 @@ def test_a_phone_not_heard_from_in_a_day_is_not_connected(client: TestClient) ->
         KV(key=LAST_SEEN_KEY, value={"at": long_ago.strftime("%Y-%m-%dT%H:%M:%SZ")})
     ]
     body = client.get("/settings").text
-    assert "Last fetched by a phone <strong>3d ago</strong>" in body
+    assert "Last fetched by a widget <strong>3d ago</strong>" in body
     assert "Not connected" in body
 
 
@@ -1644,8 +1701,8 @@ def test_regenerating_the_token_lands_back_on_the_widget_tab(
 
     assert minted == [True]
     assert response.status_code == 303
-    assert response.headers["location"] == "/settings?saved=1&tab=widget"
-    body = client.get("/settings?saved=1&tab=widget").text
+    assert response.headers["location"] == "/settings?tab=widget"
+    body = client.get("/settings?tab=widget").text
     assert re.search(
         r'id="settings-tabs-tab-3"\s+aria-controls="[^"]+"\s+aria-selected="true"', body
     )
@@ -1661,8 +1718,12 @@ def test_the_install_copy_fallback_carries_the_whole_script(client: TestClient) 
     assert "Keychain.set(TOKEN_KEY" in body
 
 
-def test_the_settings_page_says_what_the_month_has_cost(client: TestClient) -> None:
-    assert "$0.42 of $4.00 this" in client.get("/settings").text
+def test_the_limit_is_set_on_the_account_it_is_a_limit_on(client: TestClient) -> None:
+    """It is what FlightAware is allowed to cost, so it is drawn with the FlightAware
+    account rather than among the preferences."""
+    accounts = client.get("/settings").text.split('id="settings-tabs-panel-2"')[0]
+    assert "Monthly spend limit" in accounts
+    assert 'name="aeroapi_monthly_cap_usd"' in accounts
 
 
 def test_no_stored_credential_is_ever_rendered_back(client: TestClient) -> None:
@@ -1687,8 +1748,6 @@ def test_a_fresh_deployment_is_told_what_to_do_in_order(
     assert body.count("Not connected") >= 3
     # The feed is the one there is no board without, so it asks louder than the rest.
     assert "Required" in body
-    # And the board says where to go rather than sitting there empty.
-    assert "Nothing is connected yet" in fresh.get("/").text
 
 
 def test_a_deployment_nobody_has_told_its_address_is_offered_this_one(
@@ -1750,6 +1809,56 @@ def test_forgetting_a_connection_clears_every_credential_it_needs(
     written = record_secrets(monkeypatch)
     client.post("/settings/credentials", data={"service": "pushover", "forget": "1"})
     assert written == [{"pushover_token": "", "pushover_user_key": ""}]
+
+
+# Written through the route rather than set on the live copy, so the row a removal merges
+# into is a deployment that really had these on.
+RUNNING = {
+    "calendar_sync_enabled": "true",
+    "email_import_enabled": "true",
+    "notifications_enabled": "true",
+}
+
+
+def test_forgetting_icloud_puts_down_the_jobs_that_ran_on_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A switch left on for an account that is gone is one nothing can honour."""
+    record_secrets(monkeypatch)
+    client.post("/settings", data=RUNNING)
+
+    client.post("/settings/credentials", data={"service": "icloud", "forget": "1"})
+
+    assert not prefs.current().calendar_sync_enabled
+    assert not prefs.current().email_import_enabled
+    # The account that was not removed keeps what runs on it.
+    assert prefs.current().notifications_enabled
+
+
+def test_forgetting_pushover_puts_down_the_notifications(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_secrets(monkeypatch)
+    client.post("/settings", data=RUNNING)
+
+    client.post("/settings/credentials", data={"service": "pushover", "forget": "1"})
+
+    assert not prefs.current().notifications_enabled
+    assert prefs.current().calendar_sync_enabled
+    assert prefs.current().email_import_enabled
+
+
+def test_forgetting_an_account_nothing_runs_on_puts_down_nothing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_secrets(monkeypatch)
+    client.post("/settings", data=RUNNING)
+
+    client.post("/settings/credentials", data={"service": "anthropic", "forget": "1"})
+
+    assert prefs.current().calendar_sync_enabled
+    assert prefs.current().email_import_enabled
+    assert prefs.current().notifications_enabled
 
 
 def test_details_the_service_will_not_take_are_not_kept(
@@ -2032,8 +2141,8 @@ def test_a_save_comes_back_to_the_tab_it_was_made_on(client: TestClient) -> None
         "/settings", data=SETTINGS_FORM | {"tab": "preferences"}, follow_redirects=False
     )
 
-    assert response.headers["location"] == "/settings?saved=1&tab=preferences"
-    body = client.get("/settings?saved=1&tab=preferences").text
+    assert response.headers["location"] == "/settings?tab=preferences"
+    body = client.get("/settings?tab=preferences").text
     assert re.search(
         r'id="settings-tabs-tab-2"\s+aria-controls="[^"]+"\s+aria-selected="true"', body
     )
@@ -2045,7 +2154,7 @@ def test_a_tab_nobody_drew_is_the_first_one(client: TestClient) -> None:
         "/settings", data=SETTINGS_FORM | {"tab": "../evil"}, follow_redirects=False
     )
 
-    assert response.headers["location"] == "/settings?saved=1&tab=connections"
+    assert response.headers["location"] == "/settings?tab=connections"
 
 
 def test_a_credential_comes_back_to_the_connections_tab(
@@ -2059,14 +2168,14 @@ def test_a_credential_comes_back_to_the_connections_tab(
         follow_redirects=False,
     )
 
-    assert response.headers["location"] == "/settings?saved=1&tab=connections"
+    assert response.headers["location"] == "/settings?tab=connections"
 
 
 def test_a_refused_preference_stays_on_the_tab_it_was_typed_on(client: TestClient) -> None:
     """An error is worth nothing on a tab that is not showing the box it is about."""
     response = client.post(
         "/settings",
-        data=SETTINGS_FORM | {"tab": "preferences", "aeroapi_monthly_cap_usd": "four"},
+        data=SETTINGS_FORM | {"tab": "preferences", "imap_flag_colour": "chartreuse"},
     )
 
     assert response.status_code == 400
@@ -2086,14 +2195,63 @@ def test_a_card_that_posts_one_field_leaves_the_others_alone(client: TestClient)
     assert prefs.current().log_level == "WARNING"
 
 
-def test_a_typo_in_the_cap_is_refused_with_the_field_named(client: TestClient) -> None:
+def test_a_typo_in_the_limit_is_refused_beside_the_button_that_was_pressed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_secrets(monkeypatch)
+
     response = client.post(
-        "/settings", data=SETTINGS_FORM | {"aeroapi_monthly_cap_usd": "four dollars"}
+        "/settings/credentials",
+        data={"service": "flightaware", "aeroapi_monthly_cap_usd": "four dollars"},
+        headers={"Accept": "application/json"},
     )
+
     assert response.status_code == 400
-    assert "aeroapi monthly cap usd" in response.text
-    # And the typed-in value is still on the form rather than silently reverted.
-    assert "four dollars" in response.text
+    assert "Monthly spend limit" in response.json()["error"]
+    assert prefs.current().aeroapi_monthly_cap_usd == Decimal("4.00")
+
+
+def test_the_limit_is_saved_by_the_button_that_saves_the_key(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It is about this account and nothing else, so it is set where the key is."""
+    record_secrets(monkeypatch)
+
+    client.post(
+        "/settings/credentials",
+        data={"service": "flightaware", "aeroapi_monthly_cap_usd": "2.50"},
+    )
+
+    assert prefs.current().aeroapi_monthly_cap_usd == Decimal("2.50")
+
+
+def test_an_empty_limit_is_no_limit_and_lets_polling_start_again(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty is a choice here rather than a box left alone, and a deployment that has
+    just said "no limit" cannot be left stopped by a breaker latched against one."""
+    record_secrets(monkeypatch)
+    latch = KV(key=BREAKER_KEY, value={"month": "2026-08"})
+    client.session.rows["KV"] = [latch]  # type: ignore[attr-defined]
+
+    client.post(
+        "/settings/credentials",
+        data={"service": "flightaware", "aeroapi_monthly_cap_usd": ""},
+    )
+
+    assert prefs.current().aeroapi_monthly_cap_usd is None
+    assert client.session.deleted == [latch]  # type: ignore[attr-defined]
+
+
+def test_another_account_does_not_carry_the_limit_away(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A form that does not draw the box cannot be read as having emptied it."""
+    record_secrets(monkeypatch)
+
+    client.post("/settings/credentials", data={"service": "pushover", "pushover_token": "t"})
+
+    assert prefs.current().aeroapi_monthly_cap_usd == Decimal("4.00")
 
 
 def test_the_settings_page_offers_every_usable_flag_colour(client: TestClient) -> None:
@@ -2147,8 +2305,39 @@ def test_the_calendars_are_not_asked_for_until_there_is_an_account(
         options = fresh.get("/settings/calendars").text
 
     assert asked is False
-    assert "Connect iCloud under Accounts to pick a calendar." in body
+    assert "Connect iCloud in" in body
     assert CALENDARS[0].url not in options
+
+
+def test_neither_job_can_be_switched_on_without_the_account_it_runs_on(
+    unconfigured: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every job runs on an account, so with none connected no switch can be flicked."""
+    with build_client(unconfigured, monkeypatch) as fresh:
+        body = fresh.get("/settings").text
+
+    for field in ("calendar_sync_enabled", "email_import_enabled", "notifications_enabled"):
+        switch = re.search(rf'<input[^>]*id="{field}"[^>]*>', body)
+        assert switch is not None
+        assert "disabled" in switch.group()
+        assert "checked" not in switch.group()
+    assert body.count("Connect iCloud in") == 2
+    assert body.count("Connect Pushover in") == 1
+    assert body.count('href="/settings?tab=connections"') == 3
+
+
+def test_a_picker_with_nothing_stored_opens_on_the_first_calendar(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A calendar showing in the picker is one the page then stores, so it is never a
+    name on screen that nothing behind it agrees with."""
+    monkeypatch.setattr(prefs, "_current", prefs.Prefs(icloud_calendar_url=""))
+
+    options = client.get("/settings/calendars").text
+
+    first, second = CALENDARS[0], CALENDARS[1]
+    assert re.search(rf'value="{re.escape(first.url)}"\s+selected\s+data-default', options)
+    assert "data-default" not in options.split(second.url)[1]
 
 
 def test_the_settings_page_still_opens_when_icloud_cannot_be_reached(
@@ -2168,7 +2357,7 @@ def test_the_settings_page_still_opens_when_icloud_cannot_be_reached(
     options = client.get("/settings/calendars")
     assert options.status_code == 200
     # A sentence about what to do, not the repr of whatever was raised.
-    assert "Check the iCloud connection under Accounts." in options.text
+    assert "Check the iCloud connection under Connections." in options.text
     assert "CalendarUnavailable" not in options.text
     # Marked so the picker stays shut rather than offering the failure as a choice.
     assert "data-error" in options.text

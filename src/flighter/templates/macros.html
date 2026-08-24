@@ -1,4 +1,11 @@
 {# A status is a word first. The badge only colours the word it is already carrying. #}
+{# What a screen cannot do until a connection is made, said after the sentence about
+   the thing it cannot do rather than as a second sentence of its own. #}
+{% macro requires_icloud() %}
+(requires iCloud connection in <a class="btn align-middle" data-variant="outline"
+   data-size="xs" href="/settings?tab=connections">Connections</a>)
+{%- endmacro %}
+
 {% macro badge(status) %}
 <span class="badge" data-variant="{{ status.tone }}">{{ status.label }}</span>
 {% endmacro %}

@@ -72,6 +72,11 @@
   --input: oklch(0.885 0.008 258);
   --ring: oklch(0.62 0.09 250);
 
+  /* Lucide's own external-link, carried as an image because it is painted after a
+     link rather than written into one. Masked rather than drawn, so it takes the colour
+     of the words it follows in either scheme. */
+  --external-link-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>');
+
   --quiet: oklch(0.47 0.014 258);
   --plan: oklch(0.48 0.13 250);
   --live: oklch(0.495 0.16 300);
@@ -137,6 +142,9 @@
     /* A countdown that reflows every second is unreadable, so no digit is ever allowed
        to be a different width from another. */
     @apply font-sans tabular-nums antialiased;
+    /* Narrower than this the cards start squeezing their own contents, so the page
+       stops shrinking and the window scrolls to it instead. */
+    min-width: 365px;
   }
 
   main {
@@ -303,6 +311,22 @@
     color: var(--flag);
   }
 
+  /* Six targets across, and where six do not fit, three and three. Left to wrap on its
+     own the row breaks wherever it runs out, which on the narrowest screen leaves five
+     flags on one line and the sixth under them. */
+  .flag-row {
+    @apply grid justify-center gap-2;
+    grid-template-columns: repeat(6, auto);
+  }
+
+  /* Six 44px targets and the five 8px gaps between them come to 304px, which is what
+     is left of a 368px screen once the page's padding and the card's own are off it. */
+  @media (width < 368px) {
+    .flag-row {
+      grid-template-columns: repeat(3, auto);
+    }
+  }
+
   /* The label is the 44px a thumb needs; the circle drawn inside it is smaller, so the
      mark around the chosen flag sits close to the glyph rather than around the target. */
   .flag-target {
@@ -447,6 +471,47 @@
     @apply hidden;
   }
 
+  /* Basecoat underlines a link in an empty state's sentence, which is right for a word
+     standing in for a page and wrong for a button that is already drawn as one. */
+  .empty > header > p a.btn {
+    @apply no-underline;
+  }
+
+  /* A link that leaves the app says so. Not on a button: one that is already a target
+     the size of a thumb is not asking to be told apart from the words around it. */
+  a[target='_blank']:not(.btn)::after {
+    @apply ms-1 inline-block size-3 align-[-0.05em] content-[''];
+    background-color: currentColor;
+    mask: var(--external-link-icon) center / contain no-repeat;
+  }
+
+  /* The line under a box explains that box, so it sits closer to it than the next field
+     does. Basecoat spaces everything in a field alike, which leaves the note as far from
+     what it explains as from what comes after it. Written at Basecoat's own shape, or
+     the rule it sets this with outranks a shorter one and the note keeps its distance. */
+  :is(.field > p, .field section > p):last-child {
+    @apply -mt-1.5;
+  }
+
+  /* Basecoat animates the height a disclosure opens to but leaves what is inside it
+     standing at full height, so a section folding away spills out of the box closing
+     over it: the frame shrinks, and then the contents disappear where they stand.
+
+     Clipped rather than hidden so the edge can be given a margin: a box inside a
+     disclosure is as wide as the disclosure, and the ring drawn around a focused one
+     sits outside that box - clipped to the box exactly, a focused field loses the two
+     sides of its own ring. */
+  details::details-content {
+    overflow: clip;
+    overflow-clip-margin: 4px;
+  }
+
+  /* Basecoat underlines a summary on hover, which is how it marks a link. These open
+     a section of the page they are already on, so the words stay as they are. */
+  .accordion > details > summary:hover {
+    @apply no-underline;
+  }
+
   /* Basecoat sizes its accordion for a page of prose. Here a disclosure sits inside a
      step or a card, where that much air reads as a gap rather than as grouping. */
   /* Centred, because Basecoat starts its chevron at the top of the first line for a
@@ -508,24 +573,6 @@
     @apply sticky bottom-0 z-10 -mx-4 mt-auto bg-background/85 px-4 pt-3 backdrop-blur;
     margin-bottom: calc(-1 * var(--page-end));
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
-  }
-
-  /* A save is worth a word rather than a banner, so it is said just under the header,
-     where the eye already is, and then takes itself away. Basecoat drops its toasts at
-     the foot of the screen, which is where this app keeps the button that was pressed. */
-  .toaster {
-    @apply top-0 bottom-auto flex-col items-center;
-    padding-top: calc(3.5rem + env(safe-area-inset-top) + 0.75rem);
-  }
-
-  /* As wide as the word it carries. A confirmation that spans the screen is the banner
-     this is here instead of. */
-  .toaster .toast {
-    @apply w-auto;
-  }
-
-  .toast-content {
-    @apply rounded-lg border bg-popover text-popover-foreground shadow-lg;
   }
 
   /* iOS sizes a native date control to its own picker and lets it run past a narrow
