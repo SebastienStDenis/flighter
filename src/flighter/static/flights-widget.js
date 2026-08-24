@@ -8,12 +8,19 @@
 // in which tone, the one line under it, what the flight is counting to, and where the
 // airline's mark is to be fetched from. This file draws that and nothing else.
 //
-// One figure is not drawn here at all. iOS reloads a widget when it feels like it, about
-// every quarter of an hour, so a countdown worked out at draw time is that far wrong by
-// the time it is read - and a countdown is the one thing on the row that has to be right
-// to the minute. WidgetKit will tick a date down itself, between reloads and without
-// waking anything, so the server sends the instant and `applyTimerStyle` counts it. Every
-// other time in the payload is already a clock face, right until the estimate moves.
+// Two figures are not worked out here at all. iOS reloads a widget when it feels like it,
+// about every quarter of an hour, so any number counted from the clock at draw time is
+// that far wrong by the time it is read - and how long until the flight goes, and how old
+// what is on screen is, are the two that have to be right to the minute. WidgetKit ticks a
+// date on its own, between reloads and without waking anything, so both are drawn as dates
+// and it counts them: the server's instant for the first, and the moment this data landed
+// for the second. Every other time in the payload is already a clock face, right until the
+// estimate moves.
+//
+// A word is not a date, though. The label beside a countdown is frozen at the moment it was
+// drawn, so "Departs in" would still be there while the count ticked upwards past zero. The
+// server asks for a reload at that instant rather than at its usual cadence, which is as
+// close to changing the word on the spot as a widget gets.
 //
 // There is nothing to edit here. The server's address and the token arrive through the
 // Connect button on the settings page, which runs this script with both in the URL, and
@@ -99,27 +106,29 @@ function connect() {
   return null;
 }
 
+// `fetchedAt` is the whole point of the footer: the moment the flights being drawn came
+// from, which is now when the server answered and the age of the cache when it did not.
 async function load(server) {
   try {
     const data = await request(server);
     writeCache(data);
-    return { data, stale: false, cachedAt: null, rejected: false, error: null };
+    return { data, stale: false, fetchedAt: new Date(), rejected: false, error: null };
   } catch (error) {
     // Not the cache: yesterday's flights with a small "Cached" mark would hide that the
     // token is wrong, and that is the one failure a reload never fixes.
     if (error instanceof TokenRejected) {
-      return { data: null, stale: false, cachedAt: null, rejected: true, error: null };
+      return { data: null, stale: false, fetchedAt: null, rejected: true, error: null };
     }
     // A stale widget beats a blank one. The flight has almost certainly not changed,
     // and the footer says how old what is drawn is.
     const cached = readCache();
     if (cached) {
-      return { data: cached.data, stale: true, cachedAt: cached.cachedAt, rejected: false, error: null };
+      return { data: cached.data, stale: true, fetchedAt: cached.cachedAt, rejected: false, error: null };
     }
     return {
       data: null,
       stale: false,
-      cachedAt: null,
+      fetchedAt: null,
       rejected: false,
       error: String(error.message || error),
     };
@@ -269,7 +278,11 @@ async function buildWidget(result) {
   scheduleRefresh(widget, data);
 
   if (flights.length === 0) {
-    message(widget, "No upcoming flights", staleNote(result));
+    // The lock screen has no room for a footer, so there the age goes in the message.
+    message(widget, "No upcoming flights", isAccessory ? staleNote(result) : null);
+    if (!isAccessory) {
+      footer(widget, data, result);
+    }
     return widget;
   }
 
@@ -359,10 +372,11 @@ function renderSmall(widget, flight, logos) {
     widget.addSpacer(4);
     // The width here is one column, so the line wraps rather than being cut: the
     // gate and the seat are worth a second line when there is nothing else on screen.
+    // Two of them and no more, because the footer under it now always takes a line.
     const detail = widget.addText(flight.detail);
     detail.font = Font.systemFont(12);
     detail.textColor = TEXT;
-    detail.lineLimit = 3;
+    detail.lineLimit = 2;
     detail.minimumScaleFactor = 0.8;
   }
 
@@ -467,10 +481,22 @@ function milestoneWord(container, flight, size) {
 // where it stands and ticking between reloads. Monospaced, so nothing beside it shuffles
 // as the digits change, and it goes on counting up once the time has gone by - which is
 // the state the word beside it is already saying is a wait.
+//
+// Aligned right explicitly. A timer is the one element whose text WidgetKit cannot measure
+// before it draws it, so it is handed the whole of what the spacer left rather than only
+// what the digits need; the preview in Scriptable, which measures a snapshot, hands it the
+// digits. Left to itself the count therefore sits at the right-hand end of the row in the
+// app and part-way along it on the home screen, which is the same widget disagreeing with
+// itself. Right is the end the spacer was put there to hold it against.
 function countdown(container, flight, size) {
   const date = container.addDate(new Date(flight.milestone_at));
   date.applyTimerStyle();
-  date.font = Font.semiboldMonospacedSystemFont(size);
+  // Bold rather than semibold. The two are the same weight to look at when a Mac draws
+  // an iPhone's widget, so the count reads as heavier than the row on a mirrored screen
+  // and no different from it on the phone itself - and the phone is the screen this is
+  // for. The weight is the point: the count is what the row is looked at for.
+  date.font = Font.boldMonospacedSystemFont(size);
+  date.rightAlignText();
   date.lineLimit = 1;
   return date;
 }
@@ -489,17 +515,67 @@ function pill(container, flight) {
   return badge;
 }
 
+// The bottom of the widget: why the numbers might be wrong, when there is a reason, and
+// under it how old the numbers are, always. Two lines rather than one because a budget
+// breaker's sentence and a running clock do not share a row on a small widget.
 function footer(widget, data, result) {
-  const degraded = data.degraded ? data.degraded_reason || "Status may be out of date" : null;
-  const note = degraded || staleNote(result);
-  if (!note) {
+  if (data.degraded) {
+    const text = widget.addText(data.degraded_reason || "Status may be out of date");
+    text.font = Font.systemFont(footerSize());
+    text.textColor = MUTED;
+    text.lineLimit = 1;
+    text.minimumScaleFactor = 0.7;
+  }
+  updatedLine(widget, result);
+}
+
+// "Updated 04:12 ago", counted by WidgetKit rather than worked out here.
+//
+// The figure is the reason this line exists: a widget is redrawn a few times an hour, so
+// "4 min ago" written at draw time is the one number on screen guaranteed to be wrong by
+// the time anybody reads it - and wrong in the flattering direction, which is worse than
+// saying nothing. A date drawn in the timer style counts upwards on its own, so the age
+// on screen is the real one whenever the phone is looked at, whether iOS has reloaded
+// this widget in the last minute or has not touched it for half an hour.
+//
+// "Cached" rather than "Updated" when the server could not be reached, because then the
+// figure is the age of a file on the phone rather than of a conversation with the server.
+function updatedLine(widget, result) {
+  const size = footerSize();
+  const line = widget.addStack();
+  line.centerAlignContent();
+  line.spacing = 3;
+
+  const word = line.addText(result.stale ? "Cached" : "Updated");
+  word.font = Font.systemFont(size);
+  word.textColor = MUTED;
+  word.lineLimit = 1;
+
+  // A cache with no modification date on it can still be drawn; it just cannot be aged.
+  if (!result.fetchedAt) {
     return;
   }
-  const text = widget.addText(note);
-  text.font = Font.systemFont(family === "small" ? 9 : 10);
-  text.textColor = MUTED;
-  text.lineLimit = 1;
-  text.minimumScaleFactor = 0.7;
+  const age = line.addDate(result.fetchedAt);
+  age.applyTimerStyle();
+  age.font = Font.regularMonospacedSystemFont(size);
+  age.textColor = MUTED;
+  // A timer is given room for the longest reading it could ever show - hours, when it
+  // has been minutes all day - so the slack has to fall somewhere. Right-aligned it
+  // falls after "Updated", where it reads as spacing; left-aligned it falls in front of
+  // "ago", where it reads as a mistake.
+  age.rightAlignText();
+  age.lineLimit = 1;
+
+  const ago = line.addText("ago");
+  ago.font = Font.systemFont(size);
+  ago.textColor = MUTED;
+  ago.lineLimit = 1;
+  // Holds the three of them at the left of the widget rather than spread across it.
+  line.addSpacer();
+}
+
+function footerSize() {
+  return family === "small" ? 9 : 10;
 }
 
 function message(widget, headline, detail) {
@@ -543,11 +619,13 @@ function toneColor(name, alpha = 1) {
   return Color.dynamic(new Color(light, alpha), new Color(dark, alpha));
 }
 
+// The lock screen's version of the footer, squeezed into the one line a message has: no
+// room there for a word, a running count and "ago", so it states the clock face instead.
 function staleNote(result) {
   if (!result.stale) {
     return null;
   }
-  return result.cachedAt ? `Cached ${timeOfDay(result.cachedAt)}` : "Cached";
+  return result.fetchedAt ? `Cached ${timeOfDay(result.fetchedAt)}` : "Cached";
 }
 
 // The IANA name of the zone the phone is set to, or nothing if it will not say, which
