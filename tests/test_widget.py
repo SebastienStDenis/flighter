@@ -113,7 +113,6 @@ def test_upcoming_flight(settings: Settings) -> None:
         # footer for one either.
         "milestone_label": None,
         "milestone_at": None,
-        "milestone_due": None,
     }
 
 
@@ -630,38 +629,50 @@ def test_a_count_already_past_zero_is_not_asked_about_again(settings: Settings) 
 # --- what the count does when the label cannot follow it --------------------------------
 
 
-def test_a_count_still_ahead_carries_the_word_for_when_it_is_not(settings: Settings) -> None:
-    """The reload asked for at the instant is a hint iOS may sit on, so the payload has
-    to say what the phone should draw if it is still showing this one afterwards.
+def test_the_count_is_the_instant_and_nothing_but_the_instant(settings: Settings) -> None:
+    """The phone is handed a date and told to tick it, and that is the whole contract.
 
-    A label is a word and words do not tick: whatever "Departs in" said when this was
-    built is what it says until something reloads the widget. A figure that goes on
-    climbing beside it draws three minutes overdue as three minutes to go, so the figure
-    is the one that gives.
+    The label beside it is a word, and words do not tick: whatever "Departs in" said when
+    the payload was built is what it says until something reloads the widget, while the
+    figure goes on climbing past zero underneath it. Nothing on the phone can repair that
+    - swapping a drawn glyph for another needs a drawing, and WidgetKit hands out one per
+    reload - so the payload does not try, and the reload asked for at the instant is the
+    only thing standing between the row and a wrong reading.
     """
     ahead = snapshot(scheduled_out=NOW + timedelta(minutes=4))
     flight = payload([(booking(), ahead)], settings)["flights"][0]
     assert counting(flight) == ("Departs in", "2026-09-12T18:04:00Z")
-    assert flight["milestone_due"] == "Due"
+    assert set(flight) == {
+        "detail_url",
+        "phase",
+        "logo_url",
+        "number",
+        "route",
+        "status_label",
+        "status_tone",
+        "detail",
+        "milestone_label",
+        "milestone_at",
+    }
 
 
-def test_a_count_whose_label_has_caught_up_is_free_to_run_upwards(settings: Settings) -> None:
+def test_a_count_whose_label_has_caught_up_runs_upwards(settings: Settings) -> None:
     """Once the label itself says "Due to depart" there is nothing left to disagree with,
     and how far past due a flight is is worth knowing."""
     overdue = snapshot(scheduled_out=NOW - timedelta(minutes=3))
     flight = payload([(booking(), overdue)], settings)["flights"][0]
     assert counting(flight)[0] == "Due to depart"
-    assert flight["milestone_due"] is None
 
 
-def test_the_script_stands_the_count_down_rather_than_let_it_pass_its_label() -> None:
-    """The phone draws the server's word where the figure would have gone, and only ever
-    ticks a count upwards under a label that has caught up with it."""
+def test_the_script_draws_the_count_and_never_stands_it_down() -> None:
+    """A timer is the one thing on the widget WidgetKit keeps ticking between reloads,
+    and the one thing Scriptable gives no way to stop: `applyTimerStyle` takes no end
+    date, no pause and no direction, so a count past its instant climbs and there is no
+    branch anywhere that could put a word in its place."""
     source = script_source()
     timer = source[source.index("function countdown(") : source.index("function pill(")]
-    guard = timer[: timer.index("applyTimerStyle()")]
-    assert "flight.milestone_due && at <= new Date()" in guard
-    assert "addText(flight.milestone_due)" in guard
+    assert "addText" not in timer
+    assert "milestone_due" not in source
 
 
 def test_no_flights(settings: Settings) -> None:
@@ -1077,12 +1088,10 @@ def test_the_count_is_pulled_up_under_the_words_naming_it() -> None:
         ("renderSmall(", "function renderList("),
     ):
         assert "COUNT_LIFT" not in source[source.index(f"function {name}") : source.index(ends)]
-    # Applied to the box rather than to the figure, so it lands whichever of the two the
-    # count turns out to be: the timer, or the word standing in for it once its instant
-    # has gone by.
+    # Applied to the box the count is measured into rather than to the figure itself: a
+    # line of text has no say in its own height, and the box is the only handle there is.
     timer = source[source.index("function countdown(") : source.index("function pill(")]
     assert "box.setPadding(-lift, 0, 0, 0);" in timer
-    assert timer.index("const box = container.addStack();") < timer.index("milestone_due")
 
 
 def test_a_widget_reload_takes_the_servers_newer_script_quietly() -> None:

@@ -18,12 +18,13 @@
 // estimate moves.
 //
 // A word is not a date, though. The label beside a countdown is frozen at the moment it was
-// drawn, so "Departs in" would still be there while the count ticked upwards past zero. The
-// server asks for a reload at that instant rather than at its usual cadence, which is as
-// close to changing the word on the spot as a widget gets - and because that is a hint iOS
-// is free to sit on, every drawing of a count whose instant has already gone by puts the
-// server's word for it where the figure would have been instead. The two are never allowed
-// to disagree: the count runs upwards only under a label that has caught up with it.
+// drawn, so "Departs in" is still there while the count ticks upwards past zero, and the
+// row reads as three minutes to go when it is three minutes overdue. Nothing on the phone
+// can repair that: swapping a drawn glyph for another one needs a drawing, WidgetKit hands
+// out one per reload, and a reload re-runs this file from the top and asks the server again
+// - by which point the label has rolled over on its own and the count is meant to climb.
+// So the reload is the whole of the answer: the server asks for one at the instant itself
+// rather than at its usual cadence, and the row is wrong for as long as iOS makes it wait.
 //
 // There is nothing to edit here. The server's address and the token arrive through the
 // Connect button on the settings page, which runs this script with both in the URL, and
@@ -534,7 +535,7 @@ function milestoneWord(container, flight, size) {
 // itself. Right is the end the spacer was put there to hold it against.
 function countdown(container, flight, size, slack = 1, lift = 0) {
   const at = new Date(flight.milestone_at);
-  // Boxed before anything is put in it, because the box is what the count is moved by.
+  // The box is what the count is moved by, as well as what it is measured into.
   // `lift` is for the sizes that draw the words naming the count on the row above it:
   // the air a line of this size carries over its glyphs lands between the two of them
   // there, and reads as the figure having come adrift of its own label. Pulling the box
@@ -544,19 +545,6 @@ function countdown(container, flight, size, slack = 1, lift = 0) {
   const box = container.addStack();
   if (lift) {
     box.setPadding(-lift, 0, 0, 0);
-  }
-  // Where the label has not caught up, the figure is the one that gives. A count is drawn
-  // once and then ticks on its own, so one started while the flight was still ahead goes on
-  // climbing after its instant with "Departs in" sat beside it - three minutes overdue
-  // drawn as three minutes to go, which is the one reading worse than no reading. The
-  // server hands over a word for exactly this, and it holds the place until a reload rolls
-  // the label and the figure over together.
-  if (flight.milestone_due && at <= new Date()) {
-    const due = box.addText(flight.milestone_due);
-    due.font = Font.boldMonospacedSystemFont(size);
-    due.rightAlignText();
-    due.lineLimit = 1;
-    return due;
   }
   // Boxed to the width of the reading it is about to show. A timer is the one element
   // WidgetKit cannot measure before it draws it, so left to itself it is handed all the
