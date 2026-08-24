@@ -964,15 +964,37 @@ def test_a_count_is_boxed_to_the_reading_it_is_about_to_show() -> None:
 
 
 def test_the_age_ends_its_line_with_nothing_drawn_after_it() -> None:
-    """The word leads and the figure ends the line. A timer is the one element on it
+    """The word leads and the figure ends the phrase. A timer is the one element in it
     whose width is not known before it is drawn, so with nothing after it whatever its
-    box has over falls where the line stops rather than inside the phrase - which is what
+    box has over falls past the end of the phrase rather than inside it - which is what
     reading "Updated 04:12" rather than "Updated 04:12 ago" is worth."""
     source = script_source()
     line = source[source.index("function updatedLine(") : source.index("function timerWidth(")]
     assert "leftAlignText()" in line
     assert "rightAlignText()" not in line
     assert "addText" not in line[line.index("box.size") :]
+
+
+def test_the_age_sits_in_the_middle_of_the_widget() -> None:
+    """The one line on a widget that belongs to the whole of it rather than to a flight,
+    and the only one not starting where the flights start.
+
+    A spacer at each end rather than one at the right: the two share what the phrase
+    leaves and hold it between them. The word alone is centred the same way, which is why
+    the cache with no date on it cannot take an early return out of the middle of this.
+    And no glyph of slack in the timer's box here, the way there is on a count held
+    against the end of a row: a centred phrase is measured from both ends, so room the box
+    has over pushes the words off-centre rather than falling off where the line stops.
+    """
+    source = script_source()
+    line = source[source.index("function updatedLine(") : source.index("function timerWidth(")]
+    assert line.count("line.addSpacer();") == 2
+    assert "return;" not in line
+    assert "box.size = new Size(timerWidth(result.fetchedAt, size), 0);" in line
+    # The reason above it is part of the same block and centred with it: a sentence
+    # starting where the flights start reads as one more row of the list.
+    footer = source[source.index("function footer(") : source.index("function updatedLine(")]
+    assert "text.centerAlignText();" in footer
 
 
 def test_a_small_widget_holds_two_flights_of_four_lines() -> None:
@@ -1032,6 +1054,35 @@ def test_the_count_is_drawn_bigger_than_the_row_it_is_read_off() -> None:
     assert sizes["renderList("] == "COUNT_SIZE"
     assert "const COUNT_SIZE = 18;" in source
     assert "flights.length < 3" not in source
+
+
+def test_the_count_is_pulled_up_under_the_words_naming_it() -> None:
+    """Only on the sizes that draw those words on the row above the figure.
+
+    A line of type carries air over its glyphs, and the count is set half again the size
+    of every other word on the widget, so it carries half again as much. Left where it
+    falls, that air lands between "Departs in" and the figure it belongs to and reads as
+    most of a blank line. WidgetKit gives a line of text no say in its own height, so the
+    only way to take it back is to pull the box the count is drawn in up by it.
+
+    The narrow sizes are not touched: there the words and the figure share a line, so
+    there is no gap over the count to close.
+    """
+    source = script_source()
+    assert "const COUNT_LIFT = 6;" in source
+    wide = source[source.index("function renderList(") : source.index("function titleRow(")]
+    assert "countdown(line, flight, COUNT_SIZE, 1, COUNT_LIFT)" in wide
+    for name, ends in (
+        ("renderAccessory(", "function renderSmall("),
+        ("renderSmall(", "function renderList("),
+    ):
+        assert "COUNT_LIFT" not in source[source.index(f"function {name}") : source.index(ends)]
+    # Applied to the box rather than to the figure, so it lands whichever of the two the
+    # count turns out to be: the timer, or the word standing in for it once its instant
+    # has gone by.
+    timer = source[source.index("function countdown(") : source.index("function pill(")]
+    assert "box.setPadding(-lift, 0, 0, 0);" in timer
+    assert timer.index("const box = container.addStack();") < timer.index("milestone_due")
 
 
 def test_a_widget_reload_takes_the_servers_newer_script_quietly() -> None:

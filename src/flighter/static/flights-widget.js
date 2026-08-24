@@ -78,6 +78,12 @@ const SMALL_GAP = 2;
 // different ways across a home screen. It is the figure every one of them is looked at
 // for, so it is the same figure on all of them.
 const COUNT_SIZE = 18;
+// How far the count is pulled up on the sizes that draw the words naming it on the row
+// above. A line of type carries air over its glyphs, and at half again the size of every
+// other word on the widget the count carries half again as much: left where it falls, it
+// puts most of a blank line between "Departs in" and the figure it belongs to. Rather
+// less than that air, so the digits tuck under their label rather than up against it.
+const COUNT_LIFT = 6;
 
 const family = config.widgetFamily || "medium";
 const isAccessory = family.startsWith("accessory");
@@ -459,7 +465,9 @@ function renderList(widget, flights, logos) {
     }
     line.addSpacer();
     if (flight.milestone_at) {
-      countdown(line, flight, COUNT_SIZE).textColor = TEXT;
+      // The one size that draws the words naming the count on the row over it, so the
+      // one size the count is pulled up on.
+      countdown(line, flight, COUNT_SIZE, 1, COUNT_LIFT).textColor = TEXT;
     }
   });
 }
@@ -524,8 +532,19 @@ function milestoneWord(container, flight, size) {
 // digits. Left to itself the count therefore sits at the right-hand end of the row in the
 // app and part-way along it on the home screen, which is the same widget disagreeing with
 // itself. Right is the end the spacer was put there to hold it against.
-function countdown(container, flight, size, slack = 1) {
+function countdown(container, flight, size, slack = 1, lift = 0) {
   const at = new Date(flight.milestone_at);
+  // Boxed before anything is put in it, because the box is what the count is moved by.
+  // `lift` is for the sizes that draw the words naming the count on the row above it:
+  // the air a line of this size carries over its glyphs lands between the two of them
+  // there, and reads as the figure having come adrift of its own label. Pulling the box
+  // up by that air is the only way to take it back - WidgetKit gives a line of text no
+  // say in its own height - and it costs the row nothing, because the air is over the
+  // digits rather than between them and anything else.
+  const box = container.addStack();
+  if (lift) {
+    box.setPadding(-lift, 0, 0, 0);
+  }
   // Where the label has not caught up, the figure is the one that gives. A count is drawn
   // once and then ticks on its own, so one started while the flight was still ahead goes on
   // climbing after its instant with "Departs in" sat beside it - three minutes overdue
@@ -533,7 +552,7 @@ function countdown(container, flight, size, slack = 1) {
   // server hands over a word for exactly this, and it holds the place until a reload rolls
   // the label and the figure over together.
   if (flight.milestone_due && at <= new Date()) {
-    const due = container.addText(flight.milestone_due);
+    const due = box.addText(flight.milestone_due);
     due.font = Font.boldMonospacedSystemFont(size);
     due.rightAlignText();
     due.lineLimit = 1;
@@ -545,7 +564,6 @@ function countdown(container, flight, size, slack = 1) {
   // where the gate and the seat are being cut short to make it. Scriptable measures a
   // snapshot and hands it the digits, which is why the same row reads differently in the
   // app and on the home screen.
-  const box = container.addStack();
   box.size = new Size(timerWidth(at, size, slack), 0);
   const date = box.addDate(at);
   date.applyTimerStyle();
@@ -593,6 +611,9 @@ function footer(widget, data, result) {
     const text = widget.addText(data.degraded_reason || "Status may be out of date");
     text.font = Font.systemFont(footerSize());
     text.textColor = MUTED;
+    // Centred with the line under it: the two of them are one block, and a sentence
+    // starting where the flights start reads as another row of the list.
+    text.centerAlignText();
     text.lineLimit = 1;
     text.minimumScaleFactor = 0.7;
   }
@@ -611,42 +632,46 @@ function footer(widget, data, result) {
 // "Cached" rather than "Last updated" when the server could not be reached, because then
 // the figure is the age of a file on the phone rather than of a conversation with a server.
 //
-// The word leads and the figure ends the line, with nothing after it. A count is the one
-// thing on the line whose width is not known before it is drawn, so whatever the box has
-// over falls where the line stops rather than inside the phrase.
+// The word leads and the figure ends it, and the phrase sits in the middle of the widget:
+// it is the one line that belongs to the whole of it rather than to a flight, and every
+// row over it starts hard against the left. Centred, it reads as the widget's own footnote
+// rather than as one more row of the list.
 function updatedLine(widget, result) {
   const size = footerSize();
   const line = widget.addStack();
   line.centerAlignContent();
   line.spacing = 3;
+  // A spacer at each end rather than one at the right: the two of them share what the
+  // phrase leaves and hold it in the middle between them.
+  line.addSpacer();
 
   const word = line.addText(result.stale ? "Cached" : "Last updated");
   word.font = Font.systemFont(size);
   word.textColor = MUTED;
   word.lineLimit = 1;
 
-  // A cache with no modification date on it can still be drawn; it just cannot be aged.
-  if (!result.fetchedAt) {
-    return;
+  // A cache with no modification date on it can still be drawn; it just cannot be aged -
+  // and then the word is the whole phrase, centred on its own between the same spacers.
+  if (result.fetchedAt) {
+    // Boxed like the count, and for the same reason: a timer is the one element WidgetKit
+    // cannot measure before it draws it, so left to itself it takes the rest of the line
+    // and holds the digits at whichever end it is told to. No glyph of slack on this one,
+    // the way there is on a count held against the end of a row: a centred phrase is
+    // measured from both ends, so room the box has over is room the words are pushed left
+    // by rather than room that falls off where the line stops.
+    const box = line.addStack();
+    box.size = new Size(timerWidth(result.fetchedAt, size), 0);
+    const age = box.addDate(result.fetchedAt);
+    age.applyTimerStyle();
+    age.font = Font.regularMonospacedSystemFont(size);
+    age.textColor = MUTED;
+    age.leftAlignText();
+    age.lineLimit = 1;
+    // The line reads as one phrase, so the figure in it is set at the size of the word in
+    // front of it. A hair of give for the phone that has not been asked to redraw this
+    // since the reading gained a digit, and no more than that.
+    age.minimumScaleFactor = 0.95;
   }
-  // Boxed like the count, and for the same reason: a timer is the one element WidgetKit
-  // cannot measure before it draws it, so left to itself it takes the rest of the line
-  // and holds the digits at whichever end it is told to. Nothing follows it here, so the
-  // box gets the same glyph of slack the count gets and what it has over falls past the
-  // end of the phrase.
-  const box = line.addStack();
-  box.size = new Size(timerWidth(result.fetchedAt, size, 1), 0);
-  const age = box.addDate(result.fetchedAt);
-  age.applyTimerStyle();
-  age.font = Font.regularMonospacedSystemFont(size);
-  age.textColor = MUTED;
-  age.leftAlignText();
-  age.lineLimit = 1;
-  // The line reads as one phrase, so the figure in it is set at the size of the word in
-  // front of it. A hair of give for the phone that has not been asked to redraw this
-  // since the reading gained a digit, and no more than that.
-  age.minimumScaleFactor = 0.95;
-  // Holds the two of them at the left of the widget rather than spread across it.
   line.addSpacer();
 }
 
