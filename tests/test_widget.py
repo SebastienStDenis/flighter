@@ -13,11 +13,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from flighter import prefs, widget
+from flighter import prefs, views, widget
 from flighter.aeroapi import BREAKER_KEY, month_key
 from flighter.config import Settings, get_settings
 from flighter.db import get_session
 from flighter.models import KV, Airport, Booking, BookingStatus, FlightSnapshot
+from flighter.phase import compute_phase
 from flighter.widget import (
     FlightRow,
     authorize,
@@ -112,6 +113,7 @@ def test_upcoming_flight(settings: Settings) -> None:
         # footer for one either.
         "milestone_label": None,
         "milestone_at": None,
+        "milestone_due": None,
     }
 
 
@@ -160,7 +162,7 @@ def test_day_of_shows_the_terminal_the_gate_and_the_seat(settings: Settings) -> 
     gated = snapshot(scheduled_out=DEPARTURE, gate_origin="B22", terminal_origin="4")
     flight = payload([(booking(seat="14A"), gated)], settings, airports=AIRPORTS)["flights"][0]
     assert flight["phase"] == "day_of"
-    assert detail(flight) == "T 4 · G B22 · S 14A"
+    assert detail(flight) == "TERM 4 · GATE B22 · SEAT 14A"
     assert counting(flight) == ("Departs in", "2026-09-12T18:40:00Z")
     assert flight["status_label"] == "On time"
     assert flight["status_tone"] == "ok"
@@ -170,7 +172,7 @@ def test_day_of_with_nothing_assigned_yet_is_the_boxes_waiting(settings: Setting
     """Dashed rather than dropped: an empty box is the airport not having said yet, and
     a line that comes and goes as gates are published is a row that moves under the eye."""
     flight = payload([(booking(), snapshot())], settings)["flights"][0]
-    assert detail(flight) == "T - · G -"
+    assert detail(flight) == "TERM - · GATE -"
 
 
 def test_a_delayed_departure_counts_to_the_time_it_now_leaves(settings: Settings) -> None:
@@ -181,7 +183,7 @@ def test_a_delayed_departure_counts_to_the_time_it_now_leaves(settings: Settings
     # Delayed to when is the whole question the pill leaves open, and the count answers
     # it from the estimate rather than from the schedule.
     assert counting(flight) == ("Departs in", "2026-09-12T19:10:00Z")
-    assert detail(flight) == "T - · G - · S 14A"
+    assert detail(flight) == "TERM - · GATE - · SEAT 14A"
 
 
 def test_the_run_up_to_departure_keeps_the_gate(settings: Settings) -> None:
@@ -190,14 +192,13 @@ def test_the_run_up_to_departure_keeps_the_gate(settings: Settings) -> None:
     imminent = snapshot(scheduled_out=NOW + timedelta(minutes=20), gate_origin="B22")
     flight = payload([(booking(), imminent)], settings)["flights"][0]
     assert flight["phase"] == "day_of"
-    assert detail(flight) == "T - · G B22"
+    assert detail(flight) == "TERM - · GATE B22"
     assert counting(flight) == ("Departs in", "2026-09-12T18:20:00Z")
 
 
 def test_pushback_clears_the_gate_off_the_line(settings: Settings) -> None:
-    """Taxiing is ten minutes the widget is as likely as not to miss, and Departed stays
-    true until the gate. The gate it left is behind the person reading this, so the line
-    empties; nothing upstream estimates wheels up, so the count is to the landing."""
+    """The gate it left is behind the person reading this, so the line empties; nothing
+    upstream estimates wheels up, so the count is to the landing."""
     taxiing = snapshot(
         scheduled_out=NOW - timedelta(minutes=5),
         actual_out=NOW - timedelta(minutes=2),
@@ -208,7 +209,7 @@ def test_pushback_clears_the_gate_off_the_line(settings: Settings) -> None:
     )
     flight = payload([(booking(), taxiing)], settings, airports=AIRPORTS)["flights"][0]
     assert flight["phase"] == "taxiing"
-    assert flight["status_label"] == "Departed"
+    assert flight["status_label"] == "Taxiing"
     assert flight["status_tone"] == "live"
     assert detail(flight) is None
     assert counting(flight) == ("Lands in", "2026-09-12T22:15:00Z")
@@ -229,7 +230,7 @@ def test_airborne_counts_to_the_landing_and_keeps_only_the_seat(settings: Settin
     assert flight["phase"] == "airborne"
     # The gate at the other end is not worth the width from seat 32A; when it lands is,
     # and the seat is the last thing on the ticket still worth carrying.
-    assert detail(flight) == "S 32A"
+    assert detail(flight) == "SEAT 32A"
     assert counting(flight) == ("Lands in", "2026-09-12T22:40:00Z")
     assert flight["status_label"] == "Arriving late"
     assert flight["status_tone"] == "warn"
@@ -391,6 +392,45 @@ def test_a_late_pushback_is_history_once_the_flight_is_off_the_ground(
     assert flight["status_tone"] == "live"
 
 
+def test_the_pill_is_the_boards_pill_and_nothing_else(settings: Settings) -> None:
+    """One flight, one word for it. A widget that says Departed while the page says
+    Taxiing is two answers to one question, and whoever reads both has no way to tell
+    which of them is the stale one - so the widget rephrases nothing on the way out.
+    """
+    rows: list[FlightRow] = [
+        # Nothing from the feed yet, inside the day: the board names the day.
+        (booking(id=1), None),
+        # Pushed back and rolling, which is the word the board had its own name for.
+        (
+            booking(id=2),
+            snapshot(
+                booking_id=2,
+                scheduled_out=NOW - timedelta(minutes=5),
+                actual_out=NOW - timedelta(minutes=2),
+            ),
+        ),
+        (
+            booking(id=3),
+            snapshot(booking_id=3, actual_off=DEPARTURE, estimated_in=ARRIVAL),
+        ),
+    ]
+    # The board's order, not the order they were written down in.
+    drawn = {
+        _id(flight): flight for flight in payload(rows, settings, airports=AIRPORTS)["flights"]
+    }
+    for this, snap in rows:
+        board = views.status(
+            compute_phase(this, snap, NOW),
+            this,
+            snap,
+            now=NOW,
+            origin_tz=AIRPORTS[this.origin_iata].tz,
+        )
+        flight = drawn[this.id]
+        assert (flight["status_label"], flight["status_tone"]) == (board.label, board.tone)
+    assert [drawn[n]["status_label"] for n in (1, 2, 3)] == ["Today", "Taxiing", "In the air"]
+
+
 # --- the phone's own clock --------------------------------------------------------------
 
 
@@ -549,6 +589,79 @@ def test_refresh_slows_down_when_nothing_is_close(settings: Settings) -> None:
 
 def test_refresh_speeds_up_on_the_day(settings: Settings) -> None:
     assert payload([(booking(), None)], settings)["refresh_seconds"] == 600
+
+
+def test_the_reload_is_asked_for_when_the_count_reaches_zero(settings: Settings) -> None:
+    """A word does not tick and a date does, which is the whole of the problem.
+
+    "Departs in" is drawn once and stays drawn, so a count that runs past zero under it
+    reads as four minutes to go when the flight is four minutes overdue. Nothing on the
+    phone can fix that between reloads, so the reload is asked for at the instant the
+    wording changes rather than at the usual ten minutes.
+    """
+    close = snapshot(scheduled_out=NOW + timedelta(minutes=4))
+    assert payload([(booking(), close)], settings)["refresh_seconds"] == 240
+
+
+def test_a_count_further_out_than_the_cadence_does_not_slow_it_down(
+    settings: Settings,
+) -> None:
+    """The poller's cadence is still the ceiling: a rung two hours off is not a reason
+    to stop asking about the gate for two hours."""
+    later = snapshot(scheduled_out=NOW + timedelta(hours=2))
+    assert payload([(booking(), later)], settings)["refresh_seconds"] == 600
+
+
+def test_a_rung_seconds_away_is_not_worth_a_reload_of_its_own(settings: Settings) -> None:
+    """iOS budgets reloads across every widget on the phone, and the one a minute later
+    says exactly what the one ten seconds from now would have said."""
+    imminent = snapshot(scheduled_out=NOW + timedelta(seconds=10))
+    assert payload([(booking(), imminent)], settings)["refresh_seconds"] == 60
+
+
+def test_a_count_already_past_zero_is_not_asked_about_again(settings: Settings) -> None:
+    """It is drawn as "Due to depart" already; there is no later instant to wake for."""
+    overdue = snapshot(scheduled_out=NOW - timedelta(minutes=3))
+    flight = payload([(booking(), overdue)], settings)
+    assert counting(flight["flights"][0])[0] == "Due to depart"
+    assert flight["refresh_seconds"] == 600
+
+
+# --- what the count does when the label cannot follow it --------------------------------
+
+
+def test_a_count_still_ahead_carries_the_word_for_when_it_is_not(settings: Settings) -> None:
+    """The reload asked for at the instant is a hint iOS may sit on, so the payload has
+    to say what the phone should draw if it is still showing this one afterwards.
+
+    A label is a word and words do not tick: whatever "Departs in" said when this was
+    built is what it says until something reloads the widget. A figure that goes on
+    climbing beside it draws three minutes overdue as three minutes to go, so the figure
+    is the one that gives.
+    """
+    ahead = snapshot(scheduled_out=NOW + timedelta(minutes=4))
+    flight = payload([(booking(), ahead)], settings)["flights"][0]
+    assert counting(flight) == ("Departs in", "2026-09-12T18:04:00Z")
+    assert flight["milestone_due"] == "Due"
+
+
+def test_a_count_whose_label_has_caught_up_is_free_to_run_upwards(settings: Settings) -> None:
+    """Once the label itself says "Due to depart" there is nothing left to disagree with,
+    and how far past due a flight is is worth knowing."""
+    overdue = snapshot(scheduled_out=NOW - timedelta(minutes=3))
+    flight = payload([(booking(), overdue)], settings)["flights"][0]
+    assert counting(flight)[0] == "Due to depart"
+    assert flight["milestone_due"] is None
+
+
+def test_the_script_stands_the_count_down_rather_than_let_it_pass_its_label() -> None:
+    """The phone draws the server's word where the figure would have gone, and only ever
+    ticks a count upwards under a label that has caught up with it."""
+    source = script_source()
+    timer = source[source.index("function countdown(") : source.index("function pill(")]
+    guard = timer[: timer.index("applyTimerStyle()")]
+    assert "flight.milestone_due && at <= new Date()" in guard
+    assert "addText(flight.milestone_due)" in guard
 
 
 def test_no_flights(settings: Settings) -> None:
@@ -795,6 +908,42 @@ def test_the_script_draws_what_it_is_told() -> None:
     assert "applyTimerStyle()" in source
     assert source.count("new Date(flight") == 1
     assert "new Date(flight.milestone_at)" in source
+
+
+def test_the_count_is_held_against_the_end_of_the_row() -> None:
+    """A timer is the one element WidgetKit cannot measure before drawing it, so it is
+    given the whole of what the spacer left and draws inside that. Unaligned it sits at
+    the right in Scriptable's preview, which measures a snapshot, and part-way along the
+    row on the home screen - the same widget disagreeing with itself."""
+    source = script_source()
+    timer = source[source.index("function countdown(") : source.index("function pill(")]
+    assert "rightAlignText()" in timer
+
+
+def test_the_count_is_the_weight_the_row_is_read_for() -> None:
+    """Semibold and bold are the same weight to look at when a Mac draws an iPhone's
+    widget, so a count set in semibold reads as heavier than its row on a mirrored
+    screen and no different from it on the phone. The phone is the screen this is for."""
+    source = script_source()
+    timer = source[source.index("function countdown(") : source.index("function pill(")]
+    assert "Font.boldMonospacedSystemFont(size)" in timer
+
+
+def test_the_footer_ages_itself_rather_than_stating_a_figure() -> None:
+    """How old what is on screen is has the same problem as the countdown and the same
+    answer: a figure worked out at draw time is wrong within the minute and flatteringly
+    so, and WidgetKit will count a past date upwards for nothing."""
+    source = script_source()
+    line = source[source.index("function updatedLine(") : source.index("function footerSize(")]
+    assert "applyTimerStyle()" in line
+    assert '"Updated"' in line and '"Cached"' in line and '"ago"' in line
+    # Drawn from when the data landed, which is the fetch when there was one and the
+    # cache file's own date when the server could not be reached.
+    assert "result.fetchedAt" in line
+    assert (
+        "new Date()"
+        in source[source.index("async function load(") : source.index("async function request(")]
+    )
 
 
 def test_a_widget_reload_takes_the_servers_newer_script_quietly() -> None:

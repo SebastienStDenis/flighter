@@ -54,6 +54,9 @@ MAX_FLIGHTS: Final = 3
 
 REFRESH_IDLE_SECONDS: Final = 900
 REFRESH_ACTIVE_SECONDS: Final = 600
+# iOS budgets reloads across every widget on the phone and ignores an eager request
+# anyway, so this is the floor the script clamps to as well.
+REFRESH_FLOOR_SECONDS: Final = 60
 
 # The poller runs a close flight every 10 minutes and a same-day one every 30, so a
 # snapshot this old means polling has stopped rather than that nothing has changed.
@@ -61,10 +64,14 @@ POLL_STALE_AFTER: Final = timedelta(minutes=45)
 
 PHASES_IMMINENT: Final = frozenset({DAY_OF, TAXIING, AIRBORNE, DIVERTED})
 
-# The board names the day in the pill for a flight the feed has not picked up yet. Here
-# the day is on the line with the time, so the pill has nothing to add but that it is
-# booked.
-DAY_WORDS: Final = frozenset({"Today", "Tomorrow"})
+# What stands where the count is, once the count's instant has gone by and nothing has
+# reloaded the widget to catch its label up. The board rolls the two over together - the
+# words become "Due to depart" the same minute the figure starts saying "ago" - because a
+# page has a script ticking every minute to do it with. A widget has only the date, which
+# WidgetKit ticks and nothing else, so the label stays exactly as it was drawn. One of the
+# two therefore has to give, and it is the figure: a word that is merely coarse beats a
+# number that is precisely wrong.
+MILESTONE_DUE_WORD: Final = "Due"
 
 # The script is served from here rather than fetched from a repository, so the phone
 # always runs the version that matches the server answering it.
@@ -79,6 +86,11 @@ LAST_SEEN_KEY: Final = "widget_last_seen"
 
 def _iso_z(value: datetime) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _from_iso_z(value: str) -> datetime:
+    """The inverse of `_iso_z`, for reading back what the phone was actually sent."""
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 
 
 class WidgetFlight(BaseModel):
@@ -101,6 +113,11 @@ class WidgetFlight(BaseModel):
     # instant that goes over rather than a figure that would be stale on arrival.
     milestone_label: str | None
     milestone_at: str | None
+    # The word to draw in the count's place if its instant goes by before this payload is
+    # replaced. Absent once the label has caught up on its own - a payload built after the
+    # instant already says "Due to depart", and a figure climbing beside that is the useful
+    # one, because how far past due a flight is is worth knowing.
+    milestone_due: str | None
 
 
 class WidgetPayload(BaseModel):
@@ -310,7 +327,7 @@ def build_payload(
     reason = degraded_reason or _stale_reason(min(observed, default=None), now)
     return WidgetPayload(
         flights=flights,
-        refresh_seconds=_refresh_seconds(flights),
+        refresh_seconds=_refresh_seconds(flights, now),
         degraded=reason is not None,
         degraded_reason=reason,
     )
@@ -327,7 +344,10 @@ def _flight(
 ) -> WidgetFlight:
     phase = compute_phase(booking, snapshot, now)
     origin_tz = _zone(airports, booking.origin_iata)
-    pill = _status(phase, booking, snapshot, now=now, origin_tz=origin_tz)
+    # The board's word for it, with nothing rephrased on the way out: a pill that
+    # reads Departed on the phone and Taxiing on the page is two answers to one
+    # question, and the reader has no way to tell which is the stale one.
+    pill = views.status(phase, booking, snapshot, now=now, origin_tz=origin_tz)
     counting_to = _milestone(phase, booking, snapshot, now=now)
     return WidgetFlight(
         detail_url=f"{base_url}/f/{booking.id}",
@@ -347,36 +367,13 @@ def _flight(
         ),
         milestone_label=counting_to[0] if counting_to else None,
         milestone_at=_iso_z(counting_to[1]) if counting_to else None,
+        milestone_due=_due_word(counting_to, now),
     )
 
 
 def _zone(airports: Mapping[str, Airport | None], iata: str) -> str:
     airport = airports.get(iata)
     return airport.tz if airport else FALLBACK_TZ
-
-
-def _status(
-    phase: Phase,
-    booking: Booking,
-    snapshot: FlightSnapshot | None,
-    *,
-    now: datetime,
-    origin_tz: str,
-) -> views.Status:
-    """The board's word, bar the two that a widget drawn a quarter of an hour apart
-    cannot carry.
-
-    Taxiing is ten minutes between pushback and wheels up, so it is as likely as not to
-    be over by the time anyone reads it; Departed is true from pushback to the gate at
-    the other end. And the board's Today and Tomorrow say when a flight the feed has not
-    picked up leaves, which here is the word under its time.
-    """
-    pill = views.status(phase, booking, snapshot, now=now, origin_tz=origin_tz)
-    if phase == TAXIING:
-        return views.Status("Departed", "live")
-    if pill.label in DAY_WORDS:
-        return views.Status("Scheduled", "quiet")
-    return pill
 
 
 def _milestone(
@@ -399,6 +396,19 @@ def _milestone(
     if next_up is None:
         return None
     return views.milestone_label(next_up, now), next_up.target
+
+
+def _due_word(counting_to: tuple[str, datetime] | None, now: datetime) -> str | None:
+    """The word to hand the phone for the moment the count would start lying.
+
+    Nothing here knows when iOS will next reload the widget - the reload asked for at the
+    instant itself is a hint it may sit on - so the payload has to carry what the phone
+    should do if it is still drawing this one afterwards. Nothing at all once the label
+    has caught up already, which is the case where the count is meant to run upwards.
+    """
+    if counting_to is None or counting_to[1] <= now:
+        return None
+    return MILESTONE_DUE_WORD
 
 
 def _detail(
@@ -431,13 +441,13 @@ def _detail(
         return _when(departure_estimate(booking, snapshot), now, origin_tz, viewer_tz)
     if phase == DAY_OF:
         parts = [
-            f"T {views.dash(snapshot.terminal_origin if snapshot else None)}",
-            f"G {views.dash(snapshot.gate_origin if snapshot else None)}",
+            f"TERM {views.dash(snapshot.terminal_origin if snapshot else None)}",
+            f"GATE {views.dash(snapshot.gate_origin if snapshot else None)}",
         ]
         if booking.seat:
-            parts.append(f"S {booking.seat}")
+            parts.append(f"SEAT {booking.seat}")
         return " · ".join(parts)
-    return f"S {booking.seat}" if booking.seat else None
+    return f"SEAT {booking.seat}" if booking.seat else None
 
 
 def _when(instant: datetime, now: datetime, airport_tz: str, viewer_tz: str | None) -> str:
@@ -463,11 +473,35 @@ def _when(instant: datetime, now: datetime, airport_tz: str, viewer_tz: str | No
     return stated(instant, here, with_date=True)
 
 
-def _refresh_seconds(flights: Sequence[WidgetFlight]) -> int:
-    """Mirror the server's own cadence; polling faster than it updates buys nothing."""
-    if any(flight.phase in PHASES_IMMINENT for flight in flights):
-        return REFRESH_ACTIVE_SECONDS
-    return REFRESH_IDLE_SECONDS
+def _refresh_seconds(flights: Sequence[WidgetFlight], now: datetime) -> int:
+    """Mirror the server's own cadence, and never sleep through a countdown hitting zero.
+
+    Polling faster than the server updates buys nothing, so the cadence is the poller's.
+    But a widget only redraws its words when iOS reloads it, and iOS reloads one about
+    four times an hour: a row that says "Departs in" goes on saying it while the count
+    beside it ticks up past zero, which reads as three minutes to go when it is three
+    minutes overdue. The phone cannot repair that on its own - WidgetKit ticks a date
+    and leaves every other glyph exactly where it was drawn - so the moment the wording
+    changes is asked for as a reload, and the row is wrong only for as long as iOS makes
+    it wait.
+
+    The floor is the same one the script clamps to. A rung a handful of seconds out is
+    not worth a reload of its own; the one a minute later says the same thing.
+    """
+    cadence = (
+        REFRESH_ACTIVE_SECONDS
+        if any(flight.phase in PHASES_IMMINENT for flight in flights)
+        else REFRESH_IDLE_SECONDS
+    )
+    ahead = [
+        _from_iso_z(flight.milestone_at)
+        for flight in flights
+        if flight.milestone_at is not None and _from_iso_z(flight.milestone_at) > now
+    ]
+    if not ahead:
+        return cadence
+    due_in = int((min(ahead) - now).total_seconds())
+    return max(REFRESH_FLOOR_SECONDS, min(cadence, due_in))
 
 
 def _stale_reason(observed: datetime | None, now: datetime) -> str | None:

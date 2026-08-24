@@ -114,8 +114,8 @@ async def create_booking(
         scheduled_departure_utc=departure_utc,
         departure_local_date=to_local(departure_utc, origin_tz).date(),
         scheduled_arrival_utc=arrival_utc,
-        confirmation_code=confirmation_code,
-        seat=seat,
+        confirmation_code=_ticket_code(confirmation_code),
+        seat=_ticket_code(seat),
         notes=notes,
         friend_name=_friend_name(friend_name),
         status=status,
@@ -163,16 +163,18 @@ async def update_ticket(
     if booking is None:
         return None
     shown = (booking.confirmation_code, booking.seat, booking.friend_name)
-    booking.confirmation_code = confirmation_code
-    booking.seat = seat
+    booking.confirmation_code = _ticket_code(confirmation_code)
+    booking.seat = _ticket_code(seat)
     booking.notes = notes
     booking.friend_name = _friend_name(friend_name)
-    # The calendar entry carries the code and the seat; notes never leave the app.
+    # The calendar entry carries the code and the seat; notes never leave the app. What
+    # is compared is what was stored, not what was typed: `14a` over `14A` is the same
+    # seat once written down, and re-sending the calendar entry for it would be noise.
     if (
         booking.status != BookingStatus.ARCHIVED
         and (
-            confirmation_code,
-            seat,
+            booking.confirmation_code,
+            booking.seat,
             booking.friend_name,
         )
         != shown
@@ -394,3 +396,17 @@ def _friend_name(name: str | None) -> str | None:
     if name is None:
         return None
     return name.strip() or None
+
+
+def _ticket_code(value: str | None) -> str | None:
+    """A seat or a confirmation code, as it is printed on a boarding pass.
+
+    Both boxes on the flight's page are drawn in upper case, and typing `14a` into one
+    of them has always looked like it took: the letter comes back capital while the row
+    it is stored in, and the widget and the calendar entry that read that row, keep the
+    lower-case one. Upper case here rather than in the form makes the two agree wherever
+    the value came from, an imported email included.
+    """
+    if value is None:
+        return None
+    return value.strip().upper() or None

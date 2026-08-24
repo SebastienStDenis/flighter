@@ -178,6 +178,55 @@ async def test_the_ticket_and_friend_name_are_the_only_things_an_edit_touches(se
         assert changed.departure_local_date == date(2026, 9, 12)
 
 
+async def test_a_seat_is_stored_the_way_the_box_that_took_it_drew_it(seeded: None) -> None:
+    """Both boxes on the flight's page are drawn in upper case, so `14a` typed into one
+    comes back `14A` and looks saved. It was not: the row, and the widget and the
+    calendar entry that read the row, kept the lower-case one. Upper case here rather
+    than in the form makes the two agree wherever the value came from.
+    """
+    async with session_scope() as session:
+        booking = await book(session, datetime(2026, 9, 12, 9, 0))
+        changed = await update_ticket(
+            session,
+            booking.id,
+            confirmation_code=" x7qw2p ",
+            seat=" 14a ",
+            notes=None,
+            friend_name=None,
+        )
+        assert changed is not None
+        assert (changed.confirmation_code, changed.seat) == ("X7QW2P", "14A")
+
+
+async def test_an_imported_seat_is_stored_the_same_way(seeded: None) -> None:
+    """An email states a seat in whatever case its template felt like."""
+    async with session_scope() as session:
+        booking = await book(
+            session, datetime(2026, 9, 12, 9, 0), seat="7f", confirmation_code="abc123"
+        )
+        assert (booking.seat, booking.confirmation_code) == ("7F", "ABC123")
+
+
+async def test_recasing_a_seat_is_not_an_edit_worth_restating(seeded: None) -> None:
+    """`14a` over `14A` is the same seat once it is written down, and the calendar entry
+    it would re-send says exactly what the last one said."""
+    async with session_scope() as session:
+        booking = await book(session, datetime(2026, 9, 12, 9, 0))
+        for typed in ("14A", "14a"):
+            await update_ticket(
+                session,
+                booking.id,
+                confirmation_code=None,
+                seat=typed,
+                notes=None,
+                friend_name=None,
+            )
+        assert await events_for(session, booking.id) == [
+            EventKind.BOOKING_ADDED,
+            EventKind.BOOKING_EDITED,
+        ]
+
+
 async def events_for(session: AsyncSession, booking_id: int) -> list[str]:
     stmt = (
         select(FlightEvent.kind)
