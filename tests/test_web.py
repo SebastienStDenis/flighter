@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
-from flighter import notices, prefs, web
+from flighter import notices, prefs, release, web
 from flighter.aeroapi import BREAKER_KEY, BudgetExceeded, BudgetStatus
 from flighter.caldav import CalendarUnavailable, Collection
 from flighter.checks import CheckResult
@@ -1501,6 +1501,116 @@ def test_a_number_that_flies_twice_comes_back_as_the_legs_to_choose_between(
     assert 'name="flight_number" value="AC871"' in choices
     assert "origin_iata" not in choices
     assert written == {}
+
+
+# --- what is running, and taking what is not -------------------------------------------
+
+
+def test_the_settings_page_says_which_build_is_running(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In the page from the start. What is published is a button away, because that is
+    somebody else's server to wait on and a settings page should not hang on one."""
+    settings.flighter_revision = "0f1e2d3c4b5a69788796a5b4c3d2e1f001122334"
+    with build_client(settings, monkeypatch) as fresh:
+        body = fresh.get("/settings?tab=preferences").text
+    assert "0f1e2d3" in body
+    assert "Check for updates" in body
+
+
+def test_a_build_from_a_checkout_says_so_rather_than_looking_out_of_date(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings.flighter_revision = ""
+    with build_client(settings, monkeypatch) as fresh:
+        body = fresh.get("/settings?tab=preferences").text
+    assert "Not a published build" in body
+
+
+def test_the_version_check_answers_with_both_commits_and_where_it_can_go(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings.flighter_revision = "9" * 40
+    settings.watchtower_url = "http://watchtower:8080"
+    settings.watchtower_token = "shared-secret"
+
+    async def published(*_args: Any, **_kwargs: Any) -> release.Update:
+        return release.Update(running="9" * 40, published="a" * 40, behind=True)
+
+    monkeypatch.setattr(web.release, "check", published)
+    with build_client(settings, monkeypatch) as fresh:
+        answer = fresh.get("/settings/version")
+
+    assert answer.status_code == 200
+    assert answer.json() == {
+        "running": "9" * 40,
+        "published": "a" * 40,
+        "behind": True,
+        "watchtower": True,
+    }
+
+
+def test_a_registry_that_cannot_be_reached_is_said_rather_than_guessed_at(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def unreachable(*_args: Any, **_kwargs: Any) -> release.Update:
+        raise httpx.ConnectError("no route to host")
+
+    monkeypatch.setattr(web.release, "check", unreachable)
+    with build_client(settings, monkeypatch) as fresh:
+        answer = fresh.get("/settings/version")
+
+    assert answer.status_code == 502
+    assert "registry" in answer.json()["error"]
+
+
+def test_the_update_is_refused_where_there_is_nothing_that_could_make_it(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A container cannot replace itself. Without the thing that can, there is nothing
+    to hand the ask to and saying so beats pretending to try."""
+    settings.watchtower_url = ""
+    settings.watchtower_token = ""
+    with build_client(settings, monkeypatch) as fresh:
+        answer = fresh.post("/settings/update")
+
+    assert answer.status_code == 409
+    assert "Watchtower" in answer.json()["error"]
+
+
+def test_the_update_is_handed_to_watchtower(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings.watchtower_url = "http://watchtower:8080"
+    settings.watchtower_token = "shared-secret"
+    asked: list[Settings] = []
+
+    async def taken(given: Settings, **_kwargs: Any) -> None:
+        asked.append(given)
+
+    monkeypatch.setattr(web.release, "take_update", taken)
+    with build_client(settings, monkeypatch) as fresh:
+        answer = fresh.post("/settings/update")
+
+    assert answer.status_code == 200 and answer.json() == {"ok": True}
+    assert asked == [settings]
+
+
+def test_watchtower_refusing_the_ask_lands_on_the_page_that_made_it(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings.watchtower_url = "http://watchtower:8080"
+    settings.watchtower_token = "wrong-secret"
+
+    async def refused(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("Watchtower refused the token.")
+
+    monkeypatch.setattr(web.release, "take_update", refused)
+    with build_client(settings, monkeypatch) as fresh:
+        answer = fresh.post("/settings/update")
+
+    assert answer.status_code == 502
+    assert answer.json()["error"] == "Watchtower refused the token."
 
 
 def test_a_flight_on_the_calendar_offers_a_way_into_the_calendar_app(

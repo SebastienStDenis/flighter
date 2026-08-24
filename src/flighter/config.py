@@ -108,6 +108,23 @@ class Settings(BaseSettings):
     pushover_token: str = Field(default="", repr=False)
     pushover_user_key: str = Field(default="", repr=False)
 
+    # --- The deployment itself ---------------------------------------------------------
+    # The commit this image was built from, baked in by the release workflow. Empty on a
+    # build that did not come from it - a local `docker compose build`, or a checkout -
+    # and then the settings page has nothing to compare against the registry.
+    flighter_revision: str = ""
+
+    # Watchtower, which runs beside this container in the same stack and holds the Docker
+    # socket this one deliberately does not. With its HTTP API turned on, the settings
+    # page can ask it for the update it would have made on its next poll.
+    #
+    # These two are environment values rather than fields on the settings page, and are
+    # the one credential that is: the token has to match the one given to Watchtower in
+    # the same compose file, so it is set where its other half is set, by the person
+    # standing in that file. See the README.
+    watchtower_url: str = ""
+    watchtower_token: str = Field(default="", repr=False)
+
     # --- Widget -----------------------------------------------------------------------
     # Generated on first boot. The only authentication in front of the flight data.
     widget_token: str = Field(default="", repr=False)
@@ -119,6 +136,10 @@ class Settings(BaseSettings):
     @property
     def aeroapi_configured(self) -> bool:
         return bool(self.aeroapi_key)
+
+    @property
+    def watchtower_configured(self) -> bool:
+        return bool(self.watchtower_url and self.watchtower_token)
 
     @property
     def pushover_configured(self) -> bool:

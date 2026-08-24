@@ -21,7 +21,11 @@ COPY --chown=app:app alembic.ini /app/alembic.ini
 COPY --chown=app:app alembic /app/alembic
 COPY --chown=app:app scripts /app/scripts
 RUN mkdir -p /app/data && chown app:app /app/data
-ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
+# What the settings page compares against the registry to say whether this deployment
+# is behind. The release workflow passes the commit; a local build leaves it empty, and
+# an empty one is drawn as a build with nothing to compare rather than as out of date.
+ARG FLIGHTER_REVISION=""
+ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 FLIGHTER_REVISION=${FLIGHTER_REVISION}
 
 USER app
 WORKDIR /app

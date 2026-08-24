@@ -452,6 +452,35 @@
             <span data-when="auto"{{ ' hidden' if manual }}>Automatically set from the
               latest address used to access Flighter.</span></p>
         </div>
+        {# What is running, and whether there is anything newer to run. The registry is
+           asked when the button is pressed rather than when the page opens: it is
+           somebody else's server, and a settings page that waits on one to draw itself
+           is a settings page that hangs when the network is not there.
+
+           Where Watchtower is wired up, the same panel takes the update: it holds the
+           Docker socket this container deliberately does not, so the ask goes to it and
+           what comes back is this container being replaced under the page. #}
+        <div role="group" class="field">
+          <label for="version">Version</label>
+          <div class="flex items-center gap-2">
+            <span class="min-w-0 flex-1 truncate font-mono text-sm text-muted-foreground"
+                  id="version">{{ revision[:7] if revision else 'Not a published build' }}</span>
+            <button class="btn shrink-0" data-variant="outline" data-size="sm" type="button"
+                    id="version-check" onclick="checkVersion()">Check for updates</button>
+          </div>
+          <p id="version-note" class="text-xs" role="status">
+            {%- if not revision -%}
+            Built from a checkout rather than pulled, so there is nothing to compare.
+            {%- endif -%}</p>
+          {# Drawn from the start and shown once there is something to take, so the row
+             does not jump about as the answer arrives. #}
+          <div class="mt-1 flex items-center gap-2" id="version-take" hidden>
+            <button class="btn shrink-0" data-variant="destructive" data-size="sm" type="button"
+                    id="version-update" onclick="takeUpdate()">Update and restart</button>
+            <p class="min-w-0 flex-1 text-xs text-muted-foreground">Watchtower pulls the
+              new image and restarts Flighter. The page comes back on its own.</p>
+          </div>
+        </div>
         <div role="group" class="field">
           <label for="log_level">Log level</label>
           <select id="log_level" name="log_level">
@@ -758,6 +787,85 @@
     });
     showSaveState(details);
     details.open = false;
+  }
+
+  // Whether this deployment is behind, asked of the registry and answered in the row
+  // the button is in. A build that did not come from the release workflow has nothing to
+  // compare, so it never asks.
+  var WATCHTOWER = {{ 'true' if watchtower else 'false' }};
+  var RUNNING = "{{ revision }}";
+
+  async function checkVersion() {
+    var button = document.getElementById("version-check");
+    var note = document.getElementById("version-note");
+    setBusy(button, true);
+    note.textContent = "";
+    try {
+      var response = await fetch("/settings/version");
+      var answer = await response.json();
+      if (!response.ok) throw new Error(answer.error || response.status);
+      note.textContent = answer.behind
+        ? "Update available: " + answer.published.slice(0, 7)
+        : RUNNING
+          ? "Up to date."
+          : "Published: " + answer.published.slice(0, 7);
+      // Only where there is both something to take and something that can take it. A
+      // deployment without Watchtower is told what it is missing rather than shown a
+      // button that cannot do anything.
+      document.getElementById("version-take").hidden = !(answer.behind && WATCHTOWER);
+      if (answer.behind && !WATCHTOWER) {
+        note.textContent += " Run docker compose pull && docker compose up -d, or wire up Watchtower.";
+      }
+    } catch (error) {
+      note.textContent = "Could not reach the registry.";
+    }
+    setBusy(button, false);
+  }
+
+  // The answer to this one is the app going away, so what says it worked is the app
+  // coming back. The page asks Watchtower, then knocks on the door until somebody is
+  // home again and reloads onto whatever version answered.
+  async function takeUpdate() {
+    var button = document.getElementById("version-update");
+    var note = document.getElementById("version-note");
+    setBusy(button, true);
+    note.textContent = "Pulling the new image…";
+    try {
+      var response = await fetch("/settings/update", { method: "POST" });
+      if (!response.ok) {
+        var answer = await response.json().catch(function () {
+          return {};
+        });
+        throw new Error(answer.error || response.status);
+      }
+    } catch (error) {
+      // A request that dies half way through is this container being replaced, which is
+      // what was asked for. Only the server refusing it is worth stopping for.
+      if (error.message && !String(error.message).startsWith("Failed to fetch")) {
+        note.textContent = String(error.message);
+        setBusy(button, false);
+        return;
+      }
+    }
+    note.textContent = "Restarting…";
+    // Two minutes is a pull, a restart and the first boot's migrations with room to
+    // spare; past that something is wrong that a spinner will not fix.
+    for (var attempt = 0; attempt < 60; attempt++) {
+      await new Promise(function (wake) {
+        setTimeout(wake, 2000);
+      });
+      try {
+        var alive = await fetch("/healthz", { cache: "no-store" });
+        if (alive.ok) {
+          location.assign("/settings?tab=preferences");
+          return;
+        }
+      } catch (ignored) {
+        // Still down, which is the expected state for most of this loop.
+      }
+    }
+    note.textContent = "It has not come back. Check the stack.";
+    setBusy(button, false);
   }
 
   // The calendars are four round trips to iCloud, so the page does not wait on them.

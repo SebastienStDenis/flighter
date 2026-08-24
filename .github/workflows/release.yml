@@ -80,5 +80,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # The label says which commit this is to anybody reading the registry; the
+          # build arg says it to the container itself, which cannot read its own labels.
+          build-args: |
+            FLIGHTER_REVISION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

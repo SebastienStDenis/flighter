@@ -26,7 +26,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import bookings as booking_repo
-from . import ingest, lookup, prefs, views
+from . import ingest, lookup, prefs, release, views
 from .aeroapi import BudgetExceeded, budget_status, clear_breaker
 from .caldav import CalendarClient, CalendarUnavailable, Collection, macos_calendar_link
 from .checks import check_calendar, check_service
@@ -588,6 +588,10 @@ def create_app(settings: Settings) -> FastAPI:
             "widget_script": script_source(),
             "widget_last_seen": views.ago(seen, now) if seen else None,
             "widget_connected": seen is not None and now - seen < WIDGET_QUIET_AFTER,
+            # The running build is in the page from the start; what is published is one
+            # button press away, because it is somebody else's server to wait on.
+            "revision": release.running_revision(settings),
+            "watchtower": settings.watchtower_configured,
             "log_levels": LOG_LEVELS,
             "notification_choices": NOTIFICATION_CHOICES,
             "flag_colours": tuple(FLAG_COLOURS),
@@ -826,6 +830,47 @@ def create_app(settings: Settings) -> FastAPI:
                 context["tab"] = "connections"
                 return page(request, "settings.html", context, status_code=400)
         return JSONResponse({"ok": True}) if wants_json else _saved("connections")
+
+    @app.get("/settings/version")
+    async def version() -> JSONResponse:
+        """What is running, what is published, and whether there is anywhere to go.
+
+        Asked for when somebody presses the button rather than on the way into the page:
+        it is three requests to a registry, and a settings page that waits on the network
+        to draw itself is a settings page that hangs when the network is not there.
+        """
+        try:
+            update = await release.check(settings)
+        except (httpx.HTTPError, LookupError, KeyError, ValueError):
+            log.warning("could not ask the registry what is published", exc_info=True)
+            return JSONResponse({"error": "Could not reach the registry"}, status_code=502)
+        return JSONResponse(
+            {
+                "running": update.running,
+                "published": update.published,
+                "behind": update.behind,
+                "watchtower": settings.watchtower_configured,
+            }
+        )
+
+    @app.post("/settings/update")
+    async def take_update() -> JSONResponse:
+        """Hand the update to Watchtower, which is the thing that can make it.
+
+        Answered before it has happened, because what happens next is this container
+        being replaced: the page waits for the app to come back rather than for a reply
+        that may never be written.
+        """
+        if not settings.watchtower_configured:
+            return JSONResponse({"error": "No Watchtower is configured"}, status_code=409)
+        try:
+            await release.take_update(settings)
+        except RuntimeError as refused:
+            return JSONResponse({"error": str(refused)}, status_code=502)
+        except httpx.HTTPError:
+            log.warning("watchtower refused the update", exc_info=True)
+            return JSONResponse({"error": "Watchtower could not be reached"}, status_code=502)
+        return JSONResponse({"ok": True})
 
     @app.post("/settings/widget/token")
     async def rotate_widget_token() -> Response:

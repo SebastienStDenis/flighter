@@ -328,6 +328,43 @@ The package inherits this repository's visibility, so it pulls anonymously with 
 `docker login` on the desktop. Publishing is gated behind a job that re-runs lint, types
 and tests, so a commit that fails CI never ships as `:latest`.
 
+**Settings &rarr; Preferences &rarr; Advanced** says which build is running and, on a
+press, whether a newer one is published: the image carries the commit it was built from,
+and the registry says which commit `:latest` is now. That much needs nothing but a
+network.
+
+Taking the update is a different question. A container cannot pull an image or replace
+the container it is running in - exiting only hands the same image back to the restart
+policy - and the only way to do it from inside is a mounted Docker socket, which is root
+on the host in exchange for a button. So the button asks the thing that already holds
+that socket. Where [Watchtower](https://containrrr.dev/watchtower/) runs beside the app
+with its HTTP API turned on, tell Flighter where it is and give both halves the same
+token:
+
+```yaml
+services:
+  app:
+    environment:
+      WATCHTOWER_URL: http://watchtower:8080
+      WATCHTOWER_TOKEN: pick-a-long-random-string
+
+  watchtower:
+    image: containrrr/watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_HTTP_API_UPDATE: "true"
+      WATCHTOWER_HTTP_API_TOKEN: pick-a-long-random-string
+```
+
+These two are the one credential that is set in the environment rather than on the
+settings page: the token has to match the one given to Watchtower in the same file, so
+it is set where its other half is. Without them the panel still says whether the
+deployment is behind, and taking the update stays `docker compose pull && up -d`. With
+them, pressing **Update and restart** is the poll Watchtower would have made by itself,
+made now - it pulls, recreates every container it watches, and the page waits for
+Flighter to answer again before reloading onto the new build.
+
 To build locally instead of pulling, `docker compose build` still works from a checkout.
 
 The named `data` volume needs no setup. If you would rather keep the state in the
