@@ -249,7 +249,7 @@
 {# Icon only: it stands beside the thing it copies, where a word would push the value off
    the line the two share. #}
 {% macro copy_button(target, size='icon-sm', classes='') %}
-<button class="btn{{ ' ' ~ classes if classes }}" data-variant="outline" data-size="{{ size }}" type="button"
+<button class="btn copy-button{{ ' ' ~ classes if classes }}" data-variant="outline" data-size="{{ size }}" type="button"
         title="Copy" aria-label="Copy" onclick="copyText(this, '{{ target }}')">
   <svg data-state="idle" viewBox="0 0 24 24" width="14" height="14" fill="none"
        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"

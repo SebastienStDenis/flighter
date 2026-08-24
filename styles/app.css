@@ -559,6 +559,17 @@
     border-top-color: currentColor;
   }
 
+  /* The button that copies a value stands on top of the value it copies, which is the
+     one place on the page where a see-through control is a control with a string of
+     characters running under it. Basecoat draws its outline button at 30% of the input
+     colour in the dark scheme, so this one is given the whole of it: solid, and lighter
+     than either the card or the box it is sitting on. */
+  @media (prefers-color-scheme: dark) {
+    .btn[data-variant='outline'].copy-button {
+      background-color: var(--input);
+    }
+  }
+
   /* The step's number, on a rail of its own so every step's text starts at the same
      place whether its number is one digit or its title wraps. */
   .step-number {
