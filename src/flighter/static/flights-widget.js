@@ -5,11 +5,15 @@
 // Flight tracker widget.
 //
 // The server decides everything: which flights, in what order, what the pill says and
-// in which tone, the one line under it, and where the airline's mark is to be fetched
-// from. This file draws that and nothing else. Nothing here is measured against the
-// phone's clock: iOS reloads a widget when it feels like it, about every quarter of an
-// hour, and a figure counted from the clock is that far wrong by the time it is drawn
-// again. A time read at the airport is right until the estimate itself moves.
+// in which tone, the one line under it, what the flight is counting to, and where the
+// airline's mark is to be fetched from. This file draws that and nothing else.
+//
+// One figure is not drawn here at all. iOS reloads a widget when it feels like it, about
+// every quarter of an hour, so a countdown worked out at draw time is that far wrong by
+// the time it is read - and a countdown is the one thing on the row that has to be right
+// to the minute. WidgetKit will tick a date down itself, between reloads and without
+// waking anything, so the server sends the instant and `applyTimerStyle` counts it. Every
+// other time in the payload is already a clock face, right until the estimate moves.
 //
 // There is nothing to edit here. The server's address and the token arrive through the
 // Connect button on the settings page, which runs this script with both in the URL, and
@@ -313,9 +317,17 @@ function renderAccessory(widget, flight, result) {
   title.lineLimit = 1;
   title.minimumScaleFactor = 0.7;
 
-  const state = widget.addText(flight.status_label);
-  state.font = Font.semiboldSystemFont(15);
-  state.lineLimit = 1;
+  // The word and the count share a line here rather than taking one each: three lines
+  // is what a lock screen has, and the gate is worth one of them.
+  const state = widget.addStack();
+  state.centerAlignContent();
+  const word = state.addText(flight.status_label);
+  word.font = Font.semiboldSystemFont(15);
+  word.lineLimit = 1;
+  if (flight.milestone_at) {
+    state.addSpacer();
+    countdown(state, flight, 13);
+  }
 
   if (flight.detail) {
     const text = widget.addText(flight.detail);
@@ -353,6 +365,17 @@ function renderSmall(widget, flight, logos) {
     detail.lineLimit = 3;
     detail.minimumScaleFactor = 0.8;
   }
+
+  // The one column has no right-hand side, so what the board puts at the two ends of
+  // its footer goes at the two ends of the last line here.
+  if (flight.milestone_at) {
+    widget.addSpacer(4);
+    const footer = widget.addStack();
+    footer.centerAlignContent();
+    milestoneWord(footer, flight, 11);
+    footer.addSpacer();
+    countdown(footer, flight, 12).textColor = TEXT;
+  }
 }
 
 function renderList(widget, flights, logos) {
@@ -366,7 +389,12 @@ function renderList(widget, flights, logos) {
     }
     row.layoutVertically();
 
-    titleRow(row, flight, logos, 14, true);
+    // The board's footer, at the two ends of a row rather than the two ends of a card:
+    // what the flight is counting to on the right of its number, and the count itself
+    // on the right of what there is to find.
+    titleRow(row, flight, logos, 14, true, (heading) => {
+      milestoneWord(heading, flight, 11);
+    });
     row.addSpacer(4);
 
     const line = row.addStack();
@@ -376,20 +404,24 @@ function renderList(widget, flights, logos) {
     if (flight.detail) {
       // No scale factor: a text that can shrink is sized before the pill and handed
       // half the line, and is cut short with room beside it. One that only truncates
-      // is sized after the pill and gets everything the pill left. The time leads the
-      // line, so what a narrow row loses is the seat rather than the flight.
+      // is sized after the pill and gets everything the pill left. Where to be leads the
+      // line, so what a narrow row loses is the seat rather than the gate.
       const detail = line.addText(flight.detail);
       detail.font = Font.systemFont(11);
       detail.textColor = TEXT;
       detail.lineLimit = 1;
     }
     line.addSpacer();
+    if (flight.milestone_at) {
+      countdown(line, flight, 12).textColor = TEXT;
+    }
   });
 }
 
 // The heading: the airline's mark, when it came, then the number, and the route beside
-// it where the row is wide enough to hold both.
-function titleRow(container, flight, logos, size, withRoute) {
+// it where the row is wide enough to hold both. Whatever `trailing` draws is held at the
+// far end of the line by the spacer between them.
+function titleRow(container, flight, logos, size, withRoute, trailing) {
   const row = container.addStack();
   row.centerAlignContent();
   row.spacing = 5;
@@ -412,7 +444,35 @@ function titleRow(container, flight, logos, size, withRoute) {
     route.minimumScaleFactor = 0.7;
   }
   row.addSpacer();
+  if (trailing) {
+    trailing(row);
+  }
   return row;
+}
+
+// The board's own words for the rung ahead - "Departs in", "Due to land" - which is the
+// half of its footer that does not move.
+function milestoneWord(container, flight, size) {
+  if (!flight.milestone_label) {
+    return null;
+  }
+  const word = container.addText(flight.milestone_label);
+  word.font = Font.systemFont(size);
+  word.textColor = MUTED;
+  word.lineLimit = 1;
+  return word;
+}
+
+// The other half, which iOS draws for itself: the instant the server named, counted down
+// where it stands and ticking between reloads. Monospaced, so nothing beside it shuffles
+// as the digits change, and it goes on counting up once the time has gone by - which is
+// the state the word beside it is already saying is a wait.
+function countdown(container, flight, size) {
+  const date = container.addDate(new Date(flight.milestone_at));
+  date.applyTimerStyle();
+  date.font = Font.semiboldMonospacedSystemFont(size);
+  date.lineLimit = 1;
+  return date;
 }
 
 // The board's badge: the word in its tone, on the same tone let through the card.

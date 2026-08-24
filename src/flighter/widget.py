@@ -8,14 +8,14 @@ are the web UI's own, read from the same functions, so the lock screen and the b
 never disagree. Everything that could be got wrong is got wrong here, once, where it is
 covered by tests.
 
-Two rules hold the contract together. Nothing in the payload is an instant: iOS reloads
-a widget about every quarter of an hour, so anything measured against the phone's clock
-is a quarter of an hour wrong before it is drawn again, and every time here is already a
-clock face, which is right until the estimate itself moves. Which clock it is read on is
-the phone's to say: it sends the zone it is in, so the times are the ones on the reader's
-own watch, and the airport's own clock joins them only where the two differ. And the
-payload is a pydantic model, so a field that drifts breaks a test rather than a lock
-screen.
+Two rules hold the contract together. Every time in the payload is already a clock face,
+read on the phone's own clock - it sends the zone it is in - and never carries a second
+reading of the same instant beside it: a row is looked at for a second and a half, and a
+line that states two times states neither. The single exception is what the flight is
+counting to, which goes over as the instant itself: iOS counts a date down on its own,
+without a reload, so the one figure that would be a quarter of an hour stale is the one
+figure the phone draws for itself. And the payload is a pydantic model, so a field that
+drifts breaks a test rather than a lock screen.
 """
 
 from __future__ import annotations
@@ -61,11 +61,6 @@ POLL_STALE_AFTER: Final = timedelta(minutes=45)
 
 PHASES_IMMINENT: Final = frozenset({DAY_OF, TAXIING, AIRBORNE, DIVERTED})
 
-# What the line calls the rung it names a time for. The board counts down to it; the
-# widget states it, so "Lands in" reads "Lands" here. A departure needs no word at all:
-# it is the first thing on the line and the time it leaves is what a row is about.
-ARRIVAL_WORDS: Final = {"Lands in": "Lands", "At the gate in": "At the gate"}
-
 # The board names the day in the pill for a flight the feed has not picked up yet. Here
 # the day is on the line with the time, so the pill has nothing to add but that it is
 # booked.
@@ -96,10 +91,16 @@ class WidgetFlight(BaseModel):
     route: str
     status_label: str
     status_tone: str
-    # The one line under the pill: the next time that matters, on the phone's own clock,
-    # with what there is to find when it comes. Everything the row says beyond the
-    # flight itself is on this line.
+    # The one line under the pill: where in the building to be, and what seat to sit in
+    # once there is a building to be in. Days out there is neither, and it is the time
+    # the flight leaves instead.
     detail: str | None
+    # The board's footer, which is the right-hand side of a row here: what the flight is
+    # counting to, in the board's own words, and the instant it counts to. The phone
+    # draws the figure itself and it ticks between reloads, which is why this is the one
+    # instant that goes over rather than a figure that would be stale on arrival.
+    milestone_label: str | None
+    milestone_at: str | None
 
 
 class WidgetPayload(BaseModel):
@@ -252,14 +253,16 @@ async def load_flight_rows(session: AsyncSession, now: datetime) -> list[FlightR
 async def load_airports(
     session: AsyncSession, rows: Sequence[FlightRow]
 ) -> dict[str, Airport | None]:
-    """Both ends of every flight, and where a diverted one is bound, for the zone each
-    clock is read in."""
+    """The airport every flight leaves from, which is the one clock still read here.
+
+    The day a flight leaves is the day at the airport it leaves from, and it is the
+    only time the payload states. What happens at the other end is a countdown, and a
+    countdown has no zone to be read in.
+    """
     airports: dict[str, Airport | None] = {}
-    for booking, snapshot in rows:
-        bound_for = views.destination_iata(booking, snapshot)
-        for iata in (booking.origin_iata, booking.dest_iata, bound_for):
-            if iata not in airports:
-                airports[iata] = await get_airport(session, iata)
+    for booking, _ in rows:
+        if booking.origin_iata not in airports:
+            airports[booking.origin_iata] = await get_airport(session, booking.origin_iata)
     return airports
 
 
@@ -325,6 +328,7 @@ def _flight(
     phase = compute_phase(booking, snapshot, now)
     origin_tz = _zone(airports, booking.origin_iata)
     pill = _status(phase, booking, snapshot, now=now, origin_tz=origin_tz)
+    counting_to = _milestone(phase, booking, snapshot, now=now)
     return WidgetFlight(
         detail_url=f"{base_url}/f/{booking.id}",
         phase=phase,
@@ -339,9 +343,10 @@ def _flight(
             snapshot,
             now=now,
             origin_tz=origin_tz,
-            destination_tz=_zone(airports, views.destination_iata(booking, snapshot)),
             viewer_tz=viewer_tz,
         ),
+        milestone_label=counting_to[0] if counting_to else None,
+        milestone_at=_iso_z(counting_to[1]) if counting_to else None,
     )
 
 
@@ -374,6 +379,28 @@ def _status(
     return pill
 
 
+def _milestone(
+    phase: Phase,
+    booking: Booking,
+    snapshot: FlightSnapshot | None,
+    *,
+    now: datetime,
+) -> tuple[str, datetime] | None:
+    """What the flight is counting to, and when, in the board's own words.
+
+    The board's footer exactly: the same rung, named the same way - "Departs in" while
+    it is ahead, "Due to depart" once its time has gone by with no word that it happened
+    - and dropped in the same two places the board drops it. A flight days out is not
+    counted in hours by anyone, and a parked one has the belt to give instead.
+    """
+    if not views.watched(phase) or views.at_the_gate(phase, booking, snapshot, now):
+        return None
+    next_up = views.milestone(phase, booking, snapshot, now=now)
+    if next_up is None:
+        return None
+    return views.milestone_label(next_up, now), next_up.target
+
+
 def _detail(
     phase: Phase,
     booking: Booking,
@@ -381,65 +408,59 @@ def _detail(
     *,
     now: datetime,
     origin_tz: str,
-    destination_tz: str,
     viewer_tz: str | None,
 ) -> str | None:
-    """The line under the pill: the next time that matters, and what to find when it comes.
+    """The line under the pill: where to be, once being somewhere is the question.
 
-    The rung is the board's own, so the two never name different things. The departure
-    belongs to the origin and everything after it to the destination, the way a ticket
-    and an arrivals board each do, and the time leads the line so that a row too narrow
-    for all of it loses the seat rather than the flight.
+    What the flight is counting to is on the right of the row and counts itself down, so
+    this line never states a time twice over: the day a flight leaves is worth a line
+    only while it is far enough off that nothing is counting to it. Inside its day the
+    terminal, the gate and the seat are what somebody is walking to, drawn as the boxes
+    the card draws and dashed where the airport has not said yet. Off the ground all of
+    that is behind them and the seat is the last of it worth carrying.
 
-    Parked there is no time left to give and the belt is the only thing anyone wants,
-    and a flight the feed lost, or called off, has nothing to say the pill has not said.
+    Parked there is nothing left to find but the belt, and a flight the feed lost, or
+    called off, has nothing to say the pill has not said.
     """
     if views.at_the_gate(phase, booking, snapshot, now):
         belt = snapshot.baggage_claim if snapshot else None
         return f"Baggage claim {belt}" if belt else None
-    next_up = views.milestone(phase, booking, snapshot, now=now)
-    if next_up is None:
-        return None
-    if next_up.label in ARRIVAL_WORDS:
-        word = ARRIVAL_WORDS[next_up.label]
-        return f"{word} {_when(next_up.target, now, destination_tz, viewer_tz)}"
-
-    parts = [_when(next_up.target, now, origin_tz, viewer_tz)]
+    if not views.watched(phase):
+        if views.milestone(phase, booking, snapshot, now=now) is None:
+            return None
+        return _when(departure_estimate(booking, snapshot), now, origin_tz, viewer_tz)
     if phase == DAY_OF:
-        # The gate and the seat are worth the width only once there is a chance they
-        # are filled in and a person is on their way to use them.
-        if snapshot and snapshot.gate_origin:
-            parts.append(f"Gate {snapshot.gate_origin}")
+        parts = [
+            f"T {views.dash(snapshot.terminal_origin if snapshot else None)}",
+            f"G {views.dash(snapshot.gate_origin if snapshot else None)}",
+        ]
         if booking.seat:
-            parts.append(f"Seat {booking.seat}")
-    return " · ".join(parts)
+            parts.append(f"S {booking.seat}")
+        return " · ".join(parts)
+    return f"S {booking.seat}" if booking.seat else None
 
 
 def _when(instant: datetime, now: datetime, airport_tz: str, viewer_tz: str | None) -> str:
-    """The time on the reader's own clock, and the airport's too where they differ.
+    """The time on the reader's own clock, and on no other.
 
     A time at an airport four zones away is arithmetic, not information: the phone is
-    what someone is holding, so its clock is the one the line leads with, and the day in
-    front of it is that clock's day. The airport's own time follows where the two are
-    not the same reading, because on the ground at the other end that is the one that
-    matters. Neither ever loses its zone, which is the difference between a time and a
-    missed flight.
+    what someone is holding, so its clock is the one the line is read on, and the day in
+    front of it is that clock's day. The airport's own reading of the same instant is
+    not printed beside it - two times on one line is a line that has to be worked out
+    rather than read - and the zone is not named either, because the clock it is on is
+    the clock in the same hand.
 
-    A phone that did not say where it is gets the airport's clock alone, which is what
-    every copy of the widget drew before the zone was sent and is still right, just
-    harder work.
+    A phone that did not say where it is gets the airport's clock instead, and that one
+    keeps its zone: it is the one case where the time is not on the reader's own.
     """
     here = viewer_tz or airport_tz
+    stated = views.clock if viewer_tz else views.at
     day = views.day_word(instant, now, here)
     if day == "Today":
-        line = views.at(instant, here)
-    elif day is not None:
-        line = f"{day} {views.at(instant, here)}"
-    else:
-        line = views.at(instant, here, with_date=True)
-    if views.clock(instant, here) == views.clock(instant, airport_tz):
-        return line
-    return f"{line} · {views.at(instant, airport_tz)}"
+        return stated(instant, here)
+    if day is not None:
+        return f"{day} {stated(instant, here)}"
+    return stated(instant, here, with_date=True)
 
 
 def _refresh_seconds(flights: Sequence[WidgetFlight]) -> int:

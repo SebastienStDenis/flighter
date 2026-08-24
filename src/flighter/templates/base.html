@@ -41,9 +41,13 @@
     </a>
     {% set problems = request.state.problems|default(0) %}
     {% set mail = here == '/mail' or here.startswith('/mail/') %}
+    {# The box it opens is drawn at the end of every page, so the + opens it where it is
+       pressed rather than going anywhere. The address is what a browser with no script
+       follows, and what it draws is the board with that box standing open on it. #}
     <a class="btn ml-auto" data-size="icon-sm" href="/f/new" aria-label="Add a flight"
        data-variant="{{ 'secondary' if here == '/f/new' else 'ghost' }}"
-       {% if here == '/f/new' %}aria-current="page"{% endif %}>
+       {% if here == '/f/new' %}aria-current="page"{% endif %}
+       onclick="openAdd(event)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M5 12h14M12 5v14"/>
@@ -81,6 +85,7 @@
 <main class="mx-auto flex w-full max-w-lg flex-1 flex-col px-4 pt-4">
 {% block content %}{% endblock %}
 </main>
+{% include "add.html" %}
 <script>
   // Countdowns tick from the target already in the page and fetch nothing, which is what
   // keeps them consistent with the rest: the server rendered a correct string for the

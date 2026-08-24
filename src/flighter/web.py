@@ -152,6 +152,32 @@ def _posted(value: Any) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _wants_json(request: Request) -> bool:
+    """Whether the answer is going to a script that will draw it, rather than to a page."""
+    return "application/json" in request.headers.get("accept", "")
+
+
+def _add(
+    *,
+    opened: bool = False,
+    error: str | None = None,
+    posted: dict[str, Any] | None = None,
+    candidates: list[lookup.Candidate] | None = None,
+) -> dict[str, Any]:
+    """What the add dialog is standing on, for the template that draws it.
+
+    Every page carries one, shut and empty; the pages that answer for adding a flight say
+    what is in it. What was typed comes back with it, so a refusal does not cost the day
+    that was picked.
+    """
+    return {
+        "open": opened,
+        "error": error,
+        "form": posted or {},
+        "candidates": candidates or [],
+    }
+
+
 def _saved(tab: str) -> RedirectResponse:
     """Back to the settings page, on the tab the form was on.
 
@@ -188,6 +214,9 @@ def create_app(settings: Settings) -> FastAPI:
         email_url=message_url,
         logo_url=views.logo_url,
         build_id=_build_id(),
+        # The add dialog is on every page, so whether there is anything to look a flight
+        # up with is read as the page is drawn rather than passed into each one.
+        flightaware_configured=lambda: settings.aeroapi_configured,
         missing=views.MISSING,
         rendered_at=lambda: datetime.now(UTC).isoformat(timespec="seconds"),
         until=views.until,
@@ -195,30 +224,51 @@ def create_app(settings: Settings) -> FastAPI:
     )
 
     def page(request: Request, name: str, context: dict[str, Any], **kwargs: Any) -> Response:
-        return templates.TemplateResponse(request, name, context, **kwargs)
+        # The add dialog is drawn at the foot of every page, because the + that opens it
+        # is in every page's nav. Shut and empty unless the page being drawn is the one
+        # that opens it.
+        return templates.TemplateResponse(request, name, {"add": _add()} | context, **kwargs)
 
     def error_page(request: Request, code: int, detail: str) -> Response:
         if request.url.path.startswith(("/api/", "/healthz")):
             return JSONResponse({"detail": detail}, status_code=code)
         return page(request, "error.html", {"code": code, "detail": detail}, status_code=code)
 
-    def search_page(
+    def choices(posted: dict[str, Any], candidates: list[lookup.Candidate]) -> str:
+        """The legs to choose between, drawn by the macro a page draws them with.
+
+        The dialog is handed HTML rather than a list to build rows out of, because the
+        rows already exist: one piece, drawn once, wherever the choice is offered.
+        """
+        macros = templates.env.get_template("macros.html").module
+        return str(macros.add_choices(posted, candidates))  # type: ignore[attr-defined]
+
+    async def not_added(
         request: Request,
         error: str | None = None,
         posted: dict[str, Any] | None = None,
         candidates: list[lookup.Candidate] | None = None,
     ) -> Response:
-        return page(
-            request,
-            "add.html",
-            {
-                "error": error,
-                "form": posted or {},
-                "candidates": candidates or [],
-                "configured": settings.aeroapi_configured,
-            },
-            status_code=400 if error else 200,
-        )
+        """What comes back when a flight was asked for and no flight went on the board.
+
+        The dialog asks over fetch, so the answer is what it needs to stay open on: a
+        refusal to draw beside the button, and the legs to choose between when the number
+        flew twice. A browser with no script posted the form instead, and gets the board
+        back with the dialog standing open on the same two things.
+        """
+        status_code = 400 if error else 200
+        if _wants_json(request):
+            answer: dict[str, Any] = {"error": error}
+            if candidates:
+                answer["choices"] = choices(posted or {}, candidates)
+            return JSONResponse(answer, status_code=status_code)
+        async with session_scope() as session:
+            return await board_page(
+                request,
+                session,
+                _add(opened=True, error=error, posted=posted, candidates=candidates),
+                status_code=status_code,
+            )
 
     @app.exception_handler(HTTPException)
     async def on_http_error(request: Request, exc: HTTPException) -> Response:
@@ -240,8 +290,13 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(status_code=404, detail="No such flight.")
         return (await build_views(session, [booking]))[0]
 
-    @app.get("/")
-    async def board(request: Request, session: SessionDep) -> Response:
+    async def board_page(
+        request: Request,
+        session: AsyncSession,
+        add: dict[str, Any],
+        status_code: int = 200,
+    ) -> Response:
+        """The board, and whatever the add dialog standing on it is showing."""
         tracked = await build_views(
             session, await booking_repo.list_bookings(session, statuses=BOARD_STATUSES)
         )
@@ -277,8 +332,14 @@ def create_app(settings: Settings) -> FastAPI:
                 # An empty board says how to fill it, and importing from email is only
                 # one of the two ways while there is an account to read.
                 "icloud_ready": settings.icloud_configured,
+                "add": add,
             },
+            status_code=status_code,
         )
+
+    @app.get("/")
+    async def board(request: Request, session: SessionDep) -> Response:
+        return await board_page(request, session, _add())
 
     @app.get("/mail")
     async def mail(request: Request, session: SessionDep) -> Response:
@@ -336,9 +397,14 @@ def create_app(settings: Settings) -> FastAPI:
 
     # Declared before /f/{booking_id} so that "new" is never read as an id.
     @app.get("/f/new")
-    async def new_flight(request: Request) -> Response:
-        """Two boxes: the number on the boarding pass, and the day it leaves."""
-        return search_page(request)
+    async def new_flight(request: Request, session: SessionDep) -> Response:
+        """Two boxes: the number on the boarding pass, and the day it leaves.
+
+        The board with the box standing open on it, because that is what adding a flight
+        looks like from anywhere else in the app. This address is what the + falls back to
+        with no script to open it, and where a link or a bookmark to adding a flight lands.
+        """
+        return await board_page(request, session, _add(opened=True))
 
     @app.post("/f/new")
     async def add_flight(
@@ -357,35 +423,39 @@ def create_app(settings: Settings) -> FastAPI:
         posted = {"flight_number": flight_number, "departure_date": departure_date}
         flight = lookup.parse_flight_number(flight_number)
         if flight is None:
-            return search_page(request, "A flight number looks like AC871.", posted)
+            return await not_added(request, "A flight number looks like AC871.", posted)
         day = _parse_date(departure_date)
         if day is None:
-            return search_page(request, "Pick the day it departs.", posted)
+            return await not_added(request, "Pick the day it departs.", posted)
 
         carrier, number = flight
         try:
             found = await lookup.find_flights(carrier, number, day)
         except lookup.OutOfRange:
-            return search_page(request, "No airline has published a schedule that far off.", posted)
+            return await not_added(
+                request, "No airline has published a schedule that far off.", posted
+            )
         except BudgetExceeded:
-            return search_page(
+            return await not_added(
                 request, "The FlightAware budget is spent, so nothing can be looked up.", posted
             )
         except httpx.HTTPError:
             log.warning("could not look up %s on %s", flight_number, departure_date, exc_info=True)
-            return search_page(request, "FlightAware did not answer.", posted)
+            return await not_added(request, "FlightAware did not answer.", posted)
 
         if not found:
-            return search_page(
+            return await not_added(
                 request, f"No {carrier}{number} is scheduled to leave that day.", posted
             )
         if leg:
             chosen = [candidate for candidate in found if candidate.leg == leg]
             if not chosen:
-                return search_page(request, "That leg is no longer on the schedule.", posted, found)
+                return await not_added(
+                    request, "That leg is no longer on the schedule.", posted, found
+                )
             found = chosen
         if len(found) != 1:
-            return search_page(request, None, posted, found)
+            return await not_added(request, None, posted, found)
 
         # The database is opened only now, with FlightAware answered: a session holds
         # the write lock from its first statement, and nothing else could use it while
@@ -407,8 +477,15 @@ def create_app(settings: Settings) -> FastAPI:
                 )
         except IntegrityError:
             # The dedupe index caught a flight already on the list.
-            return search_page(request, "That flight is already on the list for that day.", posted)
-        return RedirectResponse(f"/f/{booking.id}", status_code=303)
+            return await not_added(
+                request, "That flight is already on the list for that day.", posted
+            )
+        # The flight's own page is the only place worth being now. The dialog asked over
+        # fetch and cannot be redirected onto a page, so it is told where to go instead.
+        where = f"/f/{booking.id}"
+        if _wants_json(request):
+            return JSONResponse({"location": where})
+        return RedirectResponse(where, status_code=303)
 
     @app.get("/f/{booking_id}")
     async def detail(request: Request, session: SessionDep, booking_id: int) -> Response:
@@ -704,7 +781,7 @@ def create_app(settings: Settings) -> FastAPI:
         }
         # The page asks over fetch so the answer can land beside the button that was
         # pressed. A browser with no script posts the form and gets the page back.
-        wants_json = "application/json" in request.headers.get("accept", "")
+        wants_json = _wants_json(request)
         # The limit is drawn in the FlightAware card and saved by its button, but it is a
         # preference rather than a credential: it is read off the form, because an empty
         # box means no limit here rather than "leave this one alone", and it is stored
