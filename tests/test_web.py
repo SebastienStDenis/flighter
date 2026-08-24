@@ -44,7 +44,13 @@ from flighter.timezones import to_local
 from flighter.widget import LAST_SEEN_KEY
 
 NOW = datetime.now(UTC)
-DEPARTURE = NOW + timedelta(days=2)
+# Two days out, and at a fixed hour rather than at whatever hour the suite is being run
+# at. The cards here are read for the strings they draw - a time, the day under it, a
+# rule through the one a delay replaced - and a departure that inherits the clock puts
+# those within minutes of local midnight twice a day, where a flight held forty minutes
+# lands on the next day and the day under it is struck through too. Midday UTC is the
+# middle of the day in every zone this file reads a card in.
+DEPARTURE = (NOW + timedelta(days=2)).replace(hour=12, minute=40, second=0, microsecond=0)
 ARRIVAL = DEPARTURE + timedelta(hours=7)
 
 CALDAV_HOME = "https://p34-caldav.icloud.com/12345/calendars/"
