@@ -142,15 +142,33 @@ def landing_estimate(booking: BookingLike, snapshot: SnapshotLike | None) -> dat
     return arrival_estimate(booking, snapshot)
 
 
+def wheels_down(snapshot: SnapshotLike | None) -> bool:
+    """Whether the feed has seen this flight arrive, whichever phase it is filed under.
+
+    A diverted flight is filed under the diversion for as long as it exists - where it
+    landed is the whole point - so `phase == LANDED` is not the question to ask about
+    one that is on the ground at its alternate.
+    """
+    if snapshot is None:
+        return False
+    return snapshot.actual_on is not None or snapshot.actual_in is not None
+
+
 def airborne_window(
     booking: BookingLike, snapshot: SnapshotLike | None, now: datetime
 ) -> tuple[datetime, datetime] | None:
     """Wheels-up and best known wheels-down, for a flight that is in the air at `now`.
 
+    Diverted counts. A flight bound somewhere it was not booked for is as much in the
+    air as one that is not, and the rule under it has an aircraft to place all the same;
+    only what the feed has seen come down is out of the air.
+
     None on the ground, once landed, and whenever the two do not make a span: a landing
     estimate that has not caught up with a late take-off is nothing to divide by.
     """
-    if snapshot is None or compute_phase(booking, snapshot, now) != AIRBORNE:
+    if snapshot is None or wheels_down(snapshot):
+        return None
+    if compute_phase(booking, snapshot, now) not in (AIRBORNE, DIVERTED):
         return None
     off = ensure_utc(snapshot.actual_off)
     landing = landing_estimate(booking, snapshot)
@@ -159,10 +177,32 @@ def airborne_window(
     return off, landing
 
 
+def expected_window(
+    booking: BookingLike, snapshot: SnapshotLike | None, now: datetime
+) -> tuple[datetime, datetime] | None:
+    """The span the ticket says the flight is flying, for one nothing has been seen of.
+
+    A flight imported while it is already in the air has no observation at all until the
+    poller's first look, and one whose feed has gone quiet - a spent budget, a number
+    FlightAware cannot resolve - may never get another. The clock cannot prove wheels-up,
+    so nothing here says the flight departed; it says where the aircraft would be if the
+    schedule held, which is the same schedule every other figure on the card falls back
+    to when the feed is silent.
+
+    None until the flight is due out, which is the stretch the rule has the length of the
+    hop to say instead.
+    """
+    departure = departure_estimate(booking, snapshot)
+    landing = landing_estimate(booking, snapshot)
+    if ensure_utc(now) < departure or landing is None or landing <= departure:
+        return None
+    return departure, landing
+
+
 def progress_estimate(
     booking: BookingLike, snapshot: SnapshotLike | None, now: datetime
 ) -> int | None:
-    """How far along the flight is at `now`, as a percentage.
+    """How far along the flight is at `now`, as a percentage, or None if nobody can say.
 
     AeroAPI states a `progress_percent`, but it is true at the moment it was polled and
     an airborne flight is polled every ten minutes, so on its own the figure sits still
@@ -174,6 +214,18 @@ def progress_estimate(
     window = airborne_window(booking, snapshot, now)
     if window is None:
         return snapshot.progress_percent if snapshot is not None else None
+    return _fraction(window, now)
+
+
+def expected_progress(
+    booking: BookingLike, snapshot: SnapshotLike | None, now: datetime
+) -> int | None:
+    """Where the ticket alone puts the aircraft. None while the flight is not due out."""
+    window = expected_window(booking, snapshot, now)
+    return None if window is None else _fraction(window, now)
+
+
+def _fraction(window: tuple[datetime, datetime], now: datetime) -> int:
     off, landing = window
     fraction = (ensure_utc(now) - off) / (landing - off)
     return round(100 * min(max(fraction, 0.0), 1.0))

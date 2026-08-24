@@ -19,6 +19,8 @@ from flighter.phase import (
     arrival_estimate,
     compute_phase,
     departure_estimate,
+    expected_progress,
+    expected_window,
     landing_estimate,
     progress_estimate,
 )
@@ -226,6 +228,45 @@ def test_progress_on_the_ground_is_whatever_the_feed_said() -> None:
     assert progress_estimate(booking(), waiting, DEPARTURE - timedelta(hours=1)) == 0
     landed = snapshot(actual_off=DEPARTURE, actual_on=ARRIVAL, progress_percent=100)
     assert progress_estimate(booking(), landed, ARRIVAL + timedelta(minutes=5)) == 100
+
+
+def test_a_diverted_flight_is_still_a_flight_in_the_air() -> None:
+    """Where it is going changed; that it is going there has not. The rule under it has
+    an aircraft to place, and the clock is what places it here as anywhere else."""
+    diverted = snapshot(
+        actual_off=DEPARTURE, estimated_on=ARRIVAL, diverted=True, progress_percent=61
+    )
+    halfway = DEPARTURE + (ARRIVAL - DEPARTURE) / 2
+    assert airborne_window(booking(), diverted, halfway) == (DEPARTURE, ARRIVAL)
+    assert progress_estimate(booking(), diverted, halfway) == 50
+
+
+def test_a_diverted_flight_that_is_down_is_out_of_the_air() -> None:
+    """Diverted outranks landed in the phase, because where it landed is the point. It
+    does not outrank the wheels: a flight the feed has seen arrive is not still flying."""
+    landed = snapshot(actual_off=DEPARTURE, actual_on=ARRIVAL, diverted=True, progress_percent=88)
+    assert airborne_window(booking(), landed, ARRIVAL + timedelta(minutes=5)) is None
+
+
+def test_the_ticket_places_the_aircraft_when_nothing_has_been_seen() -> None:
+    """A flight imported while it is already flying has no snapshot until the poller's
+    first look, and one whose feed has gone quiet may never get another. Neither is at
+    the airport it has plainly left."""
+    quarter = DEPARTURE + (ARRIVAL - DEPARTURE) / 4
+    assert expected_window(booking(), None, quarter) == (DEPARTURE, ARRIVAL)
+    assert expected_progress(booking(), None, quarter) == 25
+    # Nothing is claimed about a flight that is not due out yet: the rule has the length
+    # of the hop to say for that one.
+    assert expected_window(booking(), None, DEPARTURE - timedelta(minutes=1)) is None
+    assert expected_progress(booking(), None, DEPARTURE - timedelta(minutes=1)) is None
+
+
+def test_the_ticket_follows_the_estimate_it_is_held_against() -> None:
+    """A delay the feed did state moves the span with it, so the aircraft is not placed
+    against a departure everybody already knows has slipped."""
+    held = snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(hours=1))
+    assert expected_window(booking(), held, DEPARTURE + timedelta(minutes=30)) is None
+    assert expected_progress(booking(), held, DEPARTURE + timedelta(hours=1)) == 0
 
 
 def test_progress_falls_back_to_the_feed_when_the_times_make_no_span() -> None:

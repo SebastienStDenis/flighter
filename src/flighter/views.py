@@ -38,8 +38,11 @@ from .phase import (
     arrival_estimate,
     compute_phase,
     departure_estimate,
+    expected_progress,
+    expected_window,
     landing_estimate,
     progress_estimate,
+    wheels_down,
 )
 from .timezones import ensure_utc, format_local, parse_instant, to_local
 
@@ -225,25 +228,61 @@ class FlightView:
         return flown(self.booking)
 
     @property
+    def down(self) -> bool:
+        """Whether the feed has seen it arrive, whichever phase that is filed under."""
+        return wheels_down(self.snapshot)
+
+    @property
     def progress_percent(self) -> int | None:
         """How far along the rule the aircraft is drawn.
 
         A flight that has landed is all the way there whatever the feed last said: its
-        figure stops at the last poll, which may have been well short of the runway. A
-        cancelled one never left, however the poller closed it.
+        figure stops at the last poll, which may have been well short of the runway, and
+        a diverted one that is down landed where the rule now ends. A cancelled one never
+        left, however the poller closed it.
+
+        With nothing observed at all the schedule is what is left to go on: a flight
+        imported while it was already in the air has no snapshot until the poller's first
+        look, and one whose feed has gone quiet may never get another, and in both the
+        aircraft belongs where the ticket says it is rather than pinned to the airport it
+        has plainly left. `progress_confirmed` is what says which of the two a figure is,
+        and the rule draws an unconfirmed one in the tone of the dashes around it.
         """
         if self.cancelled:
             return None
-        if self.phase == LANDED or self.flown:
+        if self.phase == LANDED or self.flown or self.down:
             return 100
-        return progress_estimate(self.booking, self.snapshot, datetime.now(UTC))
+        now = datetime.now(UTC)
+        observed = progress_estimate(self.booking, self.snapshot, now)
+        if observed is not None:
+            return observed
+        return expected_progress(self.booking, self.snapshot, now)
+
+    @property
+    def progress_confirmed(self) -> bool:
+        """Whether anything upstream stands behind the figure, or the ticket is all of it."""
+        if self.cancelled:
+            return False
+        if self.phase == LANDED or self.flown or self.down:
+            return True
+        return progress_estimate(self.booking, self.snapshot, datetime.now(UTC)) is not None
 
     @property
     def airborne_window(self) -> tuple[datetime, datetime] | None:
-        """Wheels-up and wheels-down, for the page to move the aircraft between loads."""
-        if self.flown:
+        """The span the aircraft crosses the rule over, for the page to move it between
+        loads: wheels-up to wheels-down where those are known, and the schedule's own
+        span for a flight nothing has been seen of."""
+        if self.flown or self.down:
             return None
-        return airborne_window(self.booking, self.snapshot, datetime.now(UTC))
+        now = datetime.now(UTC)
+        seen = airborne_window(self.booking, self.snapshot, now)
+        if seen is not None:
+            return seen
+        if progress_estimate(self.booking, self.snapshot, now) is not None:
+            # The feed has a figure of its own and no window to move it across; the
+            # aircraft stands where the last poll put it rather than drifting off it.
+            return None
+        return expected_window(self.booking, self.snapshot, now)
 
     @property
     def phase(self) -> Phase:
@@ -256,8 +295,15 @@ class FlightView:
         The rule between the airports has nothing to measure until wheels up, so until
         then it says how long the hop is. Once the flight is under way the aircraft's
         place on the rule is the answer, and afterwards there is nothing left to expect.
+
+        Due out and not seen to have gone counts as under way: the phase can only say
+        day-of, because nothing observed wheels-up, but a rule saying how long the hop
+        will take sits under a footer saying the departure is three hours overdue. The
+        aircraft goes there instead, where the schedule puts it.
         """
         if self.flown or self.phase not in (UPCOMING, DAY_OF):
+            return None
+        if self.departure <= datetime.now(UTC):
             return None
         arrival = self.arrival
         if arrival is None or arrival <= self.departure:
