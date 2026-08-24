@@ -958,6 +958,9 @@ def test_a_count_is_boxed_to_the_reading_it_is_about_to_show() -> None:
         drawn = source[source.index(f"function {name}") : source.index(ends)]
         assert "box.size = new Size(timerWidth(" in drawn, name
         assert "applyTimerStyle()" in drawn, name
+        # And never shrinks into that box: a figure drawn at four fifths of the size it
+        # was asked for is the bug the box is there to prevent, not the fallback.
+        assert "minimumScaleFactor = 0.95" in drawn, name
 
 
 def test_the_age_is_read_from_the_left_so_the_slack_falls_after_the_sentence() -> None:
@@ -971,26 +974,45 @@ def test_the_age_is_read_from_the_left_so_the_slack_falls_after_the_sentence() -
     assert "rightAlignText()" not in line
 
 
-def test_a_small_widget_holds_two_flights_with_the_route_beside_the_number() -> None:
-    """The route took a line to itself, which is the line a second flight now stands in.
-    It shrinks against the number instead - `titleRow`'s own scale factor is what lets
-    it - and the words that name a count give way to the pill, because a pill and a
-    count are the whole of a line this narrow."""
+def test_a_small_widget_holds_two_flights_of_four_lines() -> None:
+    """The number and the route, the pill, where to be, and what it is counting to. The
+    route used to take a line to itself, which is a line out of eight on a widget that
+    has room for eight; it shrinks against the number instead - `titleRow`'s own scale
+    factor is what lets it - and the height that frees is the second flight."""
     source = script_source()
     assert "const SMALL_FLIGHTS = 2;" in source
     assert "flights.slice(0, SMALL_FLIGHTS)" in source
     drawn = source[source.index("function renderSmall(") : source.index("function renderList(")]
-    assert "titleRow(widget, flight, logos, 12, true)" in drawn
-    assert "milestoneWord(" not in drawn
-    # Every line of a flight is the same distance from the one above it, and the only
-    # bigger gap is the one that separates two flights.
-    assert drawn.count("widget.addSpacer(SMALL_GAP)") == 2
+    assert "titleRow(widget, flight, logos, 11, true)" in drawn
+    assert "pill(state, flight)" in drawn
+    assert "milestoneWord(line, flight, 10)" in drawn
+    # Every line of a flight is the same distance under the one above it, and the only
+    # wider gap is the one that separates two flights.
+    assert drawn.count("widget.addSpacer(SMALL_GAP)") == 3
     assert "widget.addSpacer(SMALL_GAP * 2)" in drawn
 
 
+def test_the_small_size_spends_its_last_line_on_a_flight() -> None:
+    """Eight lines of flight and an age do not both fit on a square that size, and the
+    lock screen already answers that the same way. What is actually wrong with the data -
+    a spent budget, a feed that has stopped - is not the age, and keeps its line on every
+    size: it is worth a flight's line."""
+    source = script_source()
+    drawn = source[
+        source.index("async function buildWidget(") : source.index("function newWidget(")
+    ]
+    assert 'footer(widget, data, family === "small" ? null : result);' in drawn
+    footer = source[source.index("function footer(") : source.index('// "Updated')]
+    assert "data.degraded" in footer
+    assert "if (result) {\n    updatedLine(widget, result);" in footer
+
+
 def test_the_count_is_drawn_bigger_than_the_row_it_is_read_off() -> None:
-    """It is the figure the widget is looked at for. The room is there on every size but
-    a medium widget holding three flights, where the height belongs to the rows."""
+    """It is the figure the widget is looked at for, and it is drawn at the size it is
+    given: the box around it is measured wide enough that WidgetKit never shrinks the
+    digits to fit, which is a count drawn smaller than the size it was asked for. The
+    height is there on every size but a medium widget holding three flights, where it
+    belongs to the rows."""
     source = script_source()
     sizes = {}
     for name, ends in (
@@ -998,10 +1020,10 @@ def test_the_count_is_drawn_bigger_than_the_row_it_is_read_off() -> None:
         ("renderList(", "function titleRow("),
     ):
         drawn = source[source.index(f"function {name}") : source.index(ends)]
-        found = re.search(r"countdown\([a-z]+, flight, (\w+)\)", drawn)
+        found = re.search(r"countdown\([a-z]+, flight, (\w+)[,)]", drawn)
         assert found, name
         sizes[name] = found.group(1)
-    assert sizes["renderSmall("] == "13"
+    assert sizes["renderSmall("] == "15"
     # Sized against what the widget is holding rather than fixed: three flights on a
     # medium widget is the one case where the rows need the height back.
     assert sizes["renderList("] == "size"
