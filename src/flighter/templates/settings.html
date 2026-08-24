@@ -118,9 +118,11 @@
    to read rather than a form to be careful around. Each stays its own form, because
    only a form scoped to one service can say which empty box was meant. #}
 {# An account that is not connected is the one thing on this tab there is something to
-   do about, so it opens on the way in rather than waiting to be found. #}
+   do about, so it opens on the way in rather than waiting to be found - and folds away
+   of its own accord once it is connected, which is the answer to the question it was
+   open to ask. #}
 {% macro account(key, name, ready, fields, detail='', todo='Not connected', tone='quiet') %}
-<details class="setting"{{ ' open' if opened == key or not ready }}>
+<details class="setting"{{ ' open' if not ready }}>
   <summary>
     <span class="min-w-0 flex-1">
       <span class="block font-medium">{{ name }}</span>
@@ -799,9 +801,9 @@
         headers: { Accept: "application/json" },
       });
       if (response.ok) {
-        // Back on the row that was just saved, open, so what changed is what you see.
-        var service = form.querySelector('input[name="service"]').value;
-        location.assign("/settings?tab=connections&open=" + service);
+        // Back on the tab it was saved from. Which rows are open is the page's own
+        // answer: the one just connected has nothing left to ask for.
+        location.assign("/settings?tab=connections");
         return;
       }
       var answer = await response.json().catch(function () {

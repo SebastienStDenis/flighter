@@ -495,9 +495,15 @@
 
   /* Basecoat animates the height a disclosure opens to but leaves what is inside it
      standing at full height, so a section folding away spills out of the box closing
-     over it: the frame shrinks, and then the contents disappear where they stand. */
+     over it: the frame shrinks, and then the contents disappear where they stand.
+
+     Clipped rather than hidden so the edge can be given a margin: a box inside a
+     disclosure is as wide as the disclosure, and the ring drawn around a focused one
+     sits outside that box - clipped to the box exactly, a focused field loses the two
+     sides of its own ring. */
   details::details-content {
-    overflow: hidden;
+    overflow: clip;
+    overflow-clip-margin: 4px;
   }
 
   /* Basecoat underlines a summary on hover, which is how it marks a link. These open
