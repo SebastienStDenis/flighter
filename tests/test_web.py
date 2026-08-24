@@ -1648,7 +1648,7 @@ def test_a_credential_on_file_says_what_leaving_its_box_empty_means(
 
     # The four secrets on file: the AeroAPI key, the app-specific password, and
     # Pushover's two. The Apple ID is shown back, and Anthropic is not connected.
-    assert body.count("(leave blank to keep saved value)") == 4
+    assert body.count("(leave empty to keep saved value)") == 4
     # Nothing is asked for again on a connection that is already made.
     assert not re.search(r'<input[^>]*id="icloud_app_password"[^>]*required', body)
 

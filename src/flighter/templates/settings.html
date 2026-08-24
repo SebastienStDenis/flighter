@@ -105,7 +105,7 @@
   <label for="{{ field.name }}">{{ field.label }}
     {%- if ready and not field.value and not field.empty %}
     <span class="text-xs font-normal text-muted-foreground">
-      (leave blank to keep saved value)</span>
+      (leave empty to keep saved value)</span>
     {%- endif %}</label>
   {# A box somebody may deliberately empty says so, because everywhere else on this
      page an empty box is one that was left alone. #}
@@ -667,11 +667,17 @@
   function showSaveState(scope) {
     var save = scope.querySelector("[data-save]");
     if (!save) return;
-    var boxes = scope.querySelectorAll("input:not([type=hidden])");
-    save.disabled = !Array.prototype.some.call(boxes, function (box) {
-      if (box.value === box.defaultValue) return false;
-      return box.value.trim() || box.hasAttribute("data-allow-empty");
+    var changed = false;
+    var fillable = true;
+    scope.querySelectorAll("input:not([type=hidden])").forEach(function (box) {
+      // What the browser would refuse on the way out is what it is off for on the way
+      // in: a box that has to be filled and is not, or an address that is not one. A
+      // box on a connection already made asks for nothing, so an empty one is fine.
+      if (!box.validity.valid) fillable = false;
+      if (box.value === box.defaultValue) return;
+      if (box.value.trim() || box.hasAttribute("data-allow-empty")) changed = true;
     });
+    save.disabled = !changed || !fillable;
   }
 
   document.querySelectorAll("[data-save-scope]").forEach(function (scope) {
