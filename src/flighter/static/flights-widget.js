@@ -72,6 +72,13 @@ class TokenRejected extends Error {}
 const SMALL_FLIGHTS = 2;
 const SMALL_GAP = 2;
 
+// The count, at one size on every home screen size. It was sized against the room each
+// widget had going spare, which made the figure smallest on the widget with the most
+// room on it - a medium one holding three flights - and left the same number drawn three
+// different ways across a home screen. It is the figure every one of them is looked at
+// for, so it is the same figure on all of them.
+const COUNT_SIZE = 18;
+
 const family = config.widgetFamily || "medium";
 const isAccessory = family.startsWith("accessory");
 // Per-element tap targets exist only on medium and large. Everywhere else the whole
@@ -324,9 +331,11 @@ function newWidget() {
     widget.setPadding(2, 2, 2, 2);
   } else {
     widget.backgroundColor = BACKGROUND;
-    // The small size holds two flights of four lines each, so it gives up most of its
-    // margin to keep the last of them on screen.
-    const inset = family === "small" ? 8 : 14;
+    // A little tighter on the small size, which holds two flights of four lines each with
+    // the count on them set at the size every other widget draws it. Tighter, and not as
+    // tight as it will go: a widget whose words start against its own rounded corner
+    // reads as one that ran out of room, whatever it is holding.
+    const inset = family === "small" ? 11 : 14;
     widget.setPadding(inset, inset, inset, inset);
   }
   return widget;
@@ -402,21 +411,20 @@ function renderSmall(widget, flights, logos) {
       widget.addSpacer(SMALL_GAP);
       const line = widget.addStack();
       line.centerAlignContent();
-      milestoneWord(line, flight, 10);
+      // A point under the words on the lines above it, because this one shares its line
+      // with a figure set twice its size: at the wider margins the two of them together
+      // are the whole of the line, and the words are the half of it that can afford to
+      // be quieter.
+      milestoneWord(line, flight, 9);
       line.addSpacer();
       // No slack on this one: the words naming the count share its line, and at this
       // width the widest reading a count can take is already most of what there is.
-      countdown(line, flight, 15, 0).textColor = TEXT;
+      countdown(line, flight, COUNT_SIZE, 0).textColor = TEXT;
     }
   });
 }
 
 function renderList(widget, flights, logos) {
-  // The count is the figure the row is looked at for, so it takes whatever height the
-  // widget has spare: everything else on its line is a label for it. A large widget has
-  // the room whatever it is holding, and a medium one has it until a third flight
-  // arrives - at which point the height is the rows' and the count gives it back.
-  const size = family === "large" ? 18 : flights.length < 3 ? 16 : 13;
   flights.forEach((flight, index) => {
     if (index > 0) {
       widget.addSpacer(family === "large" ? 12 : 8);
@@ -451,7 +459,7 @@ function renderList(widget, flights, logos) {
     }
     line.addSpacer();
     if (flight.milestone_at) {
-      countdown(line, flight, size).textColor = TEXT;
+      countdown(line, flight, COUNT_SIZE).textColor = TEXT;
     }
   });
 }
@@ -498,6 +506,10 @@ function milestoneWord(container, flight, size) {
   word.font = Font.systemFont(size);
   word.textColor = MUTED;
   word.lineLimit = 1;
+  // On the narrow size these words share their line with a count set half again their
+  // size, and the widest reading a count can take leaves them barely room. Being read
+  // small beats being cut in half: this is a label, and the figure beside it is the news.
+  word.minimumScaleFactor = 0.7;
   return word;
 }
 
@@ -557,9 +569,12 @@ function countdown(container, flight, size, slack = 1) {
 function pill(container, flight) {
   const badge = container.addStack();
   badge.centerAlignContent();
-  // Tighter on the small size, where eight lines of flight are what the height is for
-  // and the air around a word is the cheapest of them to give up.
-  const pad = family === "small" ? 1 : 2;
+  // No padding of its own on the small size. Every line of a flight there sits the same
+  // distance under the one above it, and air the pill carries lands inside that distance
+  // - so the gap above and below the pill read wider than the gaps around every other
+  // line. The word keeps the room it needs either side of it, which is the only room a
+  // pill on a line of its own actually needs.
+  const pad = family === "small" ? 0 : 2;
   badge.setPadding(pad, 6, pad, 6);
   badge.cornerRadius = 7;
   badge.backgroundColor = toneColor(flight.status_tone, TINT_ALPHA);
@@ -584,7 +599,7 @@ function footer(widget, data, result) {
   updatedLine(widget, result);
 }
 
-// "Updated 04:12", counted by WidgetKit rather than worked out here.
+// "Last updated 04:12", counted by WidgetKit rather than worked out here.
 //
 // The figure is the reason this line exists: a widget is redrawn a few times an hour, so
 // "4 min ago" written at draw time is the one number on screen guaranteed to be wrong by
@@ -593,8 +608,8 @@ function footer(widget, data, result) {
 // on screen is the real one whenever the phone is looked at, whether iOS has reloaded
 // this widget in the last minute or has not touched it for half an hour.
 //
-// "Cached" rather than "Updated" when the server could not be reached, because then the
-// figure is the age of a file on the phone rather than of a conversation with the server.
+// "Cached" rather than "Last updated" when the server could not be reached, because then
+// the figure is the age of a file on the phone rather than of a conversation with a server.
 //
 // The word leads and the figure ends the line, with nothing after it. A count is the one
 // thing on the line whose width is not known before it is drawn, so whatever the box has
@@ -605,7 +620,7 @@ function updatedLine(widget, result) {
   line.centerAlignContent();
   line.spacing = 3;
 
-  const word = line.addText(result.stale ? "Cached" : "Updated");
+  const word = line.addText(result.stale ? "Cached" : "Last updated");
   word.font = Font.systemFont(size);
   word.textColor = MUTED;
   word.lineLimit = 1;
@@ -640,18 +655,20 @@ function updatedLine(widget, result) {
 // the day and "23:59:59" over one - and nothing here counts past a day, because a flight
 // further off than that is not being counted to at all.
 //
-// Erring wide on purpose. A monospaced glyph is about six tenths of its point size, and
-// the cost of the two mistakes is not the same: a box a little too wide costs the line
-// beside it a character it would have truncated anyway, and a box a little too narrow
-// costs the count its size - which is the one thing the count is drawn big for. `margin`
-// is the glyph of slack a count gets on top of that, where it is drawn against the end
-// of its row and nothing reads the gap; the age in the footer, which has a word after it
-// on the same line, gets none.
+// A monospaced glyph is six tenths of its point size - a figure, not a guess, which is
+// what monospaced means - and the box is figured at sixty-four hundredths: enough over
+// for rounding and for a face that is not quite the one assumed here, and not so much
+// that the padding starts crowding whatever shares the line. `margin` is a glyph of
+// slack on top of that, for a count drawn against the end of a wide row where nothing
+// reads the gap; a narrow row, where the words naming the count are beside it, gets
+// none. Nothing may shrink into these boxes by more than a twentieth, so a box that is
+// still wrong shows up as a box that is wrong rather than as a figure quietly drawn
+// small.
 function timerWidth(at, size, margin = 0) {
   const away = Math.abs(Date.now() - new Date(at).getTime()) + 10 * 60 * 1000;
   const hours = away / (60 * 60 * 1000);
   const glyphs = (hours < 1 ? 5 : hours < 10 ? 7 : 8) + margin;
-  return Math.ceil(glyphs * size * 0.7);
+  return Math.ceil(glyphs * size * 0.64);
 }
 
 function footerSize() {
