@@ -936,7 +936,7 @@ def test_the_footer_ages_itself_rather_than_stating_a_figure() -> None:
     source = script_source()
     line = source[source.index("function updatedLine(") : source.index("function footerSize(")]
     assert "applyTimerStyle()" in line
-    assert '"Updated"' in line and '"Cached"' in line and '"ago"' in line
+    assert '"Updated"' in line and '"Cached"' in line
     # Drawn from when the data landed, which is the fetch when there was one and the
     # cache file's own date when the server could not be reached.
     assert "result.fetchedAt" in line
@@ -963,15 +963,16 @@ def test_a_count_is_boxed_to_the_reading_it_is_about_to_show() -> None:
         assert "minimumScaleFactor = 0.95" in drawn, name
 
 
-def test_the_age_is_read_from_the_left_so_the_slack_falls_after_the_sentence() -> None:
-    """ "Updated 04:12 ago" is a sentence, and the room a timer does not use has to fall
-    somewhere in it. Against the right of its box it opens a gap after "Updated"; against
-    the left it opens one in front of "ago". Boxed to the reading, there is no gap in
-    either place, and what the box does not take falls past "ago" where the line ends."""
+def test_the_age_ends_its_line_with_nothing_drawn_after_it() -> None:
+    """The word leads and the figure ends the line. A timer is the one element on it
+    whose width is not known before it is drawn, so with nothing after it whatever its
+    box has over falls where the line stops rather than inside the phrase - which is what
+    reading "Updated 04:12" rather than "Updated 04:12 ago" is worth."""
     source = script_source()
     line = source[source.index("function updatedLine(") : source.index("function timerWidth(")]
     assert "leftAlignText()" in line
     assert "rightAlignText()" not in line
+    assert "addText" not in line[line.index("box.size") :]
 
 
 def test_a_small_widget_holds_two_flights_of_four_lines() -> None:
@@ -992,19 +993,17 @@ def test_a_small_widget_holds_two_flights_of_four_lines() -> None:
     assert "widget.addSpacer(SMALL_GAP * 2)" in drawn
 
 
-def test_the_small_size_spends_its_last_line_on_a_flight() -> None:
-    """Eight lines of flight and an age do not both fit on a square that size, and the
-    lock screen already answers that the same way. What is actually wrong with the data -
-    a spent budget, a feed that has stopped - is not the age, and keeps its line on every
-    size: it is worth a flight's line."""
+def test_every_home_screen_size_says_how_old_what_it_is_showing_is() -> None:
+    """Including the small one, holding two flights of four lines. Only the lock screen
+    goes without, where three lines is the whole widget and the age is said in the
+    message instead."""
     source = script_source()
     drawn = source[
         source.index("async function buildWidget(") : source.index("function newWidget(")
     ]
-    assert 'footer(widget, data, family === "small" ? null : result);' in drawn
-    footer = source[source.index("function footer(") : source.index('// "Updated')]
-    assert "data.degraded" in footer
-    assert "if (result) {\n    updatedLine(widget, result);" in footer
+    assert "footer(widget, data, result);" in drawn
+    assert 'family === "small" ? null' not in drawn
+    assert "isAccessory ? staleNote(result) : null" in drawn
 
 
 def test_the_count_is_drawn_bigger_than_the_row_it_is_read_off() -> None:

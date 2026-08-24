@@ -308,11 +308,11 @@ async function buildWidget(result) {
     renderList(widget, flights, logos);
   }
   widget.addSpacer();
-  // Four lines a flight and two flights is the whole of a small widget's height, so the
-  // age goes there the way it goes on the lock screen: the sizes with room for it carry
-  // it. What is actually wrong with the data is not the age, and that keeps its line on
-  // every size - a widget that has stopped being told anything is worth a flight's line.
-  footer(widget, data, family === "small" ? null : result);
+  // On every home screen size, two flights of four lines included. The height this was
+  // held off the small one for is height the small one turns out to have: the figures
+  // here are worked out from the point sizes, and the phone is what says how tall a
+  // line of them really is.
+  footer(widget, data, result);
   return widget;
 }
 
@@ -573,8 +573,6 @@ function pill(container, flight) {
 // The bottom of the widget: why the numbers might be wrong, when there is a reason, and
 // under it how old the numbers are, always. Two lines rather than one because a budget
 // breaker's sentence and a running clock do not share a row on a small widget.
-// `result` is what the age is read off, and the size with no line to spare for one is
-// handed none.
 function footer(widget, data, result) {
   if (data.degraded) {
     const text = widget.addText(data.degraded_reason || "Status may be out of date");
@@ -583,12 +581,10 @@ function footer(widget, data, result) {
     text.lineLimit = 1;
     text.minimumScaleFactor = 0.7;
   }
-  if (result) {
-    updatedLine(widget, result);
-  }
+  updatedLine(widget, result);
 }
 
-// "Updated 04:12 ago", counted by WidgetKit rather than worked out here.
+// "Updated 04:12", counted by WidgetKit rather than worked out here.
 //
 // The figure is the reason this line exists: a widget is redrawn a few times an hour, so
 // "4 min ago" written at draw time is the one number on screen guaranteed to be wrong by
@@ -599,6 +595,10 @@ function footer(widget, data, result) {
 //
 // "Cached" rather than "Updated" when the server could not be reached, because then the
 // figure is the age of a file on the phone rather than of a conversation with the server.
+//
+// The word leads and the figure ends the line, with nothing after it. A count is the one
+// thing on the line whose width is not known before it is drawn, so whatever the box has
+// over falls where the line stops rather than inside the phrase.
 function updatedLine(widget, result) {
   const size = footerSize();
   const line = widget.addStack();
@@ -614,31 +614,24 @@ function updatedLine(widget, result) {
   if (!result.fetchedAt) {
     return;
   }
-  // A timer is the one element WidgetKit cannot measure before it draws it, so it is
-  // handed whatever room is going: in Scriptable, which measures a snapshot, that is the
-  // width of the digits, and on the home screen it is the rest of the line. Held against
-  // either end of that room the slack lands inside the sentence - a gap after "Updated"
-  // or a gap in front of "ago" - so the count is given a box the width of the reading it
-  // is about to show and drawn from the left of it. What is left over then falls after
-  // "ago", at the end of a line nothing else is on, where there is nothing to read it as.
+  // Boxed like the count, and for the same reason: a timer is the one element WidgetKit
+  // cannot measure before it draws it, so left to itself it takes the rest of the line
+  // and holds the digits at whichever end it is told to. Nothing follows it here, so the
+  // box gets the same glyph of slack the count gets and what it has over falls past the
+  // end of the phrase.
   const box = line.addStack();
-  box.size = new Size(timerWidth(result.fetchedAt, size), 0);
+  box.size = new Size(timerWidth(result.fetchedAt, size, 1), 0);
   const age = box.addDate(result.fetchedAt);
   age.applyTimerStyle();
   age.font = Font.regularMonospacedSystemFont(size);
   age.textColor = MUTED;
   age.leftAlignText();
   age.lineLimit = 1;
-  // The line reads as one sentence, so the figure in it is set at the size of the words
-  // on either side of it. A hair of give for the phone that has not been asked to redraw
-  // this since the reading gained a digit, and no more than that.
+  // The line reads as one phrase, so the figure in it is set at the size of the word in
+  // front of it. A hair of give for the phone that has not been asked to redraw this
+  // since the reading gained a digit, and no more than that.
   age.minimumScaleFactor = 0.95;
-
-  const ago = line.addText("ago");
-  ago.font = Font.systemFont(size);
-  ago.textColor = MUTED;
-  ago.lineLimit = 1;
-  // Holds the three of them at the left of the widget rather than spread across it.
+  // Holds the two of them at the left of the widget rather than spread across it.
   line.addSpacer();
 }
 
