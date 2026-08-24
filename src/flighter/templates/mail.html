@@ -21,6 +21,8 @@
       </svg>
     </figure>
     <h2>No email read yet</h2>
+    <p>Flag a flight confirmation email to process it.
+      {%- if not icloud_ready %} {{ m.requires_icloud() }}{% endif %}</p>
   </header>
 </section>
 {% else %}

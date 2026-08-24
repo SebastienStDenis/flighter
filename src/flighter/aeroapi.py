@@ -74,7 +74,8 @@ SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
 class BudgetStatus(BaseModel):
     spend_usd: Decimal
-    cap_usd: Decimal
+    # None is no limit, which is the one state the breaker can never be tripped in.
+    cap_usd: Decimal | None
     tripped: bool
     month: str
 
@@ -196,7 +197,7 @@ async def budget_status(session: AsyncSession) -> BudgetStatus:
     return BudgetStatus(
         spend_usd=spend,
         cap_usd=cap,
-        tripped=latched or spend >= cap,
+        tripped=latched or (cap is not None and spend >= cap),
         month=month,
     )
 
@@ -249,7 +250,9 @@ async def budget_refusal(
     the caller can commit the latch before it lets the exception out.
     """
     status = await budget_status(session)
-    if not status.tripped and status.spend_usd + estimate_cost(endpoint, 1) <= status.cap_usd:
+    if status.tripped:
+        pass
+    elif status.cap_usd is None or status.spend_usd + estimate_cost(endpoint, 1) <= status.cap_usd:
         return None
     just_tripped = not await _latched(session, status.month)
     if just_tripped:
@@ -345,6 +348,9 @@ class AeroAPIClient:
     async def _announce(self, status: BudgetStatus) -> None:
         """Tell the phone the breaker tripped. Best effort: the breaker has already done
         its job, and a push that fails must not turn a refusal into a crash."""
+        # A breaker only ever trips against a limit, so there is always one to name.
+        if status.cap_usd is None:
+            return
         try:
             await self._notifier.budget_tripped(status.spend_usd, status.cap_usd)
         except Exception:

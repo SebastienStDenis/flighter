@@ -273,10 +273,10 @@ def create_app(settings: Settings) -> FastAPI:
                 "past": past,
                 "tab": tab,
                 "budget": budget,
-                "raised_cap": budget.cap_usd + LIMIT_STEP,
-                # An empty board on a fresh deployment is not the same thing as an empty
-                # board on a working one, and only one of them is worth a signpost.
-                "set_up": settings.icloud_configured or settings.aeroapi_configured,
+                "raised_cap": None if budget.cap_usd is None else budget.cap_usd + LIMIT_STEP,
+                # An empty board says how to fill it, and importing from email is only
+                # one of the two ways while there is an account to read.
+                "icloud_ready": settings.icloud_configured,
             },
         )
 
@@ -291,17 +291,24 @@ def create_app(settings: Settings) -> FastAPI:
         """
         rows = await ingest.list_activity(session)
         imports = await views.build_mail_imports(session, rows)
-        return page(request, "mail.html", {"imports": imports})
+        return page(
+            request,
+            "mail.html",
+            {"imports": imports, "icloud_ready": settings.icloud_configured},
+        )
 
     @app.post("/limit")
     async def raise_limit(session: SessionDep) -> Response:
         """Raise the monthly limit and start polling again, from the board.
 
         The breaker latches so that a restart stays stopped, which means raising the cap
-        has to unlatch it too or nothing visibly happens.
+        has to unlatch it too or nothing visibly happens. There is nothing to raise when
+        there is no limit, and nothing to unlatch either: the breaker cannot have tripped.
         """
-        cap = prefs.current().aeroapi_monthly_cap_usd + LIMIT_STEP
-        await prefs.save(session, {"aeroapi_monthly_cap_usd": str(cap)})
+        current = prefs.current().aeroapi_monthly_cap_usd
+        if current is None:
+            return RedirectResponse("/", status_code=303)
+        await prefs.save(session, {"aeroapi_monthly_cap_usd": str(current + LIMIT_STEP)})
         await clear_breaker(session)
         return RedirectResponse("/", status_code=303)
 
@@ -600,7 +607,6 @@ def create_app(settings: Settings) -> FastAPI:
         request: Request,
         session: SessionDep,
         log_level: Annotated[str | None, Form()] = None,
-        aeroapi_monthly_cap_usd: Annotated[str | None, Form()] = None,
         imap_flag_colour: Annotated[str | None, Form()] = None,
         icloud_calendar_url: Annotated[str | None, Form()] = None,
         email_import_enabled: Annotated[str | None, Form()] = None,
@@ -622,7 +628,6 @@ def create_app(settings: Settings) -> FastAPI:
         entered |= {
             "public_base_url": _posted(form.get("public_base_url")),
             "log_level": log_level.upper() if log_level is not None else None,
-            "aeroapi_monthly_cap_usd": aeroapi_monthly_cap_usd,
             "imap_flag_colour": imap_flag_colour,
             "icloud_calendar_url": icloud_calendar_url,
             "email_import_enabled": email_import_enabled,
@@ -704,6 +709,26 @@ def create_app(settings: Settings) -> FastAPI:
         # The page asks over fetch so the answer can land beside the button that was
         # pressed. A browser with no script posts the form and gets the page back.
         wants_json = "application/json" in request.headers.get("accept", "")
+        # The limit is drawn in the FlightAware card and saved by its button, but it is a
+        # preference rather than a credential: it is read off the form, because an empty
+        # box means no limit here rather than "leave this one alone", and it is stored
+        # before the key is tried, because a key the service refuses says nothing about
+        # what somebody is willing to spend.
+        limit = _posted((await request.form()).get("aeroapi_monthly_cap_usd"))
+        if limit is not None:
+            try:
+                await prefs.save(session, {"aeroapi_monthly_cap_usd": limit.strip() or None})
+            except ValidationError:
+                refusal = "Monthly spend limit: a figure, or empty for no limit."
+                if wants_json:
+                    return JSONResponse({"error": refusal}, status_code=400)
+                context = await settings_context(request, session)
+                context["error"] = f"{found.name}: {refusal}"
+                context["tab"] = "connections"
+                return page(request, "settings.html", context, status_code=400)
+            # A limit that was in force and has been raised, or taken off altogether,
+            # leaves a breaker latched against a month it no longer applies to.
+            await clear_breaker(session)
         changed = _merged(found.fields, entered, forget=bool(forget))
         if not changed:
             return JSONResponse({"ok": True}) if wants_json else _saved("connections")

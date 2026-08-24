@@ -27,6 +27,8 @@ def test_the_worker_serves_the_server_first_and_the_last_copy_when_it_cannot() -
     assert copy == fresh
     assert "No connection" in after_a_day
     assert not outcome["kept"]
+    # Which tab the address names is not what makes it a different page.
+    assert "fresh" in outcome["byTab"]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the worker")

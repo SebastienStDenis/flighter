@@ -40,7 +40,8 @@ class Prefs(BaseModel):
 
     # Polling stops dead above this month-to-date estimate. The tier above Personal
     # carries a $100/month minimum, so the default leaves room under the $5 allowance.
-    aeroapi_monthly_cap_usd: Decimal = Decimal("4.00")
+    # Empty is a choice rather than a missing value: no limit at all.
+    aeroapi_monthly_cap_usd: Decimal | None = Decimal("4.00")
 
     # The two jobs the app runs against the mailbox and the calendar. Either can be put
     # down without taking the account off the app: off, the mailbox is not watched and

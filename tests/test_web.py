@@ -66,7 +66,6 @@ AIRPORTS = {
 SETTINGS_FORM = {
     "public_base_url": "https://flights.example.com",
     "log_level": "INFO",
-    "aeroapi_monthly_cap_usd": "4.00",
     "imap_flag_colour": "grey",
 }
 
@@ -1624,7 +1623,7 @@ def test_the_settings_page_shows_what_is_connected(client: TestClient) -> None:
 
 def test_the_widget_tab_says_whether_a_phone_has_fetched(client: TestClient) -> None:
     body = client.get("/settings").text
-    assert "No Widget has fetched flights yet" in body
+    assert "No widget has fetched flights yet" in body
     assert "Not connected" in body
 
     recent = datetime.now(UTC) - timedelta(minutes=4)
@@ -1632,7 +1631,7 @@ def test_the_widget_tab_says_whether_a_phone_has_fetched(client: TestClient) -> 
         KV(key=LAST_SEEN_KEY, value={"at": recent.strftime("%Y-%m-%dT%H:%M:%SZ")})
     ]
     body = client.get("/settings").text
-    assert "Last fetched by a Widget <strong>4m ago</strong>" in body
+    assert "Last fetched by a widget <strong>4m ago</strong>" in body
 
 
 def test_a_phone_not_heard_from_in_a_day_is_not_connected(client: TestClient) -> None:
@@ -1642,7 +1641,7 @@ def test_a_phone_not_heard_from_in_a_day_is_not_connected(client: TestClient) ->
         KV(key=LAST_SEEN_KEY, value={"at": long_ago.strftime("%Y-%m-%dT%H:%M:%SZ")})
     ]
     body = client.get("/settings").text
-    assert "Last fetched by a Widget <strong>3d ago</strong>" in body
+    assert "Last fetched by a widget <strong>3d ago</strong>" in body
     assert "Not connected" in body
 
 
@@ -2130,7 +2129,7 @@ def test_a_refused_preference_stays_on_the_tab_it_was_typed_on(client: TestClien
     """An error is worth nothing on a tab that is not showing the box it is about."""
     response = client.post(
         "/settings",
-        data=SETTINGS_FORM | {"tab": "preferences", "aeroapi_monthly_cap_usd": "four"},
+        data=SETTINGS_FORM | {"tab": "preferences", "imap_flag_colour": "chartreuse"},
     )
 
     assert response.status_code == 400
@@ -2150,14 +2149,63 @@ def test_a_card_that_posts_one_field_leaves_the_others_alone(client: TestClient)
     assert prefs.current().log_level == "WARNING"
 
 
-def test_a_typo_in_the_cap_is_refused_with_the_field_named(client: TestClient) -> None:
+def test_a_typo_in_the_limit_is_refused_beside_the_button_that_was_pressed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_secrets(monkeypatch)
+
     response = client.post(
-        "/settings", data=SETTINGS_FORM | {"aeroapi_monthly_cap_usd": "four dollars"}
+        "/settings/credentials",
+        data={"service": "flightaware", "aeroapi_monthly_cap_usd": "four dollars"},
+        headers={"Accept": "application/json"},
     )
+
     assert response.status_code == 400
-    assert "aeroapi monthly cap usd" in response.text
-    # And the typed-in value is still on the form rather than silently reverted.
-    assert "four dollars" in response.text
+    assert "Monthly spend limit" in response.json()["error"]
+    assert prefs.current().aeroapi_monthly_cap_usd == Decimal("4.00")
+
+
+def test_the_limit_is_saved_by_the_button_that_saves_the_key(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It is about this account and nothing else, so it is set where the key is."""
+    record_secrets(monkeypatch)
+
+    client.post(
+        "/settings/credentials",
+        data={"service": "flightaware", "aeroapi_monthly_cap_usd": "2.50"},
+    )
+
+    assert prefs.current().aeroapi_monthly_cap_usd == Decimal("2.50")
+
+
+def test_an_empty_limit_is_no_limit_and_lets_polling_start_again(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty is a choice here rather than a box left alone, and a deployment that has
+    just said "no limit" cannot be left stopped by a breaker latched against one."""
+    record_secrets(monkeypatch)
+    latch = KV(key=BREAKER_KEY, value={"month": "2026-08"})
+    client.session.rows["KV"] = [latch]  # type: ignore[attr-defined]
+
+    client.post(
+        "/settings/credentials",
+        data={"service": "flightaware", "aeroapi_monthly_cap_usd": ""},
+    )
+
+    assert prefs.current().aeroapi_monthly_cap_usd is None
+    assert client.session.deleted == [latch]  # type: ignore[attr-defined]
+
+
+def test_another_account_does_not_carry_the_limit_away(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A form that does not draw the box cannot be read as having emptied it."""
+    record_secrets(monkeypatch)
+
+    client.post("/settings/credentials", data={"service": "pushover", "pushover_token": "t"})
+
+    assert prefs.current().aeroapi_monthly_cap_usd == Decimal("4.00")
 
 
 def test_the_settings_page_offers_every_usable_flag_colour(client: TestClient) -> None:

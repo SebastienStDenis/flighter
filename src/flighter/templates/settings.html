@@ -77,7 +77,11 @@
   <span class="shrink-0 text-sm font-medium">{{ field.label }}</span>
   {% if field.value %}
   <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
-    {{- field.value -}}</span>
+    {{- field.prefix }}{{ field.value -}}</span>
+  {% elif field.empty %}
+  {# Not a secret: an empty one is a setting somebody chose rather than a value being
+     withheld, so it says which setting it is. #}
+  <span class="min-w-0 truncate text-sm text-muted-foreground">{{ field.empty }}</span>
   {% else %}
   {# Nothing to print: the value is on file and is never rendered back, so what stands
      in for it is a bar rather than a string pretending to be one. #}
@@ -93,9 +97,13 @@
 {% macro box(field, ready=False) %}
 <div role="group" class="field">
   <label for="{{ field.name }}">{{ field.label }}</label>
+  {# A box somebody may deliberately empty says so, because everywhere else on this
+     page an empty box is one that was left alone. #}
   <input type="{{ field.type|default('password') }}" id="{{ field.name }}"
          name="{{ field.name }}" class="font-mono"
          autocomplete="{{ field.autocomplete|default('off') }}"
+         {% if field.inputmode %}inputmode="{{ field.inputmode }}"{% endif %}
+         {% if field.empty %}data-allow-empty{% endif %}
          {% if field.help %}aria-describedby="{{ field.name }}-help"{% endif %}
          value="{{ field.value|default('') }}"
          placeholder="{{ field.hint or ('••••••••••' if ready and not field.value else '') }}">
@@ -189,42 +197,21 @@
     <div class="divide-y">
       {# First, and the only one the app cannot do without: with no feed there is
          nothing to put on the board. #}
-      {% call account('flightaware', 'FlightAware', flightaware_ready, [
+      {# What the feed may cost is not a credential, but it is about this account and
+         nothing else, so it is set where the key is and saved by the same button. #}
+      {{ account('flightaware', 'FlightAware', flightaware_ready, [
            {'name': 'aeroapi_key', 'label': 'AeroAPI key',
             'help': 'Register at <a href="https://www.flightaware.com/aeroapi/signup/personal"
                      target="_blank" rel="noopener">flightaware.com</a>.'},
-         ], 'Source for flight details', 'Required', 'stop') %}
-      {# What the account is allowed to cost belongs with the account, drawn the way
-         everything else on this tab is: what it is set to, and a button to change it. #}
-      <details class="reveal mt-4" data-manual-save data-prefix="$" data-save-scope>
-        <summary>
-          <div class="flex items-center justify-between gap-3 pe-7">
-            <span class="shrink-0 text-sm font-medium">Monthly spend limit</span>
-            <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
-              ${{- '%.2f'|format(budget.cap_usd) -}}</span>
-          </div>
-          <div class="mt-4 flex items-center gap-2">
-            <span class="btn" data-variant="outline" data-size="sm">Edit</span>
-          </div>
-        </summary>
-        <div role="group" class="field">
-          <label for="aeroapi_monthly_cap_usd">Monthly spend limit</label>
-          {# A figure half typed is a different limit, so this one commits on Save. It
-             belongs to the preferences form rather than to the account beside it: what
-             it sets is a preference, and the form that owns it is on another tab. #}
-          <input type="text" inputmode="decimal" class="input font-mono"
-                 id="aeroapi_monthly_cap_usd" name="aeroapi_monthly_cap_usd"
-                 form="settings-form"
-                 value="{{ posted['aeroapi_monthly_cap_usd'] }}">
-        </div>
-        <div class="mt-4 flex items-center gap-2">
-          <button class="btn" data-save data-size="sm" type="button"
-                  onclick="saveField(this)">Save</button>
-          <button class="btn" data-variant="ghost" data-size="sm" type="button"
-                  onclick="cancelField(this)">Cancel</button>
-        </div>
-      </details>
-      {% endcall %}
+           {'name': 'aeroapi_monthly_cap_usd', 'label': 'Monthly spend limit',
+            'type': 'text', 'inputmode': 'decimal', 'prefix': '$', 'empty': 'No limit',
+            'hint': 'No limit', 'value': posted['aeroapi_monthly_cap_usd'] or '',
+            'help': 'Updates stop for the rest of the month at this much spend. The
+                     first $5 a month is free on FlightAware\'s Personal tier and the
+                     tier above it starts at $100 a month, so a limit under $5 is what
+                     keeps a deployment inside the free allowance. Leave empty for no
+                     limit.'},
+         ], 'Source for flight details', 'Required', 'stop') }}
 
       {{ account('icloud', 'iCloud', icloud_ready, [
            {'name': 'icloud_email', 'label': 'Apple ID', 'type': 'email',
@@ -278,7 +265,7 @@
         {{ toggle('calendar_sync_enabled', 'Calendar sync', 'calendar-settings',
                   icloud_ready) }}
       </div>
-      <p>Synchronize flights to your calendar.</p>
+      <p>Synchronize flights to your iCloud calendar.</p>
     </header>
     {# Only a card whose switch is on folds away. With no account the switch is off
        because it has to be, and folding the card on that would take the sentence saying
@@ -311,7 +298,7 @@
         {{ toggle('email_import_enabled', 'Email import', 'import-settings',
                   icloud_ready) }}
       </div>
-      <p>Import flights from flagged emails.</p>
+      <p>Import flights from flagged iCloud emails.</p>
     </header>
     <section id="import-settings"
              {{- ' hidden' if icloud_ready and not posted['email_import_enabled'] }}>
@@ -363,7 +350,7 @@
         {{ toggle('notifications_enabled', 'Notifications', 'notification-settings',
                   pushover_ready) }}
       </div>
-      <p>Send notifications about flight updates and email import.</p>
+      <p>Send Pushover notifications about flight updates and email import.</p>
     </header>
     <section id="notification-settings"
              {{- ' hidden' if pushover_ready and not posted['notifications_enabled'] }}>
@@ -449,7 +436,7 @@
           </details>
           {# What it is for holds either way; where it came from is only worth saying
              while nobody has set one, so that is the sentence that comes and goes. #}
-          <p id="url-help" class="text-xs">Used for linking to Flighter from the Widget
+          <p id="url-help" class="text-xs">Used for linking to Flighter from the widget
             and calendar events.
             <span data-when="auto"{{ ' hidden' if manual }}>Set from the latest address
               used to access Flighter.</span></p>
@@ -553,9 +540,9 @@
           Regenerate token</button>
         <p class="min-w-0 flex-1 text-xs text-muted-foreground">
           {%- if widget_last_seen -%}
-          Last fetched by a Widget <strong>{{ widget_last_seen }}</strong>.
+          Last fetched by a widget <strong>{{ widget_last_seen }}</strong>.
           {%- else -%}
-          No Widget has fetched flights yet.
+          No widget has fetched flights yet.
           {%- endif -%}
         </p>
       </div>
@@ -594,6 +581,19 @@
 </div>
 
 <script>
+  // The tab is in the address, so a link to this page opens on the tab it was sent from,
+  // and a save that comes back through a redirect lands where it was made.
+  (function () {
+    var names = ["connections", "preferences", "widget"];
+    document.querySelectorAll('#settings-tabs [role="tab"]').forEach(function (tab, index) {
+      tab.addEventListener("click", function () {
+        var address = new URL(location.href);
+        address.searchParams.set("tab", names[index]);
+        history.replaceState(null, "", address);
+      });
+    });
+  })();
+
   // isSecureContext is the browser's own answer to the question the service worker asks,
   // so it is right about localhost and about whatever the address is really being served
   // through, in a way that reading the scheme is not.
@@ -658,7 +658,8 @@
     if (!save) return;
     var boxes = scope.querySelectorAll("input:not([type=hidden])");
     save.disabled = !Array.prototype.some.call(boxes, function (box) {
-      return box.value.trim() && box.value !== box.defaultValue;
+      if (box.value === box.defaultValue) return false;
+      return box.value.trim() || box.hasAttribute("data-allow-empty");
     });
   }
 

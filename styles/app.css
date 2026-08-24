@@ -471,6 +471,12 @@
     @apply hidden;
   }
 
+  /* Basecoat underlines a link in an empty state's sentence, which is right for a word
+     standing in for a page and wrong for a button that is already drawn as one. */
+  .empty > header > p a.btn {
+    @apply no-underline;
+  }
+
   /* A link that leaves the app says so. Not on a button: one that is already a target
      the size of a thumb is not asking to be told apart from the words around it. */
   a[target='_blank']:not(.btn)::after {
