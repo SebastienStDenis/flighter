@@ -4,7 +4,7 @@
 // to the server first, and the copy is served when the server cannot be reached. The
 // page itself says how old it is, so a gate number from an hour ago reads as one.
 
-const SHELL = "shell-v6";
+const SHELL = "shell-v7";
 const RELEASE = new URL(self.location.href || self.location.origin).searchParams.get("v") || "v1";
 const PAGES = `pages-${RELEASE}`;
 const AIRLINE_LOGOS = "airline-logos-v1";
@@ -17,7 +17,6 @@ const ASSETS = [
   "/static/fonts/manrope-latin-var.woff2",
   "/static/fonts/jetbrains-mono-latin-var.woff2",
   "/static/icon.svg",
-  "/static/favicon.svg",
   "/static/manifest.json",
 ];
 
