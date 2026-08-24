@@ -936,7 +936,7 @@ def test_the_footer_ages_itself_rather_than_stating_a_figure() -> None:
     source = script_source()
     line = source[source.index("function updatedLine(") : source.index("function footerSize(")]
     assert "applyTimerStyle()" in line
-    assert '"Updated"' in line and '"Cached"' in line
+    assert '"Last updated"' in line and '"Cached"' in line
     # Drawn from when the data landed, which is the fetch when there was one and the
     # cache file's own date when the server could not be reached.
     assert "result.fetchedAt" in line
@@ -991,6 +991,9 @@ def test_a_small_widget_holds_two_flights_of_four_lines() -> None:
     # wider gap is the one that separates two flights.
     assert drawn.count("widget.addSpacer(SMALL_GAP)") == 3
     assert "widget.addSpacer(SMALL_GAP * 2)" in drawn
+    # And nothing on those lines carries air of its own inside that distance: a pill with
+    # its own padding is a line held further from its neighbours than any other.
+    assert 'const pad = family === "small" ? 0 : 2;' in source
 
 
 def test_every_home_screen_size_says_how_old_what_it_is_showing_is() -> None:
@@ -1022,11 +1025,13 @@ def test_the_count_is_drawn_bigger_than_the_row_it_is_read_off() -> None:
         found = re.search(r"countdown\([a-z]+, flight, (\w+)[,)]", drawn)
         assert found, name
         sizes[name] = found.group(1)
-    assert sizes["renderSmall("] == "15"
-    # Sized against what the widget is holding rather than fixed: three flights on a
-    # medium widget is the one case where the rows need the height back.
-    assert sizes["renderList("] == "size"
-    assert 'const size = family === "large" ? 18 : flights.length < 3 ? 16 : 13;' in source
+    # One size on every home screen size. Sized against the room each widget had going
+    # spare, the figure came out smallest on the widget with the most room on it, and the
+    # same number was drawn three different ways across one home screen.
+    assert sizes["renderSmall("] == "COUNT_SIZE"
+    assert sizes["renderList("] == "COUNT_SIZE"
+    assert "const COUNT_SIZE = 18;" in source
+    assert "flights.length < 3" not in source
 
 
 def test_a_widget_reload_takes_the_servers_newer_script_quietly() -> None:
