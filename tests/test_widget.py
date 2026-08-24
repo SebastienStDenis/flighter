@@ -936,7 +936,7 @@ def test_the_footer_ages_itself_rather_than_stating_a_figure() -> None:
     source = script_source()
     line = source[source.index("function updatedLine(") : source.index("function footerSize(")]
     assert "applyTimerStyle()" in line
-    assert '"Updated"' in line and '"Cached"' in line and '"ago"' in line
+    assert '"Updated"' in line and '"Cached"' in line
     # Drawn from when the data landed, which is the fetch when there was one and the
     # cache file's own date when the server could not be reached.
     assert "result.fetchedAt" in line
@@ -963,15 +963,16 @@ def test_a_count_is_boxed_to_the_reading_it_is_about_to_show() -> None:
         assert "minimumScaleFactor = 0.95" in drawn, name
 
 
-def test_the_age_is_read_from_the_left_so_the_slack_falls_after_the_sentence() -> None:
-    """ "Updated 04:12 ago" is a sentence, and the room a timer does not use has to fall
-    somewhere in it. Against the right of its box it opens a gap after "Updated"; against
-    the left it opens one in front of "ago". Boxed to the reading, there is no gap in
-    either place, and what the box does not take falls past "ago" where the line ends."""
+def test_the_age_ends_its_line_with_nothing_drawn_after_it() -> None:
+    """The word leads and the figure ends the line. A timer is the one element on it
+    whose width is not known before it is drawn, so with nothing after it whatever its
+    box has over falls where the line stops rather than inside the phrase - which is what
+    reading "Updated 04:12" rather than "Updated 04:12 ago" is worth."""
     source = script_source()
     line = source[source.index("function updatedLine(") : source.index("function timerWidth(")]
     assert "leftAlignText()" in line
     assert "rightAlignText()" not in line
+    assert "addText" not in line[line.index("box.size") :]
 
 
 def test_a_small_widget_holds_two_flights_of_four_lines() -> None:
