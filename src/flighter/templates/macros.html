@@ -277,6 +277,39 @@
 {{- ('text-stop-soft' if line.late else 'text-ok-soft') if line.moved -}}
 {%- endmacro %}
 
+{# A number that flies twice that day, offered rather than guessed at. One row per leg,
+   and each posts the same two boxes back with the leg named, so what is saved is still
+   what the schedule says at the moment of saving. The dialog draws this when it is first
+   answered and the server draws it again into a page, so it is one piece. #}
+{% macro add_choices(form, candidates) %}
+{% if candidates %}
+<h2 class="mt-4 mb-2 text-xs font-semibold text-muted-foreground">
+  That number flies more than once</h2>
+<div class="item-group">
+  {% for candidate in candidates %}
+  <form method="post" action="/f/new">
+    <input type="hidden" name="flight_number" value="{{ form['flight_number'] }}">
+    <input type="hidden" name="departure_date" value="{{ form['departure_date'] }}">
+    <input type="hidden" name="leg" value="{{ candidate.leg }}">
+    <button class="item w-full text-left" data-variant="outline" data-size="sm" type="submit">
+      <section>
+        <h3>
+          <span class="font-mono">{{ candidate.flight_number }}</span>
+          <span class="font-mono font-normal text-muted-foreground">
+            {{ candidate.origin_iata }} &rarr; {{ candidate.dest_iata }}</span>
+        </h3>
+        <p class="font-mono">{{ candidate.departure_local.strftime('%H:%M') }}
+          at {{ candidate.origin_iata }}
+          {%- if candidate.operated %} &middot; {{ candidate.operated }}{% endif -%}
+        </p>
+      </section>
+    </button>
+  </form>
+  {% endfor %}
+</div>
+{% endif %}
+{% endmacro %}
+
 {# One change, on one line: what moved, from what to what, and when we were told. #}
 {% macro change(e, tz) %}
 <p class="flex flex-wrap items-baseline gap-x-2 text-sm">

@@ -1223,6 +1223,35 @@ def test_adding_a_flight_asks_for_a_number_and_a_day_and_nothing_else(
         assert asked not in page.text
 
 
+def test_the_box_that_adds_a_flight_is_on_every_page_and_opens_on_its_own_address(
+    client: TestClient,
+) -> None:
+    """The + is in every page's nav, so the box it opens is drawn under every page. It
+    is shut everywhere but the address the + falls back to with no script to open it."""
+    for path in ("/", "/mail", "/settings"):
+        drawn = client.get(path).text
+        assert 'id="add-flight"' in drawn, path
+        assert re.search(r'<dialog\s+id="add-flight"[^>]*\bopen\b', drawn) is None, path
+
+    standing = client.get("/f/new").text
+    assert re.search(r'<dialog\s+id="add-flight"[^>]*\bopen\b', standing)
+    # The board is still behind it: adding a flight is not a page of its own.
+    assert 'id="flight-tabs"' in standing
+
+
+def test_the_box_says_what_it_is_and_backing_out_of_it_is_the_x(client: TestClient) -> None:
+    """One heading, two labelled boxes, and Add. Nothing in it explains a boarding pass
+    to the person holding one, and the way out is the X every other dialog closes on."""
+    body = " ".join(client.get("/f/new").text.split())
+    assert '<h2 id="add-flight-title">Add Flight</h2>' in body
+    assert '<label for="departure_date">Departure Date</label>' in body
+    assert ">Add</button>" in body
+    assert 'aria-label="Close dialog"' in body
+    assert "Cancel" not in body
+    assert "as the ticket writes them" not in body
+    assert "read at the airport it leaves from" not in body
+
+
 def records_creation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Catch what would be booked, so the suite stays off the database."""
     written: dict[str, Any] = {}
@@ -1400,6 +1429,72 @@ def test_without_a_flightaware_key_the_page_says_why_and_points_at_settings(
     assert 'href="/settings"' in body
     assert 'name="flight_number"' not in body
     assert "By hand" not in body
+
+
+# The dialog asks over fetch, so what comes back is what it needs to answer with: a
+# flight to open, a refusal to draw beside the button, or the legs to choose between.
+ASKED_BY_THE_DIALOG = {"Accept": "application/json"}
+
+
+def test_the_flight_that_was_added_is_where_the_dialog_is_told_to_go(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fetch cannot be redirected onto a page, so the address is the answer."""
+    looks_up(monkeypatch, [CANDIDATE])
+    records_creation(monkeypatch)
+
+    answer = client.post(
+        "/f/new",
+        data={"flight_number": "AC871", "departure_date": "2026-09-12"},
+        headers=ASKED_BY_THE_DIALOG,
+    )
+
+    assert answer.status_code == 200
+    assert answer.json() == {"location": "/f/1"}
+
+
+def test_a_refusal_comes_back_as_the_line_that_goes_beside_the_button(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing is added, so the dialog stays open on what was typed with the reason in it
+    rather than being replaced by a page carrying the reason at the top."""
+    looks_up(monkeypatch, [])
+
+    answer = client.post(
+        "/f/new",
+        data={"flight_number": "AC871", "departure_date": "2026-09-12"},
+        headers=ASKED_BY_THE_DIALOG,
+    )
+
+    assert answer.status_code == 400
+    assert answer.json() == {"error": "No AC871 is scheduled to leave that day."}
+
+
+def test_a_number_that_flies_twice_comes_back_as_the_legs_to_choose_between(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Drawn by the server from the macro the page draws them with, so the choice inside
+    the dialog is the same rows as the choice on a page."""
+    evening = replace(CANDIDATE, departure_local=datetime(2026, 9, 12, 21, 15))
+    looks_up(monkeypatch, [CANDIDATE, evening])
+    written = records_creation(monkeypatch)
+
+    answer = client.post(
+        "/f/new",
+        data={"flight_number": "AC871", "departure_date": "2026-09-12"},
+        headers=ASKED_BY_THE_DIALOG,
+    )
+
+    assert answer.status_code == 200
+    assert answer.json()["error"] is None
+    choices = answer.json()["choices"]
+    assert "flies more than once" in choices
+    assert 'name="leg" value="YUL-LHR 18:40"' in choices
+    assert 'name="leg" value="YUL-LHR 21:15"' in choices
+    # The same two boxes go back with the leg named, and nothing about the flight does.
+    assert 'name="flight_number" value="AC871"' in choices
+    assert "origin_iata" not in choices
+    assert written == {}
 
 
 def test_a_flight_on_the_calendar_offers_a_way_into_the_calendar_app(
@@ -2323,7 +2418,9 @@ def test_neither_job_can_be_switched_on_without_the_account_it_runs_on(
         assert "checked" not in switch.group()
     assert body.count("Connect iCloud in") == 2
     assert body.count("Connect Pushover in") == 1
-    assert body.count('href="/settings?tab=connections"') == 3
+    # Three ways to Connections from the cards that are waiting on one, and a fourth in
+    # the add dialog every page carries, which has no feed to look a flight up in either.
+    assert body.count('href="/settings?tab=connections"') == 4
 
 
 def test_a_picker_with_nothing_stored_opens_on_the_first_calendar(

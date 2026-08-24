@@ -51,7 +51,8 @@ new again.
 **Adding a flight is two boxes.** The airline has already published where AC871 goes
 on the 12th, when it leaves, and who actually flies it, so the form asks for the number
 and the day, reads the rest out of FlightAware's schedule, and puts the flight on the
-board. Nothing about the flight itself is ever typed or edited: the airports and the
+board. Two boxes are not a page, so the **+** in the nav opens them over whatever is on
+screen and what it cannot resolve is said beside the button that asked. Nothing about the flight itself is ever typed or edited: the airports and the
 times are the airline's statement, and a number or a day that was wrong is fixed by
 deleting the flight and adding the right one. A number that flies twice that day is
 offered as a choice rather than guessed at. There is no form to type a whole flight
@@ -156,7 +157,7 @@ the flag stays on so the next pass tries again.
 
 Whatever was read out of the email is what lands on the board; there is no review step.
 If the flight it names is not yours, its page has **Stop tracking**, and the right one is
-two boxes away under **Add a flight**.
+two boxes away behind the **+** in the nav.
 
 Something that fails for a passing reason - the model, iCloud, the network - is tried
 again after two minutes and again after ten. If it still fails, your phone is told once

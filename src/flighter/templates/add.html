@@ -1,46 +1,51 @@
-{% extends "base.html" %}
-{% block title %}Add a flight{% endblock %}
-{% block content %}
+{% import "basecoat/dialog.html.jinja" as dlg %}
+{% import "macros.html" as m %}
 
-<h1 class="mb-4 text-xl font-semibold tracking-tight">Add a flight</h1>
+{# Adding a flight is two boxes over whatever is already on screen. It is a dialog rather
+   than a page because nothing about it is worth leaving the board for: the number and the
+   day are read off a boarding pass in a few seconds, and what comes back is the flight
+   itself. Backing out is the X, as it is in every other dialog here.
 
-{% if error %}
-<div class="alert mb-3" data-variant="destructive" role="alert">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="10"/>
-  </svg>
-  <strong>{{ error }}</strong>
-</div>
-{% endif %}
+   Drawn on every page, because the + that opens it is in every page's nav. A browser with
+   no script has no way to open one, so /f/new renders the board with this standing open
+   and posts the form the ordinary way. #}
 
-{% if configured %}
+{% set add_footer %}
+{# A refusal lands beside the button that was pressed rather than at the top of a page the
+   dialog is standing on, and the box stays open on what was typed. #}
+<p class="add-error min-w-0 flex-1 text-xs text-stop" role="alert">{{ add.error or '' }}</p>
+{# Live as it is drawn, and off a moment later on an empty box: a button the script turns
+   off is one a browser with no script can still press. #}
+<button class="btn" id="add-submit" type="submit" form="add-form">Add</button>
+{% endset %}
+
+{% call dlg.dialog(
+     id='add-flight',
+     title='Add Flight',
+     footer=add_footer if flightaware_configured() else none,
+     header_attrs={'class': 'pe-8'},
+     footer_attrs={'class': 'flex-row items-center justify-end gap-3'},
+     open=add.open) %}
+{% if flightaware_configured() %}
 <form id="add-form" method="post" action="/f/new">
-  <div class="card" data-size="sm">
-    <header><h3>The flight</h3></header>
-    <section>
-      <fieldset class="fieldset gap-4">
-        <div role="group" class="field">
-          <label for="flight_number">Flight number</label>
-          <input class="font-mono uppercase" type="text" id="flight_number" name="flight_number"
-                 maxlength="8" placeholder="AC871" required autocapitalize="characters"
-                 autocomplete="off" aria-describedby="number-help"
-                 value="{{ form['flight_number'] if 'flight_number' in form else '' }}">
-          <p id="number-help">The airline and the number, as the ticket writes them.</p>
-        </div>
-        <div role="group" class="field">
-          <label for="departure_date">Date</label>
-          <input type="date" id="departure_date" name="departure_date" required
-                 aria-describedby="date-help"
-                 value="{{ form['departure_date'] if 'departure_date' in form else '' }}">
-          <p id="date-help">The day it leaves, read at the airport it leaves from.</p>
-        </div>
-      </fieldset>
-    </section>
-  </div>
+  <fieldset class="fieldset gap-4">
+    <div role="group" class="field">
+      <label for="flight_number">Flight number</label>
+      <input class="font-mono uppercase" type="text" id="flight_number" name="flight_number"
+             maxlength="8" placeholder="AC871" required autocapitalize="characters"
+             autocomplete="off" value="{{ add.form['flight_number']|default('', true) }}">
+    </div>
+    <div role="group" class="field">
+      <label for="departure_date">Departure Date</label>
+      <input type="date" id="departure_date" name="departure_date" required
+             value="{{ add.form['departure_date']|default('', true) }}">
+    </div>
+  </fieldset>
 </form>
+{# Filled in by the answer to the first ask, on the rare day a number flies twice. #}
+<div id="add-choices">{{ m.add_choices(add.form, add.candidates) }}</div>
 {% else %}
-<div class="alert mb-3" role="status">
+<div class="alert" role="status">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="10"/>
@@ -54,39 +59,77 @@
   </section>
 </div>
 {% endif %}
+{% endcall %}
 
-{% if candidates %}
-<h2 class="mt-5 mb-2 text-xs font-semibold text-muted-foreground">
-  That number flies more than once</h2>
-<div class="item-group">
-  {% for candidate in candidates %}
-  <form method="post" action="/f/new">
-    <input type="hidden" name="flight_number" value="{{ form['flight_number'] }}">
-    <input type="hidden" name="departure_date" value="{{ form['departure_date'] }}">
-    <input type="hidden" name="leg" value="{{ candidate.leg }}">
-    <button class="item w-full text-left" data-variant="outline" data-size="sm" type="submit">
-      <section>
-        <h3>
-          <span class="font-mono">{{ candidate.flight_number }}</span>
-          <span class="font-mono font-normal text-muted-foreground">
-            {{ candidate.origin_iata }} &rarr; {{ candidate.dest_iata }}</span>
-        </h3>
-        <p class="font-mono">{{ candidate.departure_local.strftime('%H:%M') }}
-          at {{ candidate.origin_iata }}
-          {%- if candidate.operated %} &middot; {{ candidate.operated }}{% endif -%}
-        </p>
-      </section>
-    </button>
-  </form>
-  {% endfor %}
-</div>
-{% endif %}
+<script>
+  (function () {
+    var dialog = document.getElementById("add-flight");
+    var form = document.getElementById("add-form");
+    var submit = document.getElementById("add-submit");
+    var error = dialog.querySelector(".add-error");
+    var choices = document.getElementById("add-choices");
 
-{% if configured %}
-<div class="action-bar flex gap-2">
-  <button class="btn flex-1" data-size="lg" type="submit" form="add-form">Add flight</button>
-  <a class="btn" data-variant="ghost" data-size="lg" href="/">Cancel</a>
-</div>
-{% endif %}
+    // Rendered open so a browser with no script has the box at all. With one it is a
+    // modal over the board, and a dialog that is already open cannot be made one without
+    // being closed first.
+    if (dialog.open) {
+      dialog.close();
+      dialog.showModal();
+    }
 
-{% endblock %}
+    // What the + in the nav does instead of going anywhere. The address behind it is what
+    // a browser with no script follows, and it draws the same box open.
+    window.openAdd = function (event) {
+      event.preventDefault();
+      // Whatever the last attempt said is not about this one.
+      if (error) error.textContent = "";
+      if (choices) choices.innerHTML = "";
+      dialog.showModal();
+      if (form) form.elements.flight_number.focus();
+    };
+
+    if (!form) return;
+
+    // Add is off until the browser would take both boxes: a number and a day are what the
+    // lookup is made of, and there is nothing to ask FlightAware without either.
+    function showAddState(busy) {
+      submit.classList.toggle("is-busy", !!busy);
+      submit.disabled = !!busy || !form.checkValidity();
+    }
+    showAddState();
+    form.addEventListener("input", function () {
+      showAddState();
+    });
+
+    // The two boxes and each leg offered under them post the same two boxes to the same
+    // place, so one listener answers for the whole dialog. Asked over fetch because the
+    // answer is either a flight to open or a refusal to stand beside the button, and a
+    // reload of the page underneath is neither.
+    dialog.addEventListener("submit", async function (event) {
+      var posting = event.target;
+      event.preventDefault();
+      error.textContent = "";
+      showAddState(true);
+      try {
+        var response = await fetch(posting.action, {
+          method: "POST",
+          body: new FormData(posting),
+          headers: { Accept: "application/json" },
+        });
+        var answer = await response.json().catch(function () {
+          return {};
+        });
+        // Added: the flight's own page is the only place worth being now.
+        if (answer.location) {
+          location.assign(answer.location);
+          return;
+        }
+        choices.innerHTML = answer.choices || "";
+        error.textContent = answer.error || (answer.choices ? "" : "Could not add that flight.");
+      } catch (ignored) {
+        error.textContent = "Could not reach the server";
+      }
+      showAddState(false);
+    });
+  })();
+</script>
