@@ -5,9 +5,10 @@
 // Flight tracker widget.
 //
 // The server decides everything: which flights, in what order, what the pill says and
-// in which tone, the line under the heading, the words that end the row and the time
-// beside them, and where the airline's mark is to be fetched from. This file draws that
-// and nothing else.
+// in which tone, the line under the heading and which mark heads each place on it, the
+// words that end the row and the time beside them, and where the airline's mark is to be
+// fetched from. This file draws that and nothing else - and holds the three glyphs the
+// places are headed with, which are the one thing on the widget that is not a string.
 //
 // Nothing on it moves. iOS reloads a widget when it feels like it, about every quarter
 // of an hour, so any figure counted from the clock at draw time - how long until the
