@@ -1078,9 +1078,15 @@ def test_the_count_is_pulled_up_under_the_words_naming_it() -> None:
 
     The narrow sizes are not touched: there the words and the figure share a line, so
     there is no gap over the count to close.
+
+    Both edges of the box move, and each is held to the air behind it. Pulled up by more
+    than the air over the digits, the box is one they no longer fit in and WidgetKit draws
+    their tops off; the foot comes up by what the descenders a count has none of were
+    holding, which leaves the row exactly as tall as it stood before.
     """
     source = script_source()
-    assert "const COUNT_LIFT = 6;" in source
+    assert "const COUNT_LIFT = 4;" in source
+    assert "const COUNT_FOOT = 2;" in source
     wide = source[source.index("function renderList(") : source.index("function titleRow(")]
     assert "countdown(line, flight, COUNT_SIZE, 1, COUNT_LIFT)" in wide
     for name, ends in (
@@ -1091,7 +1097,17 @@ def test_the_count_is_pulled_up_under_the_words_naming_it() -> None:
     # Applied to the box the count is measured into rather than to the figure itself: a
     # line of text has no say in its own height, and the box is the only handle there is.
     timer = source[source.index("function countdown(") : source.index("function pill(")]
-    assert "box.setPadding(-lift, 0, 0, 0);" in timer
+    assert "box.setPadding(-lift, 0, -COUNT_FOOT, 0);" in timer
+    # Neither edge past its own air. The system fonts report an ascender of 0.967 of the
+    # point size against a cap height of 0.705, so a digit is drawn 0.262 of it below the
+    # top of its line and nothing at all is drawn in the 0.211 under the baseline.
+    box = {}
+    for name in ("COUNT_SIZE", "COUNT_LIFT", "COUNT_FOOT"):
+        found = re.search(rf"const {name} = (\d+);", source)
+        assert found, name
+        box[name] = int(found.group(1))
+    assert box["COUNT_LIFT"] < box["COUNT_SIZE"] * 0.262
+    assert box["COUNT_FOOT"] < box["COUNT_SIZE"] * 0.211
 
 
 def test_a_widget_reload_takes_the_servers_newer_script_quietly() -> None:

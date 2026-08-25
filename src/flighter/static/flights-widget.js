@@ -82,9 +82,14 @@ const COUNT_SIZE = 18;
 // How far the count is pulled up on the sizes that draw the words naming it on the row
 // above. A line of type carries air over its glyphs, and at half again the size of every
 // other word on the widget the count carries half again as much: left where it falls, it
-// puts most of a blank line between "Departs in" and the figure it belongs to. Rather
-// less than that air, so the digits tuck under their label rather than up against it.
-const COUNT_LIFT = 6;
+// puts most of a blank line between "Departs in" and the figure it belongs to. That air
+// is also all there is to take: at this size it is 4.7pt over the top of a digit, so 4
+// tucks the count under its label and leaves the digits their own tops.
+const COUNT_LIFT = 4;
+// And how much the foot of the box comes up with it, so the row it sits in is no taller
+// for the count having moved. A digit has no descender, so the 3.8pt a line of this size
+// keeps under the baseline is the one part of it nothing is drawn in.
+const COUNT_FOOT = 2;
 
 const family = config.widgetFamily || "medium";
 const isAccessory = family.startsWith("accessory");
@@ -482,8 +487,11 @@ function titleRow(container, flight, logos, size, withRoute, trailing) {
   row.spacing = 5;
   const logo = logos[flight.logo_url];
   if (logo) {
+    // Squared to the number's own point size rather than over it. A mark drawn taller
+    // than the line of type beside it sets the height of the heading itself, and the
+    // words held at the other end of that line then read as adrift in it.
     const mark = row.addImage(logo);
-    mark.imageSize = new Size(size + 3, size + 3);
+    mark.imageSize = new Size(size, size);
     mark.cornerRadius = 3;
   }
   const number = row.addText(flight.number);
@@ -540,11 +548,16 @@ function countdown(container, flight, size, slack = 1, lift = 0) {
   // the air a line of this size carries over its glyphs lands between the two of them
   // there, and reads as the figure having come adrift of its own label. Pulling the box
   // up by that air is the only way to take it back - WidgetKit gives a line of text no
-  // say in its own height - and it costs the row nothing, because the air is over the
-  // digits rather than between them and anything else.
+  // say in its own height.
+  //
+  // Both edges move, and each is held to the air behind it. A box pulled up by more than
+  // the air over the digits is a box they no longer fit in, and WidgetKit answers that by
+  // drawing their tops off rather than by letting them out of it; the foot comes up by
+  // what the descenders a count has none of were holding, which is what leaves the row
+  // exactly as tall as it stood before the count was moved at all.
   const box = container.addStack();
   if (lift) {
-    box.setPadding(-lift, 0, 0, 0);
+    box.setPadding(-lift, 0, -COUNT_FOOT, 0);
   }
   // Boxed to the width of the reading it is about to show. A timer is the one element
   // WidgetKit cannot measure before it draws it, so left to itself it is handed all the
