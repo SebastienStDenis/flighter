@@ -261,9 +261,9 @@
      several, and the whole of it is that it is one. It ends under the tail, so the
      aircraft sits on the line rather than after it. */
   .brand-name::after {
-    @apply pointer-events-none absolute left-0 h-px -translate-y-1/2 rounded-full
-      content-[''];
+    @apply pointer-events-none absolute h-px -translate-y-1/2 rounded-full content-[''];
     top: calc(50% + var(--cross));
+    left: -0.25em;
     right: -0.5em;
     z-index: -1;
     background-color: var(--mark);
@@ -274,15 +274,18 @@
     translate: 0 var(--cross);
   }
 
-  /* The leg still to come: grey and short, so the mark ends on the aircraft rather
-     than on the dash behind it. */
+  /* The leg still to come: two hairlines, grey and short, so the mark ends on the
+     aircraft rather than on the dashes behind it. */
   .brand-ahead {
     @apply h-[0.5px] w-[0.18em] rounded-full;
-    /* Closer than the flex gap sets, because the aircraft's nose stops short of the
-       edge of its own box and the gap is measured from the box. */
-    margin-left: -0.26em;
     background-color: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
     translate: 0 var(--cross);
+  }
+
+  /* The first sits closer than the flex gap sets, because the aircraft's nose stops
+     short of the edge of its own box and the gap is measured from the box. */
+  .brand-plane + .brand-ahead {
+    margin-left: -0.26em;
   }
 
   /* The route: two airports, one rule between them, and the aircraft at the fraction of
