@@ -594,13 +594,6 @@ def destination_iata(booking: Booking, snapshot: FlightSnapshot | None) -> str:
     return booking.dest_iata
 
 
-def duration(delta: timedelta) -> str:
-    """`45m`, `1h 20m`. Used for delays, so the caller carries the sign."""
-    minutes = int(abs(delta).total_seconds() // 60)
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
-
-
 def until(instant: datetime) -> str:
     """A countdown as the server can render it, before the page's own clock takes over.
 

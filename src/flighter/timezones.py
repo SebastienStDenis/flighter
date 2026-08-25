@@ -9,7 +9,7 @@ is always right.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import overload
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -89,6 +89,16 @@ def format_local(instant: datetime | None, tz: str, *, with_date: bool = False) 
     local = to_local(instant, tz)
     fmt = "%a %-d %b %H:%M %Z" if with_date else "%H:%M %Z"
     return local.strftime(fmt)
+
+
+def duration(delta: timedelta) -> str:
+    """`45m`, `1h 20m`, `2d 3h`. Used for delays, so the caller carries the sign."""
+    minutes = int(abs(delta).total_seconds() // 60)
+    days, rest = divmod(minutes, 1440)
+    hours, minutes = divmod(rest, 60)
+    if days:
+        return f"{days}d {hours}h"
+    return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
 
 
 def same_local_date(a: datetime, b: datetime, tz: str) -> bool:

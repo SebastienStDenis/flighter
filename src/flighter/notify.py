@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from datetime import timedelta
 from decimal import Decimal
 from typing import Final
 
@@ -13,7 +14,7 @@ from . import notices, prefs
 from .bookings import flight_label
 from .config import Settings
 from .models import Booking, EventKind, FlightEvent, IngestOutcome
-from .timezones import FALLBACK_TZ, format_local, parse_instant
+from .timezones import FALLBACK_TZ, duration, format_local, parse_instant
 
 log = logging.getLogger(__name__)
 
@@ -96,7 +97,7 @@ OPEN_APP = "Open flighter"
 
 # What each import outcome is called on the lock screen, and the line under it.
 _IMPORTED = {
-    IngestOutcome.CREATED: ("Flight added", "{flights}"),
+    IngestOutcome.CREATED: ("Flight added", "{flights}."),
     IngestOutcome.DUPLICATE: ("Already tracked", "{flights}. Nothing added."),
 }
 
@@ -105,22 +106,22 @@ class PushFailed(RuntimeError):
     """Pushover did not take the message; the text is its own reason where it gave one."""
 
 
-def _minutes_between(old: str | None, new: str | None) -> int | None:
+def _moved_by(old: str | None, new: str | None) -> timedelta | None:
     start, end = parse_instant(old), parse_instant(new)
     if start is None or end is None:
         return None
-    return round(abs((end - start).total_seconds()) / 60)
+    return abs(end - start)
 
 
 def _moved(event: FlightEvent, tz: str, *, verb: str, fallback: str, now: str) -> str:
-    """`Delayed 35 min. Departs 19:15 EDT`.
+    """`Delayed 35m. Departs 19:15 EDT`.
 
     Degrades to whichever half survives when a value is missing, because format_local
     renders a missing time as a dash and that is not a sentence.
     """
     when = parse_instant(event.new_value)
-    minutes = _minutes_between(event.old_value, event.new_value)
-    head = fallback if minutes is None else f"{verb} {minutes} min"
+    moved = _moved_by(event.old_value, event.new_value)
+    head = fallback if moved is None else f"{verb} {duration(moved)}"
     return head if when is None else f"{head}. {now} {format_local(when, tz)}"
 
 
@@ -130,7 +131,11 @@ def _at(verb: str, value: str | None, tz: str) -> str:
 
 
 def event_message(event: FlightEvent, *, origin_tz: str, dest_tz: str) -> str:
-    """One plain line a person can act on without opening anything."""
+    """One plain line a person can act on without opening anything, ended as a sentence."""
+    return f"{_event_line(event, origin_tz=origin_tz, dest_tz=dest_tz)}."
+
+
+def _event_line(event: FlightEvent, *, origin_tz: str, dest_tz: str) -> str:
     kind, old, new = event.kind, event.old_value, event.new_value
 
     if kind == EventKind.GATE_ASSIGNED:
@@ -283,7 +288,7 @@ class Notifier:
 
     async def check(self) -> None:
         """A real push, quietly, because a token that is never spent proves nothing."""
-        await self._send(title="flighter", message="Test notification", priority=PRIORITY_QUIET)
+        await self._send(title="flighter", message="Test notification.", priority=PRIORITY_QUIET)
 
     @staticmethod
     def _flight_url(bookings: Sequence[Booking]) -> str:

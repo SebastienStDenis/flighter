@@ -35,6 +35,7 @@ from .db import get_session, session_scope
 from .mail import FLAG_COLOURS, IDLE_CYCLE_SECONDS, message_url
 from .models import BookingSource, BookingStatus, FlightEvent
 from .notify import NOTIFICATION_CHOICES, NOTIFICATION_FLAGS
+from .timezones import duration
 from .views import FlightView, build_views
 from .widget import connect_url, last_seen, script_source
 from .widget import router as widget_router
@@ -210,7 +211,7 @@ def create_app(settings: Settings) -> FastAPI:
         clock=views.clock,
         dash=views.dash,
         day=views.day,
-        duration=views.duration,
+        duration=duration,
         email_url=message_url,
         logo_url=views.logo_url,
         build_id=_build_id(),

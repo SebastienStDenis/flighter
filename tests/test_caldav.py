@@ -109,7 +109,7 @@ def test_normal_flight() -> None:
     )
     text = body.to_ical().decode()
 
-    assert "SUMMARY:DL1234 JFK -> LAX" in text
+    assert "SUMMARY:DL1234 JFK → LAX" in text
     assert "LOCATION:John F Kennedy International Airport\\, New York\\, US" in text
     assert "DTSTART;TZID=America/New_York:20260912T150000" in text
     assert "DTEND;TZID=America/Los_Angeles:20260912T152000" in text
@@ -130,8 +130,8 @@ def test_a_friend_calendar_event_names_the_friend() -> None:
     body = event_body(booking(friend_name="Sam"), None, AIRPORTS, base_url=BASE_URL)
     [event] = body.walk("VEVENT")
     [alarm] = body.walk("VALARM")
-    assert str(event["SUMMARY"]) == "Sam - DL1234 JFK -> LAX"
-    assert str(alarm["DESCRIPTION"]) == "Sam - DL1234 JFK -> LAX"
+    assert str(event["SUMMARY"]) == "Sam - DL1234 JFK → LAX"
+    assert str(alarm["DESCRIPTION"]) == "Sam - DL1234 JFK → LAX"
 
 
 def test_a_flight_from_an_email_carries_a_link_to_it() -> None:
@@ -148,7 +148,7 @@ def test_a_flight_from_an_email_carries_a_link_to_it() -> None:
 def test_the_entry_is_the_ticket_and_says_who_flies_it() -> None:
     text = ical_for(operating_carrier="BA", operating_number="112")
 
-    assert "SUMMARY:DL1234 JFK -> LAX" in text
+    assert "SUMMARY:DL1234 JFK → LAX" in text
     assert "Operated as BA112" in text
 
 
@@ -170,7 +170,7 @@ def test_a_flight_with_no_arrival_time_still_gets_an_end() -> None:
 def test_cancelled_flight_is_struck_through_never_deleted() -> None:
     body = event_body(booking(), snapshot(cancelled=True), AIRPORTS, base_url=BASE_URL)
     text = body.to_ical().decode()
-    assert "SUMMARY:DL1234 JFK -> LAX (cancelled)" in text
+    assert "SUMMARY:DL1234 JFK → LAX (cancelled)" in text
     assert "STATUS:CANCELLED" in text
     # Still a full event: the trip stays visible where it was planned.
     assert "DTSTART;TZID=America/New_York:20260912T150000" in text

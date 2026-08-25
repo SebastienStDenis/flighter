@@ -51,7 +51,7 @@ def test_overnight_is_stored_as_stated() -> None:
 
 
 def test_date_line_arrival_is_not_pushed_to_the_next_day() -> None:
-    """NRT 17:00 -> LAX 10:30 the same local date is correct as given."""
+    """NRT 17:00 → LAX 10:30 the same local date is correct as given."""
     departure, arrival = to_booking_times(
         datetime(2026, 3, 15, 17, 0), NRT, datetime(2026, 3, 15, 10, 30), LAX
     )
@@ -90,7 +90,7 @@ def test_the_label_is_the_ticket_not_the_operator() -> None:
         origin_iata="LHR",
         dest_iata="JFK",
     )
-    assert flight_label(booking) == "AA6141 LHR -> JFK"
+    assert flight_label(booking) == "AA6141 LHR → JFK"
 
 
 def test_the_note_names_the_operator_only_when_there_is_one() -> None:

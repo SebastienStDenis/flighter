@@ -3,7 +3,7 @@ when Pushover says it took it."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from urllib.parse import parse_qs
 
@@ -94,32 +94,41 @@ async def test_title_and_url_name_the_flight(settings: Settings) -> None:
     sent = (await push(settings, event(EventKind.GATE_ASSIGNED, new="B22"))).only
 
     # The title is the flight and nothing else: no glyph in front of it to decode.
-    assert sent["title"] == "DL1234 JFK -> LAX"
+    assert sent["title"] == "DL1234 JFK → LAX"
     assert sent["url"] == "https://flights.example.com/f/7"
     assert sent["url_title"] == "Open flight"
-    assert sent["message"] == "Gate B22"
+    assert sent["message"] == "Gate B22."
 
 
 @pytest.mark.parametrize(
     ("flight_event", "priority", "message"),
     [
-        (event(EventKind.GATE_ASSIGNED, new="B22"), "0", "Gate B22"),
-        (event(EventKind.GATE_CHANGED, old="B22", new="C14"), "1", "Gate changed from B22 to C14"),
+        (event(EventKind.GATE_ASSIGNED, new="B22"), "0", "Gate B22."),
+        (event(EventKind.GATE_CHANGED, old="B22", new="C14"), "1", "Gate changed from B22 to C14."),
         (
             event(EventKind.DEPARTURE_DELAYED, old=DEPARTS.isoformat(), new=DELAYED.isoformat()),
             "0",
-            "Delayed 35 min. Departs 19:35 EDT",
+            "Delayed 35m. Departs 19:35 EDT.",
         ),
-        (event(EventKind.DEPARTED, new=DELAYED.isoformat()), "0", "Departed 19:35 EDT"),
-        (event(EventKind.LANDED, new=DELAYED.isoformat()), "0", "Landed 16:35 PDT"),
+        (
+            event(
+                EventKind.DEPARTURE_DELAYED,
+                old=DEPARTS.isoformat(),
+                new=(DEPARTS + timedelta(days=1, hours=2, minutes=5)).isoformat(),
+            ),
+            "0",
+            "Delayed 1d 2h. Departs 21:05 EDT.",
+        ),
+        (event(EventKind.DEPARTED, new=DELAYED.isoformat()), "0", "Departed 19:35 EDT."),
+        (event(EventKind.LANDED, new=DELAYED.isoformat()), "0", "Landed 16:35 PDT."),
         (
             event(EventKind.BAGGAGE_CLAIM_ASSIGNED, new="carousel 3"),
             "0",
-            "Baggage claim carousel 3",
+            "Baggage claim carousel 3.",
         ),
-        (event(EventKind.CANCELLED, old="false", new="true"), "1", "Cancelled"),
-        (event(EventKind.DIVERTED, old="false", new="true"), "1", "Diverted"),
-        (event(EventKind.DIVERTED, new="YOW"), "1", "Diverted to YOW"),
+        (event(EventKind.CANCELLED, old="false", new="true"), "1", "Cancelled."),
+        (event(EventKind.DIVERTED, old="false", new="true"), "1", "Diverted."),
+        (event(EventKind.DIVERTED, new="YOW"), "1", "Diverted to YOW."),
     ],
 )
 async def test_message_and_priority_per_kind(
@@ -128,8 +137,8 @@ async def test_message_and_priority_per_kind(
     sent = (await push(settings, flight_event)).only
     assert sent["message"] == message
     assert sent["priority"] == priority
-    # Plain text on the lock screen: no symbols, no emoji, nothing to decode.
-    assert sent["title"].isascii()
+    # Plain text on the lock screen: no symbols, no emoji, nothing to decode. The
+    # route arrow in the title is the one glyph, and it reads as itself.
     assert sent["message"].isascii()
 
 
@@ -163,7 +172,7 @@ async def test_friend_notifications_follow_the_preference(
         prefs.current().model_copy(update={"notify_for_friend_flights": True}),
     )
     await notifier.flight_event(friend, changed, origin_tz=ORIGIN_TZ, dest_tz=DEST_TZ)
-    assert recorder.only["message"] == "Gate B22"
+    assert recorder.only["message"] == "Gate B22."
 
 
 @pytest.mark.parametrize(
@@ -293,7 +302,7 @@ async def test_an_import_links_to_the_flight_page(settings: Settings) -> None:
     sent = await imported(settings, "created")
 
     assert sent["title"] == "Flight added"
-    assert sent["message"] == "DL1234 JFK -> LAX"
+    assert sent["message"] == "DL1234 JFK → LAX."
     assert sent["url"] == "https://flights.example.com/f/7"
     assert sent["priority"] == "0"
 
@@ -301,7 +310,7 @@ async def test_an_import_links_to_the_flight_page(settings: Settings) -> None:
 async def test_a_duplicate_import_says_nothing_was_added(settings: Settings) -> None:
     sent = await imported(settings, "duplicate")
     assert sent["title"] == "Already tracked"
-    assert "DL1234 JFK -> LAX" in sent["message"]
+    assert "DL1234 JFK → LAX" in sent["message"]
 
 
 async def test_a_failed_import_links_to_the_problems_page(settings: Settings) -> None:

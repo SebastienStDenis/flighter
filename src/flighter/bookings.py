@@ -30,10 +30,10 @@ _DEDUPE_WINDOW = timedelta(days=1)
 
 
 def flight_label(booking: Booking) -> str:
-    """`DL1234 JFK -> LAX`, the one string that identifies a flight to a human."""
+    """`DL1234 JFK → LAX`, the one string that identifies a flight to a human."""
     return (
         f"{booking.marketing_carrier}{booking.marketing_number} "
-        f"{booking.origin_iata} -> {booking.dest_iata}"
+        f"{booking.origin_iata} → {booking.dest_iata}"
     )
 
 
