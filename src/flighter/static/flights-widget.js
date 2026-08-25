@@ -58,19 +58,21 @@ const TONES = {
 // What the pill lets through behind the word, as the page mixes it into its card.
 const TINT_ALPHA = 0.14;
 
-// A friend's mark: the hue the server took from their name, at the saturation and the
-// lightness styles/app.css reads it at where it has to be seen rather than sat behind -
-// the strength the page draws their initial in - light scheme then dark. Mixed here
-// rather than rendered to a colour up there with the rest of the palette, because a hue
-// that belongs to a name is not known until the name is.
-const FRIEND_MARK = [
+// A friend's disc and the initial on it, as styles/app.css mixes them: the hue is the
+// one the server took from their name, and these are the saturation, the lightness and
+// the strength the page reads it at, light scheme then dark. Mixed here rather than
+// rendered to a colour up here like the rest of the palette, because a hue that belongs
+// to a name is not known until the name is.
+const FRIEND_DISC = [
+  { s: 55, l: 50, a: 0.12 },
+  { s: 45, l: 65, a: 0.16 },
+];
+const FRIEND_INITIAL = [
   { s: 35, l: 38, a: 1 },
   { s: 42, l: 78, a: 1 },
 ];
-// How much of the heading's own height the mark takes. A dot rather than a disc: there
-// is no letter in it to leave room for, and a filled circle as tall as the type beside
-// it is a hole in the line rather than a mark on it.
-const FRIEND_MARK_SCALE = 0.5;
+// How much of the disc the letter on it takes.
+const FRIEND_INITIAL_SCALE = 0.6;
 
 // The one repair for a missing or rejected token, and the same sentence for both.
 const RECONNECT_TEXT = "Open the settings page on this phone and tap Connect.";
@@ -529,41 +531,42 @@ function titleRow(container, flight, logos) {
   return row;
 }
 
-// Whose flight it is, drawn in the colour the board draws them in: the hue the server
-// took from their name, so one person is one colour on the phone and on the page both.
+// Whose flight it is, drawn the way the board draws it: their initial in a disc tinted
+// by the hue the server takes from their name, so one person is one colour on the phone
+// and on the page both.
 //
-// A colour and nothing written on it. The board's disc is the height of a line of body
-// text and holds an initial comfortably; the same disc on a widget row is fourteen
-// points across, which draws the letter in it at eight - a smudge rather than a name,
-// and a smudge on a mark reads as a glyph that failed rather than as a person. The hue
-// is what tells one friend from another at either size, so here it is the whole mark.
+// The disc is a stack with a size on it, and a stack in a widget carries padding of its
+// own unless it is told not to. Fourteen points across with the system's own insets
+// inside it leaves a couple of points for a letter, and a letter with nowhere to be
+// drawn is not drawn small - it is dropped, and what is left is a disc with nothing on
+// it. So the padding goes to nothing, the spacing with it, and the letter has the whole
+// of the disc to stand in.
+//
+// It is centred on both axes. `centerAlignContent` is the stack's answer for the one
+// axis it does not lay out along; the other one takes a spacer either side, and the
+// letter shrinks rather than vanishing if a wide glyph ever asks for more than the disc.
 function friendMark(container, flight) {
-  if (flight.friend_hue === null || flight.friend_hue === undefined) {
+  if (!flight.friend_initial) {
     return null;
   }
-  const side = Math.round(TYPE.heading * FRIEND_MARK_SCALE);
-  const dot = container.addStack();
-  dot.size = new Size(side, side);
-  dot.cornerRadius = side / 2;
-  dot.backgroundColor = friendColor(flight.friend_hue, FRIEND_MARK);
-  return dot;
+  const side = TYPE.heading;
+  const disc = container.addStack();
+  disc.size = new Size(side, side);
+  disc.cornerRadius = side / 2;
+  disc.backgroundColor = friendColor(flight.friend_hue, FRIEND_DISC);
+  disc.centerAlignContent();
+  disc.setPadding(0, 0, 0, 0);
+  disc.spacing = 0;
+  disc.addSpacer();
+  const initial = disc.addText(flight.friend_initial);
+  initial.font = Font.semiboldSystemFont(Math.round(side * FRIEND_INITIAL_SCALE));
+  initial.textColor = friendColor(flight.friend_hue, FRIEND_INITIAL);
+  initial.lineLimit = 1;
+  initial.minimumScaleFactor = 0.6;
+  disc.addSpacer();
+  return disc;
 }
 
-// Where to be, at the near end of the second line: the terminal and the gate behind a
-// plane pointing the way this flight is - climbing while the walk is towards it, coming
-// down once the walk is at the other end - and the seat behind a seat.
-//
-// The marks stand where the words TERM, GATE and SEAT used to. On a line with room for
-// figures or for labels and not for both, the labels were most of it, and they were
-// spelling out the one thing on the widget nobody has to be told: which of three
-// figures is the gate. What the mark does that a word did not is say which end of the
-// flight the row is naming, which is the half of it a reader can get wrong.
-//
-// A place the airport has not named is left out rather than dashed. It was dashed to
-// hold the line still while gates are published; but a dash is an empty box, and two of
-// them on a row that has three boxes at most is a line that says nothing at all in the
-// space where it says everything. What holds the line still now is the mark, which is
-// there from the first draw whether one figure has arrived behind it or both.
 function hasDetail(flight) {
   return (flight.detail || []).length > 0;
 }

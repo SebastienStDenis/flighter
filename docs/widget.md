@@ -70,10 +70,10 @@ mark, the number and the route - and ends with the board's status pill. The seco
 carries where to be, and ends with what the flight is next due to do and the time it is
 due.
 
-Whose it is, is a dot in the colour the board gives that person, with no initial on it:
-the mark is half the height of the number beside it, which would draw a letter at eight
-points, where it is a smudge that reads as a glyph which failed to load rather than as a
-name. The colour is what tells one friend from another on the page as well.
+Whose it is, is their initial in a disc in the colour the board gives that person, the
+same disc the page draws. The disc is squared to the number beside it, so the heading is
+the height of its own type; the letter on it is drawn at three fifths of that, and shrinks
+rather than disappearing if a glyph ever asks for more room than the disc has.
 
 The row is the board's card, narrowed. The pill is the card's pill, the places are the
 card's places and the end of the row is the card's footer, each drawn on exactly the
@@ -91,8 +91,8 @@ flight to watch:
 | While it is | The line reads |
 | --- | --- |
 | Days off, with nothing to watch yet | `Fri 18 Sep 18:00 EDT` |
-| Still at the gate it leaves from | *plane climbing* `T4 B22`, *seat* `14A` |
-| Pushed back, in the air, or parked | *seat* `14A`, *plane landing* `12 TB` |
+| Still at the gate it leaves from | *plane climbing* `T 4 B22`, *seat* `14A` |
+| Pushed back, in the air, or parked | *seat* `14A`, *plane landing* `12 T B` |
 | Called off, or given up on | nothing; the pill has said it |
 
 The marks are `plane-takeoff`, `plane-landing` and `armchair` from Lucide, which is the
@@ -102,13 +102,13 @@ has room for figures or for labels and not for both, and the labels were most of
 spelling out the one thing nobody has to be told: which of three figures is the gate.
 What a mark says instead is which end of the flight the row is naming, which is the half
 of it a reader can get wrong. They are carried in the script rather than fetched from the
-server, because `T4 B22` with no plane in front of it is a line read wrong rather than
+server, because `T 4 B22` with no plane in front of it is a line read wrong rather than
 read short - unlike an airline's mark, which is decoration the number beside it has
 already covered.
 
 The terminal and the gate are in the order a boarding pass prints them, and the terminal
-keeps the `T` that pass prints, because a bare `4` beside a bare `B22` is two figures with
-nothing to tell them apart. A place the airport has not named is left out rather than
+keeps the `T` that pass prints and keeps it off the figure the way the pass sets it,
+because a bare `4` beside a bare `B22` is two figures with nothing to tell them apart. A place the airport has not named is left out rather than
 dashed: a dash is an empty box, and a row with three boxes at most and two of them empty
 says nothing in the space where it says everything. What holds the line still while gates
 are published is the mark, which is drawn as soon as one figure lands behind it. Once the

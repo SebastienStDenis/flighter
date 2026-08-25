@@ -109,6 +109,7 @@ def test_upcoming_flight(settings: Settings) -> None:
     assert flight == {
         "detail_url": "https://flights.example.com/f/42",
         "phase": "upcoming",
+        "friend_initial": None,
         "friend_hue": None,
         "logo_url": "https://www.gstatic.com/flights/airline_logos/70px/DL.png",
         "number": "DL1234",
@@ -122,32 +123,21 @@ def test_upcoming_flight(settings: Settings) -> None:
 
 
 def test_a_friends_flight_is_drawn_in_their_own_colour(settings: Settings) -> None:
-    """The board gives a friend a disc tinted by a hue taken from their name, and the
-    widget marks their row in the same hue, so one person is one colour on the phone and
-    on the page both - which means the hue is worked out in one place.
-
-    The colour is the whole mark. The board's disc is a line of body text tall and holds
-    an initial comfortably; the row's is half the height of a flight number, which draws
-    a letter at eight points - a smudge that reads as a glyph which failed to load
-    rather than as a name. So no initial is sent, because none is drawn.
-    """
+    """The board gives a friend a disc with their initial in it, tinted by a hue taken
+    from their name. The widget draws the same disc, so one person is one colour on the
+    phone and on the page both - which means the hue is worked out in one place."""
     theirs = booking(friend_name="beatrice")
     flight = payload([(theirs, None)], settings)["flights"][0]
+    assert flight["friend_initial"] == "B"
     assert flight["friend_hue"] == views.friend_hue("beatrice")
-    assert "friend_initial" not in flight
 
 
-def test_the_script_mixes_a_friends_hue_the_way_the_page_does(settings: Settings) -> None:
-    """A hue is not a colour until something reads it at a saturation and a lightness.
-
-    The mark has to be seen rather than sat behind, so it is read at the strength the
-    page draws a friend's initial in - not at the strength it tints the disc under one,
-    which is a backdrop and disappears with nothing on top of it.
-    """
+def test_the_script_draws_the_disc_the_way_the_page_mixes_it(settings: Settings) -> None:
+    """A hue is not a colour until something reads it at a saturation and a lightness,
+    and the page reads it at four of them. The script carries the same four."""
     source = script_source()
+    assert "{ s: 55, l: 50, a: 0.12 }" in source
     assert "{ s: 35, l: 38, a: 1 }" in source
-    assert "{ s: 42, l: 78, a: 1 }" in source
-    assert "0.12" not in source
 
 
 def test_the_day_it_leaves_is_read_at_the_origin(settings: Settings) -> None:
@@ -206,7 +196,7 @@ def test_day_of_shows_the_terminal_the_gate_and_the_seat(settings: Settings) -> 
     # The end being walked to behind a plane climbing, then the seat behind a seat. The
     # terminal keeps the T a boarding pass prints in front of it, because a bare 4 beside
     # a bare B22 is two figures with nothing to tell them apart.
-    assert detail(flight) == [("takeoff", "T4 B22"), ("seat", "14A")]
+    assert detail(flight) == [("takeoff", "T 4 B22"), ("seat", "14A")]
     assert target(flight) == ("Departs", "14:40")
     assert flight["status_label"] == "On time"
     assert flight["status_tone"] == "ok"
@@ -263,7 +253,7 @@ def test_pushback_turns_the_line_round_to_the_far_end(settings: Settings) -> Non
     assert flight["phase"] == "taxiing"
     assert flight["status_label"] == "Taxiing"
     assert flight["status_tone"] == "live"
-    assert detail(flight) == [("landing", "12 TB")]
+    assert detail(flight) == [("landing", "12 T B")]
     assert target(flight) == ("Lands", "18:15")
 
 
@@ -282,7 +272,7 @@ def test_airborne_states_the_landing_and_reads_the_line_backwards(settings: Sett
     assert flight["phase"] == "airborne"
     # Where they are, then where they are going: the seat first because that is where
     # the line is being read from, and the gate and the terminal at the far end after it.
-    assert detail(flight) == [("seat", "32A"), ("landing", "12 TB")]
+    assert detail(flight) == [("seat", "32A"), ("landing", "12 T B")]
     assert target(flight) == ("Lands", "22:40")
     assert flight["status_label"] == "Arriving late"
     assert flight["status_tone"] == "warn"
@@ -303,7 +293,7 @@ def test_landed_states_when_it_is_at_the_gate(settings: Settings) -> None:
     assert flight["phase"] == "landed"
     assert flight["status_label"] == "Landed"
     assert flight["status_tone"] == "ok"
-    assert detail(flight) == [("landing", "12 TB")]
+    assert detail(flight) == [("landing", "12 T B")]
     assert target(flight) == ("At the gate", "22:15")
 
 
@@ -323,7 +313,7 @@ def test_at_the_gate_the_belt_takes_the_end_of_the_row(settings: Settings) -> No
     assert target(flight) == ("Baggage claim", "7")
     # The card goes on drawing where the flight came in while it draws the belt, and so
     # does this: the terminal on that line is the one the belt is in.
-    assert detail(flight) == [("landing", "12 TB")]
+    assert detail(flight) == [("landing", "12 T B")]
 
 
 def test_a_belt_nobody_has_named_yet_is_dashed(settings: Settings) -> None:
@@ -821,6 +811,7 @@ def test_the_row_is_words_and_clock_faces_and_nothing_else(settings: Settings) -
     assert set(flight) == {
         "detail_url",
         "phase",
+        "friend_initial",
         "friend_hue",
         "logo_url",
         "number",
@@ -1159,22 +1150,30 @@ def test_a_small_widget_holds_two_flights_of_three_lines() -> None:
     assert 'const pad = family === "small" ? 0 : 2;' in source
 
 
-def test_a_friends_mark_is_a_dot_in_their_colour() -> None:
-    """A colour and nothing written on it, at half the height of the number beside it.
+def test_a_friends_disc_has_room_on_it_for_the_letter() -> None:
+    """The disc is squared to the number beside it, and the letter is drawn on it.
 
-    A round mark as tall as the type it sits in front of is a hole in the line rather
-    than a mark on it, and there is no letter inside this one to leave room for. Nothing
-    is drawn at all for a flight that is the reader's own, and a hue of zero is a hue:
-    the mark goes on the row when the server sent one, not when it sent a true one.
+    A stack in a widget carries the system's own insets unless it is told not to, and a
+    disc the height of a flight number has nothing left inside those insets to draw a
+    letter in - so the letter was dropped rather than drawn small, and what was left was
+    a disc with nothing on it. Zeroing the padding and the spacing is what puts it back.
+
+    Centred on both axes: `centerAlignContent` is the stack's answer for the one axis it
+    does not lay out along, and the other takes a spacer either side or the letter sits
+    against the wall of its own disc.
     """
     source = script_source()
     drawn = source[source.index("function friendMark(") : source.index("function hasDetail(")]
-    assert "flight.friend_hue === null || flight.friend_hue === undefined" in drawn
-    assert "const side = Math.round(TYPE.heading * FRIEND_MARK_SCALE);" in drawn
-    assert "dot.size = new Size(side, side);" in drawn
-    assert "dot.cornerRadius = side / 2;" in drawn
-    assert "friendColor(flight.friend_hue, FRIEND_MARK)" in drawn
-    assert "addText" not in drawn
+    assert "const side = TYPE.heading;" in drawn
+    assert "disc.size = new Size(side, side);" in drawn
+    assert "disc.cornerRadius = side / 2;" in drawn
+    assert "disc.setPadding(0, 0, 0, 0);" in drawn
+    assert "disc.spacing = 0;" in drawn
+    assert drawn.count("disc.addSpacer();") == 2
+    assert "disc.centerAlignContent();" in drawn
+    # And a glyph wider than the disc shrinks to fit rather than being dropped, which is
+    # the same failure the padding was causing by another route.
+    assert "initial.minimumScaleFactor" in drawn
 
 
 def test_the_line_under_the_heading_is_marks_in_front_of_figures() -> None:
@@ -1204,7 +1203,7 @@ def test_the_script_carries_every_mark_the_payload_can_name() -> None:
     """The glyphs are in the script rather than fetched, and they are real images.
 
     An airline's mark is decoration: the number beside it already names the carrier, so
-    one that never arrives costs nothing. These are not. "T4 B22" with no plane in front
+    one that never arrives costs nothing. These are not. "T 4 B22" with no plane in front
     of it is a line that is read wrong rather than read short, so the script carries them
     and draws them on the first reload, network or no network.
     """

@@ -102,10 +102,10 @@ ICON_SEAT: Final = "seat"
 
 # Between the terminal and the gate behind the same mark. A gate is a figure nobody
 # mistakes for anything else; a terminal on its own is a bare 4 or a bare B, so it keeps
-# the T a boarding pass prints in front of it and the two of them need nothing between
-# them but the space.
+# the T a boarding pass prints in front of it - off the figure rather than run into it,
+# the way the pass sets it - and the two of them need nothing between them but the space.
 BETWEEN_PLACES: Final = " "
-TERMINAL_PREFIX: Final = "T"
+TERMINAL_PREFIX: Final = "T "
 
 
 def _iso_z(value: datetime) -> str:
@@ -129,10 +129,9 @@ class WidgetFlight(BaseModel):
     # For the server's own refresh cadence. The script never reads it: what it draws is
     # the status and the times, which are words already chosen.
     phase: Phase
-    # Whose flight it is, where it is not the reader's own: the hue the board takes from
-    # their name, drawn as a mark in front of the number. A hue and no letter, because a
-    # letter set inside a mark the height of the type beside it is drawn at eight points
-    # and read at none: what tells one person from another at that size is the colour.
+    # Whose flight it is, where it is not the reader's own: the initial the board draws
+    # in a disc, and the hue it takes for that disc from the name.
+    friend_initial: str | None
     friend_hue: int | None
     logo_url: str
     number: str
@@ -410,6 +409,7 @@ def _flight(
         WidgetFlight(
             detail_url=f"{base_url}/f/{booking.id}",
             phase=phase,
+            friend_initial=friend[0].upper() if friend else None,
             friend_hue=views.friend_hue(friend) if friend else None,
             logo_url=views.logo_url(booking.marketing_carrier),
             number=f"{booking.marketing_carrier}{booking.marketing_number}",
