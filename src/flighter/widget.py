@@ -42,7 +42,16 @@ from .airports import get_airport
 from .config import Settings, get_settings
 from .db import get_session
 from .models import KV, Airport, Booking, BookingStatus, FlightSnapshot
-from .phase import AIRBORNE, DAY_OF, DIVERTED, TAXIING, Phase, compute_phase, departure_estimate
+from .phase import (
+    AIRBORNE,
+    DAY_OF,
+    DIVERTED,
+    TAXIING,
+    Phase,
+    compute_phase,
+    departure_estimate,
+    wheels_down,
+)
 from .timezones import FALLBACK_TZ, to_local
 
 log = logging.getLogger(__name__)
@@ -493,8 +502,14 @@ def _detail(
     its day that is the terminal and the gate it leaves from, behind a climbing plane,
     and then the seat behind a seat. Off the ground it is the same three the other way
     about - the seat first, because that is where the reader is, and then the terminal
-    and the gate at the far end behind a plane coming down - including once they are
-    parked, when the terminal is the one the belt is in.
+    and the gate at the far end behind a plane coming down.
+
+    Down, the seat comes off and the far end has the line to itself, including once they
+    are parked, when the terminal is the one the belt is in. A seat is where the reader
+    is only for as long as they are in it: once the aircraft is on the ground the row has
+    one thing left to say, which is the way out - the terminal, the gate it came in at,
+    and then the belt at the end of the row - and a seat number standing in front of that
+    is a figure the reader has finished with taking room from the ones they have not.
 
     The runs turn round; what is inside one does not. A terminal and a gate are read as
     the pair "T4 • B22" at both ends of the flight, because they are the same two figures
@@ -516,7 +531,11 @@ def _detail(
             return []
         left = views.at(departure_estimate(booking, snapshot), origin_tz, with_date=True)
         return [WidgetDetail(icon=None, text=left)]
-    seat = _run(ICON_SEAT, booking.seat)
+    # Whichever phase the arrival is filed under: a diverted flight sitting at its
+    # alternate is as done with its seat as one that landed where it was booked to, and
+    # so is one the poller closed the book on without ever seeing it come down.
+    arrived = views.flown(booking) or wheels_down(snapshot)
+    seat = None if arrived else _run(ICON_SEAT, booking.seat)
     if phase == DAY_OF:
         runs = [
             _run(

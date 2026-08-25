@@ -319,6 +319,102 @@ def test_at_the_gate_the_belt_takes_the_end_of_the_row(settings: Settings) -> No
     assert detail(flight) == [("landing", "TB • 12")]
 
 
+def test_wheels_down_takes_the_seat_off_the_line(settings: Settings) -> None:
+    """A seat is where the reader is only for as long as they are in it.
+
+    Down, the row has one thing left to say - the way out - so the seat gives up its half
+    of the line to the terminal and the gate the aircraft came in at, and the belt takes
+    the end of the row from there.
+    """
+    landed = snapshot(
+        actual_off=DEPARTURE,
+        actual_on=ARRIVAL - timedelta(minutes=10),
+        estimated_in=ARRIVAL,
+        gate_destination="12",
+        terminal_destination="B",
+    )
+    flight = payload([(booking(seat="32A"), landed)], settings)["flights"][0]
+    assert flight["phase"] == "landed"
+    assert flight["status_label"] == "Landed"
+    assert detail(flight) == [("landing", "TB • 12")]
+
+
+def test_a_parked_flight_keeps_the_seat_off_the_line(settings: Settings) -> None:
+    """Still true at the gate, where the terminal on the line is the belt's own."""
+    done = snapshot(
+        actual_off=DEPARTURE,
+        actual_on=ARRIVAL,
+        actual_in=ARRIVAL,
+        baggage_claim="7",
+        gate_destination="12",
+        terminal_destination="B",
+    )
+    flight = payload([(booking(seat="32A"), done)], settings)["flights"][0]
+    assert flight["status_label"] == "Arrived"
+    assert detail(flight) == [("landing", "TB • 12")]
+    assert target(flight) == ("Baggage claim", "7")
+
+
+def test_a_landed_flight_with_nothing_at_the_far_end_draws_no_line(settings: Settings) -> None:
+    """The seat was the only thing on it, and the seat is behind them.
+
+    A row with nothing left to name draws nothing rather than the one figure it still
+    holds: an empty line reads as an airport that has not said yet, which is the truth of
+    every other figure on it.
+    """
+    landed = snapshot(actual_off=DEPARTURE, actual_on=ARRIVAL - timedelta(minutes=10))
+    flight = payload([(booking(seat="32A"), landed)], settings)["flights"][0]
+    assert flight["phase"] == "landed"
+    assert detail(flight) == []
+
+
+def test_a_diversion_on_the_ground_gives_up_the_seat_too(settings: Settings) -> None:
+    """Filed under the diversion for as long as it exists, and as done with its seat as
+    a flight that came down where it was booked to."""
+    down = snapshot(
+        diverted=True,
+        destination_iata="YOW",
+        actual_off=DEPARTURE,
+        actual_on=NOW - timedelta(minutes=5),
+        estimated_in=NOW + timedelta(minutes=5),
+        gate_destination="12",
+        terminal_destination="B",
+    )
+    flight = payload([(booking(seat="32A"), down)], settings, airports=AIRPORTS)["flights"][0]
+    assert flight["phase"] == "diverted"
+    assert detail(flight) == [("landing", "TB • 12")]
+
+
+def test_a_flight_still_in_the_air_keeps_its_seat(settings: Settings) -> None:
+    """The line only turns round at wheels down; on the way there the reader is in 32A
+    and the row says so, ahead of where they are going."""
+    flying = snapshot(
+        actual_off=DEPARTURE - timedelta(hours=2),
+        estimated_on=ARRIVAL - timedelta(minutes=10),
+        estimated_in=ARRIVAL,
+        gate_destination="12",
+        terminal_destination="B",
+    )
+    flight = payload([(booking(seat="32A"), flying)], settings)["flights"][0]
+    assert flight["phase"] == "airborne"
+    assert detail(flight) == [("seat", "32A"), ("landing", "TB • 12")]
+
+
+def test_a_booking_closed_in_the_air_gives_up_the_seat(settings: Settings) -> None:
+    """The poller closed the book without ever seeing it come down. Whatever the feed
+    last said, that flight is over and nobody is in that seat."""
+    lost = snapshot(
+        actual_off=NOW - timedelta(hours=9),
+        estimated_in=NOW - timedelta(hours=3),
+        gate_destination="12",
+        terminal_destination="B",
+    )
+    closed = booking(status=BookingStatus.COMPLETED, seat="32A")
+    flight = payload([(closed, lost)], settings)["flights"][0]
+    assert flight["status_label"] == "Flown"
+    assert detail(flight) == [("landing", "TB • 12")]
+
+
 def test_a_belt_nobody_has_named_yet_is_dashed(settings: Settings) -> None:
     """The words are the news either way, and a line that arrives with the belt is a row
     that moves under the eye. The card draws the same dash in the same place."""

@@ -104,7 +104,8 @@ flight to watch:
 | --- | --- |
 | Days off, with nothing to watch yet | `Fri 18 Sep 18:00 EDT` |
 | Still at the gate it leaves from | *plane climbing* `T4 • B22`, *seat* `14A` |
-| Pushed back, in the air, or parked | *seat* `14A`, *plane landing* `TB • 12` |
+| Pushed back or in the air | *seat* `14A`, *plane landing* `TB • 12` |
+| Down, taxiing in or parked | *plane landing* `TB • 12` |
 | Called off, or given up on | nothing; the pill has said it |
 
 The marks are `plane-takeoff`, `plane-landing` and `armchair` from Lucide, which is the
@@ -128,10 +129,17 @@ dashed: a dash is an empty box, and a row with three boxes at most and two of th
 says nothing in the space where it says everything. What holds the line still while gates
 are published is the mark, which is drawn as soon as one figure lands behind it. Once the
 aircraft has left the gate the same three are read the other way about, because the seat
-is where the reader is and the terminal and the gate are where they are going - and they
-stay on the row after it parks, where the terminal is the one the belt is in. The runs
+is where the reader is and the terminal and the gate are where they are going. The runs
 turn round; what is inside one does not, so a terminal and a gate are the same pair in
 the same order at both ends of the flight.
+
+Wheels down, the seat comes off and the far end has the line to itself, where it stays
+while the aircraft taxis in and after it parks - and the terminal there is the one the
+belt is in. A seat is where the reader is only for as long as they are in it: on the
+ground the row has one thing left to say, which is the way out, and a seat number
+standing in front of that is a figure they have finished with taking room from the ones
+they have not. It comes off a diversion that is down at its alternate for the same
+reason, and off a flight the poller closed the book on without ever seeing it land.
 
 When it goes is the other end of the row, and never on this line: the board's own words
 for the rung ahead, with the time it is due beside them.
