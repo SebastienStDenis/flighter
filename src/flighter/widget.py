@@ -114,6 +114,15 @@ ICON_SEAT: Final = "seat"
 BETWEEN_PLACES: Final = " • "
 TERMINAL_PREFIX: Final = "T"
 
+# Between the two airports on a heading. The arrow keeps a space either side of it, the
+# way a board sets a route, except on the small size, where those two spaces are most of
+# an airport code's worth of a line that is already holding the number as well. The route
+# there is seven characters set at one size on every row, which is worth more than the
+# air around its arrow: a route drawn smaller on the second flight than on the first,
+# because that flight's number was longer, is a size the reader has to account for.
+ROUTE_ARROW: Final = " → "
+ROUTE_ARROW_TIGHT: Final = "→"
+
 
 def _iso_z(value: datetime) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -379,6 +388,7 @@ def build_payload(
         built = _flight(
             booking,
             snapshot,
+            arrow=ROUTE_ARROW_TIGHT if family == "small" else ROUTE_ARROW,
             now=now,
             base_url=base_url,
             airports=known,
@@ -406,6 +416,7 @@ def _flight(
     booking: Booking,
     snapshot: FlightSnapshot | None,
     *,
+    arrow: str,
     now: datetime,
     base_url: str,
     airports: Mapping[str, Airport | None],
@@ -427,7 +438,7 @@ def _flight(
             friend_hue=views.friend_hue(friend) if friend else None,
             logo_url=views.logo_url(booking.marketing_carrier),
             number=f"{booking.marketing_carrier}{booking.marketing_number}",
-            route=f"{booking.origin_iata} → {views.destination_iata(booking, snapshot)}",
+            route=f"{booking.origin_iata}{arrow}{views.destination_iata(booking, snapshot)}",
             status_label=pill.label,
             status_tone=pill.tone,
             detail=_detail(phase, booking, snapshot, now=now, origin_tz=origin_tz),

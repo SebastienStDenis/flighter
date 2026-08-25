@@ -126,7 +126,7 @@ const supportsRowLinks = family === "medium" || family === "large";
 // A size chosen here is the same size on both.
 const TYPE =
   family === "small"
-    ? { heading: 12, route: 11, detail: 10, pill: 10, label: 10, time: 13 }
+    ? { heading: 12, route: 10, detail: 10, pill: 10, label: 10, time: 13 }
     : { heading: 14, route: 12, detail: 11, pill: 10, label: 11, time: 13 };
 
 // How tall the line under the heading stands, on every row, whatever lands on it.
@@ -575,23 +575,25 @@ function titleRow(container, flight, logos) {
   number.font = Font.semiboldMonospacedSystemFont(TYPE.heading);
   number.textColor = TEXT;
   number.lineLimit = 1;
-  row.addSpacer(3);
+  // Two runs of figures on one line keep more air between them than a mark keeps from
+  // its own - except on the square, where that air is part of what the route needs to be
+  // drawn at the size below rather than at whatever this row had spare.
+  if (family !== "small") {
+    row.addSpacer(3);
+  }
   const route = row.addText(flight.route);
   route.font = Font.regularMonospacedSystemFont(TYPE.route);
   route.textColor = MUTED;
   route.lineLimit = 1;
-  // Only where the route has to give: a 155pt square has no room for a number and a
-  // route at the size the rest of that widget is read at.
-  //
-  // On the wide sizes it does have the room, and a shrink there is a size chosen by
-  // whatever else landed on that particular line - a longer number, a friend's disc, a
-  // longer word in the pill. Which is the same fault the type sizes above were fixed to
-  // settle, one row down: the flight at the foot of a large widget was drawn larger than
-  // the flight above it, for no reason a reader could see. A size chosen here is the
-  // size on every row.
-  if (family === "small") {
-    route.minimumScaleFactor = 0.7;
-  }
+  // No shrink on any size, the square included. A shrink factor hands the size to
+  // whatever else landed on that particular line - a longer number, a friend's disc -
+  // so the same route came out smaller under one flight than under the flight above it,
+  // which is a difference the reader has to account for and which says nothing. It was
+  // the square's answer to a line holding a number and a route at once; the answers now
+  // are a route set two points under the number, an arrow the server sends without the
+  // spaces around it, and the air between the two runs spent on the figures instead.
+  // Every route is the same seven characters, so one size fits all of them or none.
+
   // What holds whatever shares this line - the pill on the wide sizes - against the far
   // end of it, and what leaves the heading itself hard against the near one.
   row.addSpacer();

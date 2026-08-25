@@ -1237,6 +1237,36 @@ def test_the_small_widget_fills_its_square() -> None:
     assert "SMALL_GAP * 2" not in drawn
 
 
+def test_the_small_widget_draws_every_route_at_one_size() -> None:
+    """The airports under one flight, set the size of the airports under the other.
+
+    The route was the half of the heading that gave way, and what it gave way to was
+    whatever else landed on that row: a longer number or a friend's disc left it less to
+    fit into, so the same seven characters came out smaller on the second flight than on
+    the first. Nothing about the flight was different, only the row.
+
+    It is set now: two points under the number, with an arrow the server sends without
+    the spaces around it and the air between the two runs handed back to the figures.
+    """
+    source = script_source()
+    drawn = source[source.index("function titleRow(") : source.index("// Whose flight it is")]
+    assert "minimumScaleFactor" not in drawn
+    # The air between the number and the route is the wide sizes' alone.
+    assert 'if (family !== "small") {' in drawn
+    assert "row.addSpacer(3);" in drawn
+
+
+def test_the_square_gets_the_arrow_without_the_spaces_around_it(settings: Settings) -> None:
+    """Seven characters rather than nine, on the one size where the heading is holding
+    the number as well and those two spaces are most of an airport code's worth of it."""
+    small = payload([(booking(), None)], settings, family="small")
+    assert small["flights"][0]["route"] == "JFK→LAX"
+    # Every other size sets the route the way a board sets it.
+    for asked in ("medium", "large", "accessoryRectangular"):
+        wide = payload([(booking(), None)], settings, family=asked)
+        assert wide["flights"][0]["route"] == "JFK → LAX", asked
+
+
 def test_the_small_widget_sends_its_one_tap_to_the_board() -> None:
     """iOS gives a small widget a single tap target for the whole square - Link is a
     medium and large size thing - so whichever of the two flights the thumb lands on, the
@@ -1297,18 +1327,19 @@ def test_the_wide_sizes_draw_every_row_at_one_size() -> None:
     """A type size on a widget is chosen once, and a shrink factor un-chooses it.
 
     The sizes above are picked so that a flight is drawn the same on a medium widget as
-    on a large one. A shrink factor on the route, the pill or the rung does the same
-    thing one row further down: it hands the size to whatever else landed on that
-    particular line, so the flight at the foot of a large widget comes out larger than
-    the flight above it because its number was shorter or its status a shorter word.
+    on a large one. A shrink factor on the pill or the rung does the same thing one row
+    further down: it hands the size to whatever else landed on that particular line, so
+    the flight at the foot of a large widget comes out larger than the flight above it
+    because its status was a shorter word.
 
-    The narrow size keeps them. There the route shares its line with the number and the
-    rung shares its line with the pill, on a 155pt square where neither pair fits, so
-    something has to give on every row rather than on the fullest one.
+    The narrow size keeps them on the two that share a line with the pill, where the
+    longest status and the longest rung do not fit beside each other on a 155pt square
+    and a word cut in half is worse than a word read small. The route no longer gives:
+    it is set two points under the number and its arrow comes without spaces, so one
+    size draws it on every row.
     """
     source = script_source()
     for drawn in (
-        source[source.index("function titleRow(") : source.index("// Whose flight it is")],
         source[source.index("function targetLabel(") : source.index("// The other half")],
         source[source.index("function pill(") : source.index("// The bottom of the widget")],
     ):
@@ -1371,7 +1402,7 @@ def test_the_route_is_set_rather_than_left_to_fit() -> None:
     """
     source = script_source()
     scale = source[source.index("const TYPE =") : source.index("const server = connect();")]
-    assert "{ heading: 12, route: 11, detail: 10, pill: 10, label: 10, time: 13 }" in scale
+    assert "{ heading: 12, route: 10, detail: 10, pill: 10, label: 10, time: 13 }" in scale
     assert "{ heading: 14, route: 12, detail: 11, pill: 10, label: 11, time: 13 }" in scale
     # And the one branch in it is the small size's: medium and large are one scale, so
     # neither can drift from the other.
