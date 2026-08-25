@@ -1153,17 +1153,18 @@ def test_a_small_widget_holds_two_flights_of_three_lines() -> None:
     assert 'const pad = family === "small" ? 0 : 2;' in source
 
 
-def test_a_friends_disc_has_room_on_it_for_the_letter() -> None:
-    """The disc is squared to the number beside it, and the letter is drawn on it.
+def test_a_friends_disc_has_the_letter_drawn_on_it_rather_than_set() -> None:
+    """The disc is squared to the number beside it, and the letter is drawn into it.
 
-    A stack in a widget carries the system's own insets unless it is told not to, and a
-    disc the height of a flight number has nothing left inside those insets to draw a
-    letter in - so the letter was dropped rather than drawn small, and what was left was
-    a disc with nothing on it. Zeroing the padding and the spacing is what puts it back.
+    Centring a line of type in a stack takes a spacer either side of it, and a spacer
+    holds a length of its own - the stack's default spacing - before it gives any room
+    away, whatever the stack's own `spacing` is set to afterwards. Two of them ask for
+    more than a disc the height of a flight number has, so what was left for the letter
+    was nothing, and a letter with nowhere to be drawn is dropped rather than drawn
+    small. Which is why zeroing the padding did not put it back.
 
-    Centred on both axes: `centerAlignContent` is the stack's answer for the one axis it
-    does not lay out along, and the other takes a spacer either side or the letter sits
-    against the wall of its own disc.
+    Drawn into an image the size of the disc, the letter is centred by the context, and
+    the two spacers that could not fit are not needed at all.
     """
     source = script_source()
     drawn = source[source.index("function friendMark(") : source.index("function hasDetail(")]
@@ -1171,12 +1172,46 @@ def test_a_friends_disc_has_room_on_it_for_the_letter() -> None:
     assert "disc.size = new Size(side, side);" in drawn
     assert "disc.cornerRadius = side / 2;" in drawn
     assert "disc.setPadding(0, 0, 0, 0);" in drawn
-    assert "disc.spacing = 0;" in drawn
-    assert drawn.count("disc.addSpacer();") == 2
-    assert "disc.centerAlignContent();" in drawn
-    # And a glyph wider than the disc shrinks to fit rather than being dropped, which is
-    # the same failure the padding was causing by another route.
-    assert "initial.minimumScaleFactor" in drawn
+    # Nothing on the disc is laid out, so nothing on it can be squeezed out.
+    assert "disc.spacing" not in drawn
+    assert "addSpacer" not in drawn
+    assert "disc.addText" not in drawn
+    assert "disc.addImage(initialImage(flight.friend_initial, side))" in drawn
+    assert "letter.imageSize = new Size(side, side);" in drawn
+    # White into the context and tinted on the way onto the row, which is the deal the
+    # marks below make: one image is the light scheme's colour and the dark one's both.
+    assert "context.setTextColor(Color.white());" in drawn
+    assert "letter.tintColor = friendColor(flight.friend_hue, FRIEND_INITIAL);" in drawn
+    # And centred: across by the context's own alignment, down by a rect one line tall
+    # set half of what is left over down the square, because the text hangs from the top
+    # of the rect it is given.
+    assert "context.setTextAlignedCenter();" in drawn
+    assert "new Rect(0, (side - line) / 2, side, line)" in drawn
+    assert "const line = size * LINE_HEIGHT;" in drawn
+
+
+def test_the_wide_sizes_draw_every_row_at_one_size() -> None:
+    """A type size on a widget is chosen once, and a shrink factor un-chooses it.
+
+    The sizes above are picked so that a flight is drawn the same on a medium widget as
+    on a large one. A shrink factor on the route, the pill or the rung does the same
+    thing one row further down: it hands the size to whatever else landed on that
+    particular line, so the flight at the foot of a large widget comes out larger than
+    the flight above it because its number was shorter or its status a shorter word.
+
+    The narrow size keeps them. There the route shares its line with the number and the
+    rung shares its line with the pill, on a 155pt square where neither pair fits, so
+    something has to give on every row rather than on the fullest one.
+    """
+    source = script_source()
+    for drawn in (
+        source[source.index("function titleRow(") : source.index("// Whose flight it is")],
+        source[source.index("function targetLabel(") : source.index("// The other half")],
+        source[source.index("function pill(") : source.index("// The bottom of the widget")],
+    ):
+        assert "minimumScaleFactor" in drawn
+        assert 'if (family === "small") {' in drawn
+        assert drawn.index('if (family === "small") {') < drawn.index("minimumScaleFactor")
 
 
 def test_the_line_under_the_heading_is_marks_in_front_of_figures() -> None:

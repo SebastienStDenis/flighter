@@ -72,8 +72,20 @@ due.
 
 Whose it is, is their initial in a disc in the colour the board gives that person, the
 same disc the page draws. The disc is squared to the number beside it, so the heading is
-the height of its own type; the letter on it is drawn at three fifths of that, and shrinks
-rather than disappearing if a glyph ever asks for more room than the disc has.
+the height of its own type, and the letter on it is drawn at three fifths of that -
+drawn, into an image the size of the disc, rather than set as a line of type on it.
+Centring type in a stack takes a spacer either side of it, and a spacer holds a length of
+its own before it gives any room away; two of them ask for more than a disc this size
+has, which left the letter with nothing and no letter is drawn small when it has nowhere
+to go - it is dropped, and the disc came out bare.
+
+Every row of a wide widget is drawn at one size. The type sizes are chosen for the widget
+rather than measured against the room a line has left over, because a route or a status
+that shrinks to fit its own row is a flight drawn larger than the flight above it for no
+reason a reader can see - the row at the foot of a large widget with the shortest number
+on it, most visibly. The small size is the exception: there the route shares its line
+with the number and the rung shares its line with the pill, on a square where neither
+pair fits, so something gives on every row rather than on the fullest one.
 
 The row is the board's card, narrowed. The pill is the card's pill, the places are the
 card's places and the end of the row is the card's footer, each drawn on exactly the
