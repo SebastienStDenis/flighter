@@ -51,7 +51,7 @@ does the same thing at once, and says so.
 | `accessoryRectangular` (Lock Screen) | Next flight only, three tight lines. **iOS 16 or later.** |
 | Small | Two flights, three lines each |
 | Medium | Up to three flights, two lines each, each row tappable |
-| Large | Up to six of the same rows, with more air between them |
+| Large | Up to seven of the same rows, with a little more air between them |
 
 The widget tells the server which size it is, and the server sends a list that long. How
 many rows fit is the one thing about the layout the server cannot work out for itself,
@@ -59,8 +59,11 @@ and a list cut to the smallest size that might be asking is a large widget with 
 bottom half empty.
 
 Tapping opens the flight's page on your server. On medium and large each row deep-links
-to its own flight; small and Lock Screen widgets get a single tap target, which is an iOS
-restriction and not a choice made here.
+to its own flight; small and Lock Screen widgets get a single tap target for the whole
+widget, which is an iOS restriction and not a choice made here. The Lock Screen's opens
+the flight it draws, which is the only one it draws. The small size draws two, so its tap
+opens the board instead: pointed at either of them it would be the wrong flight half the
+time, and both of them are on the board, in the order the square has them.
 
 ## What it shows
 
@@ -79,13 +82,25 @@ its own before it gives any room away; two of them ask for more than a disc this
 has, which left the letter with nothing and no letter is drawn small when it has nowhere
 to go - it is dropped, and the disc came out bare.
 
-Every row of a wide widget is drawn at one size. The type sizes are chosen for the widget
-rather than measured against the room a line has left over, because a route or a status
-that shrinks to fit its own row is a flight drawn larger than the flight above it for no
-reason a reader can see - the row at the foot of a large widget with the shortest number
-on it, most visibly. The small size is the exception: there the route shares its line
-with the number and the rung shares its line with the pill, on a square where neither
-pair fits, so something gives on every row rather than on the fullest one.
+Every row is drawn at one size, on every size of widget. The type sizes are chosen for
+the widget rather than measured against the room a line has left over, because a route or
+a status that shrinks to fit its own row is a flight drawn larger than the flight above it
+for no reason a reader can see - the row at the foot of a large widget with the shortest
+number on it, most visibly. The route on the small size was the last of them to give way:
+it shares its line with the number there, so a longer number drew the same seven
+characters smaller. It is set two points under the number instead, and its arrow comes
+from the server without the spaces around it - `JFK→LAX` rather than `JFK → LAX` - which
+is the width those two points and the air between the runs were buying.
+
+What still gives on the small size is the pill and the rung beside it: the longest status
+and the longest rung do not fit on one line of a 155pt square, and a word cut in half is
+worse read than a word read small.
+
+The small size draws its two flights as blocks of three lines, and what the square has
+left over after those six lines and the footer goes between the two blocks rather than
+under them: they stand apart and fill the widget instead of sitting pinned to the top of
+it. Its words keep the same distance from the rounded corner as every other size's, which
+they did not while the room was thought to be spare.
 
 The row is the board's card, narrowed. The pill is the card's pill, the places are the
 card's places and the end of the row is the card's footer, each drawn on exactly the
@@ -107,6 +122,22 @@ flight to watch:
 | Pushed back or in the air | *seat* `14A`, *plane landing* `TB • 12` |
 | Down, taxiing in or parked | *plane landing* `TB • 12` |
 | Called off, or given up on | nothing; the pill has said it |
+
+Every row stands the same height whether or not it has all of that to show. The line
+under the heading is drawn on every one of them and holds the height of the tallest thing
+it can carry - the time at the far end of it - so a flight with only a date under its
+heading, and a flight with nothing at all, take the same room as a flight with a time.
+The gap between two rows is a fixed one, and a row that closed up its own spare space
+would sit nearer its neighbour than the rest of the column for no reason a reader could
+see.
+
+On the large size the gap between two rows is nine points rather than the twelve it was.
+Twelve was air the size happened to have rather than air the column needed - beside the
+medium's eight it read no differently - and three points off each of six gaps is a
+seventh flight, which the size now holds. It is the tightest figure in the layout: seven
+rows, the footer and the widget's own inset come to within a point or two of what the
+large widget holds on a 6.1in phone, so it is the first figure to put back should a row
+ever come out clipped.
 
 The marks are `plane-takeoff`, `plane-landing` and `armchair` from Lucide, which is the
 icon set the web UI is drawn with, and they stand where TERM, GATE and SEAT used to. The
@@ -148,12 +179,18 @@ for the rung ahead, with the time it is due beside them.
 | --- | --- |
 | Ahead of its time | `Departs 14:40`, `Lands 22:40`, `At the gate 22:15` |
 | Past it, with no word that it happened | `Due to depart 14:40`, `Due to land 22:40` |
-| Parked | `Baggage claim 7`, dashed until the airport says which |
+| Parked, with a belt named | `Baggage claim 7` |
+| Parked, with none named yet | nothing, until the airport says which |
 | Days off, or called off | nothing, the way the card draws no footer for one |
 
 A flight days out is on a rung - the ladder starts at its departure - but nobody is
 waiting on it yet, so neither the card nor the row names it. The pill has already said it
 is booked, and the day it leaves is under the heading.
+
+A belt nobody has named yet leaves the end of the row empty rather than dashed. The card
+has the width to hold the words with a dash where the carousel goes; a row has one line,
+and words on it with nothing to read beside them are the news that there is no news. The
+line arrives with the belt.
 
 Every word, tone and figure comes from the server; the script picks nothing on its own
 and works nothing out.

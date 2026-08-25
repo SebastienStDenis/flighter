@@ -280,14 +280,14 @@
      because the aircraft's nose stops short of the edge of its own box and the gap is
      measured from the box. */
   .brand-ahead {
-    @apply h-[0.5px] w-[0.18em] rounded-full;
+    @apply h-px w-[0.18em] rounded-full;
     margin-left: -0.26em;
-    /* Half a pixel high and centred on the rule, it straddles a device pixel and is
-       painted into the row above the rule's. The quarter drops it into the row below,
-       and the pixel off it lifts the whole dash clear: at the rule's own height it reads
-       as a step under the nose it carries on from rather than as the same line further
-       along, which is the one thing a leg still to come has to look like. */
-    translate: 0 -0.75px;
+    /* The height of the rule behind the word, and centred the way that rule is, so the
+       two land in the same device pixels whatever the screen's ratio. Half a pixel high
+       it could not: a hairline that thin falls between the two rows the rule paints and
+       has to be nudged into one of them, and the row it was nudged into was the lower -
+       which read as a dash sitting under the line rather than on it. What keeps the leg
+       ahead quieter than the leg behind is its colour, which was doing that anyway. */
     background-color: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
   }
 
