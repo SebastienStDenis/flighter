@@ -140,12 +140,18 @@ for the rung ahead, with the time it is due beside them.
 | --- | --- |
 | Ahead of its time | `Departs 14:40`, `Lands 22:40`, `At the gate 22:15` |
 | Past it, with no word that it happened | `Due to depart 14:40`, `Due to land 22:40` |
-| Parked | `Baggage claim 7`, dashed until the airport says which |
+| Parked, with a belt named | `Baggage claim 7` |
+| Parked, with none named yet | nothing, until the airport says which |
 | Days off, or called off | nothing, the way the card draws no footer for one |
 
 A flight days out is on a rung - the ladder starts at its departure - but nobody is
 waiting on it yet, so neither the card nor the row names it. The pill has already said it
 is booked, and the day it leaves is under the heading.
+
+A belt nobody has named yet leaves the end of the row empty rather than dashed. The card
+has the width to hold the words with a dash where the carousel goes; a row has one line,
+and words on it with nothing to read beside them are the news that there is no news. The
+line arrives with the belt.
 
 Every word, tone and figure comes from the server; the script picks nothing on its own
 and works nothing out.
