@@ -52,15 +52,17 @@ router = APIRouter()
 # What each size has room for, in rows of two lines. The phone says which size is
 # asking; the server cuts the list to it rather than sending a list every size has to
 # cut for itself. A lock screen has room for one flight, a 155pt square for two, and a
-# large widget for twice what the medium one holds - past that it is a trip itinerary,
-# which is what the web UI is for.
+# large widget for seven - twice the medium's height, and one row more than twice its
+# rows once the air between them is the air a break between two flights needs rather
+# than the air the size happened to have. Past seven it is a trip itinerary, which is
+# what the web UI is for.
 FLIGHTS_BY_FAMILY: Final = {
     "accessoryRectangular": 1,
     "accessoryCircular": 1,
     "accessoryInline": 1,
     "small": 2,
     "medium": 3,
-    "large": 6,
+    "large": 7,
 }
 # What a request that did not name its size gets: the medium widget's share. A script
 # that has not replaced itself yet is the only thing that asks without saying, and it
@@ -111,6 +113,15 @@ ICON_SEAT: Final = "seat"
 # it, because a separator run into what it separates is a character in the figure.
 BETWEEN_PLACES: Final = " • "
 TERMINAL_PREFIX: Final = "T"
+
+# Between the two airports on a heading. The arrow keeps a space either side of it, the
+# way a board sets a route, except on the small size, where those two spaces are most of
+# an airport code's worth of a line that is already holding the number as well. The route
+# there is seven characters set at one size on every row, which is worth more than the
+# air around its arrow: a route drawn smaller on the second flight than on the first,
+# because that flight's number was longer, is a size the reader has to account for.
+ROUTE_ARROW: Final = " → "
+ROUTE_ARROW_TIGHT: Final = "→"
 
 
 def _iso_z(value: datetime) -> str:
@@ -176,6 +187,12 @@ class Built(NamedTuple):
 
 class WidgetPayload(BaseModel):
     flights: list[WidgetFlight]
+    # Where a tap goes when it cannot be given to a row. iOS hands a small widget one
+    # tap target for the whole square - Link is medium and large only - so a tap on the
+    # second flight there opens whatever the square points at, and pointing it at the
+    # first flight opened a flight the reader had not touched. The board is the one
+    # answer that is right wherever the tap landed: both flights are on it.
+    board_url: str
     refresh_seconds: int
     degraded: bool
     degraded_reason: str | None
@@ -371,6 +388,7 @@ def build_payload(
         built = _flight(
             booking,
             snapshot,
+            arrow=ROUTE_ARROW_TIGHT if family == "small" else ROUTE_ARROW,
             now=now,
             base_url=base_url,
             airports=known,
@@ -387,6 +405,7 @@ def build_payload(
     reason = degraded_reason or _stale_reason(min(observed, default=None), now)
     return WidgetPayload(
         flights=[built.flight for built in drawn],
+        board_url=base_url,
         refresh_seconds=_refresh_seconds(drawn, now),
         degraded=reason is not None,
         degraded_reason=reason,
@@ -397,6 +416,7 @@ def _flight(
     booking: Booking,
     snapshot: FlightSnapshot | None,
     *,
+    arrow: str,
     now: datetime,
     base_url: str,
     airports: Mapping[str, Airport | None],
@@ -418,7 +438,7 @@ def _flight(
             friend_hue=views.friend_hue(friend) if friend else None,
             logo_url=views.logo_url(booking.marketing_carrier),
             number=f"{booking.marketing_carrier}{booking.marketing_number}",
-            route=f"{booking.origin_iata} → {views.destination_iata(booking, snapshot)}",
+            route=f"{booking.origin_iata}{arrow}{views.destination_iata(booking, snapshot)}",
             status_label=pill.label,
             status_tone=pill.tone,
             detail=_detail(phase, booking, snapshot, now=now, origin_tz=origin_tz),

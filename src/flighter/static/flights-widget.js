@@ -102,6 +102,11 @@ const BETWEEN_RUNS = 8;
 const SMALL_FLIGHTS = 2;
 const SMALL_GAP = 3;
 
+// What every size but the Lock Screen keeps between its words and its own edge. A widget
+// whose words start against its rounded corner reads as one that ran out of room,
+// whatever it is holding.
+const INSET = 14;
+
 const family = config.widgetFamily || "medium";
 const isAccessory = family.startsWith("accessory");
 // Per-element tap targets exist only on medium and large. Everywhere else the whole
@@ -121,7 +126,7 @@ const supportsRowLinks = family === "medium" || family === "large";
 // A size chosen here is the same size on both.
 const TYPE =
   family === "small"
-    ? { heading: 12, route: 11, detail: 10, pill: 10, label: 10, time: 13 }
+    ? { heading: 12, route: 10, detail: 10, pill: 10, label: 10, time: 13 }
     : { heading: 14, route: 12, detail: 11, pill: 10, label: 11, time: 13 };
 
 // How tall the line under the heading stands, on every row, whatever lands on it.
@@ -140,6 +145,13 @@ const TYPE =
 // above it, the fixed gaps between them read as one distance, and the eye goes down the
 // column on the words rather than on the spacing.
 const UNDER_HEADING = Math.ceil(TYPE.time * LINE_HEIGHT);
+
+// The distance between two flights on the large widget, and what a seventh row costs.
+// A row is the heading, the line under it and the three points between them - a shade
+// under 36 - so seven of them with this between and the footer under them come to
+// within a point or two of what the size holds on a 6.1in phone. It is the tightest
+// figure here, and the one to put back first if a row ever comes out clipped.
+const LARGE_GAP = 9;
 
 const server = connect();
 const result = server ? await load(server) : null;
@@ -371,7 +383,7 @@ async function buildWidget(result) {
   }
   const logos = await loadLogos(flights);
   if (family === "small") {
-    renderSmall(widget, flights.slice(0, SMALL_FLIGHTS), logos);
+    renderSmall(widget, flights.slice(0, SMALL_FLIGHTS), logos, data.board_url);
   } else {
     renderList(widget, flights, logos);
   }
@@ -388,11 +400,13 @@ function newWidget() {
     widget.setPadding(2, 2, 2, 2);
   } else {
     widget.backgroundColor = BACKGROUND;
-    // A little tighter on the small size, which holds two flights of three lines each.
-    // Tighter, and not as tight as it will go: a widget whose words start against its
-    // own rounded corner reads as one that ran out of room, whatever it is holding.
-    const inset = family === "small" ? 11 : 14;
-    widget.setPadding(inset, inset, inset, inset);
+    // The same inset on every size. The small one was drawn three points tighter, on
+    // the reading that two flights of three lines each is what a 155pt square barely
+    // holds - but the lines are what they are, and what that widget actually has is
+    // room to spare below them. Tightening the one size with air left over was three
+    // points spent to make a widget look full, and what it bought was words nearer the
+    // rounded corner than any other size sets them.
+    widget.setPadding(INSET, INSET, INSET, INSET);
   }
   return widget;
 }
@@ -438,17 +452,25 @@ function renderAccessory(widget, flight, result) {
   }
 }
 
-function renderSmall(widget, flights, logos) {
-  // One tap target, set on the widget rather than a row: a small widget has only the one
-  // to give, and the flight at the top is the one it is being looked at for.
-  widget.url = flights[0].detail_url;
+function renderSmall(widget, flights, logos, board) {
+  // One tap target for the whole square, set on the widget rather than on a row: iOS
+  // gives a small widget only the one, whichever row the thumb landed on. It used to
+  // carry the top flight, which meant a tap on the second one opened the first - the
+  // reader is shown two flights and told, by every other size, that a row is a thing to
+  // press. So it goes to the board instead, which is the one page that is not the wrong
+  // answer to either tap: both flights are on it, in the order they are in here.
+  widget.url = board;
 
   flights.forEach((flight, index) => {
     if (index > 0) {
-      // The one distance here that is not SMALL_GAP. Every line of a flight is the same
-      // distance under the line above it, so the only gap that reads as a break is the
-      // one between two flights.
-      widget.addSpacer(SMALL_GAP * 2);
+      // The one distance here that is not SMALL_GAP, and the one that is not a distance
+      // at all: every line of a flight is the same three points under the line above it,
+      // so the only gap that reads as a break is the one between two flights, and that
+      // is the gap the square's spare height is handed to. It was six points with the
+      // rest of the room left in a heap under the second flight, which drew two blocks
+      // pinned to the top of a widget with space to give them. Given the room, the
+      // two blocks stand apart and the widget is filled by what is on it.
+      widget.addSpacer();
     }
     // The number and the route on one line. The two do not fit at the size the rest of
     // this widget is read at, so the route is the half that gives: it shrinks against
@@ -483,7 +505,14 @@ function renderSmall(widget, flights, logos) {
 function renderList(widget, flights, logos) {
   flights.forEach((flight, index) => {
     if (index > 0) {
-      widget.addSpacer(family === "large" ? 12 : 8);
+      // What separates one flight from the next, and the only distance the two wide
+      // sizes do not share. The large widget's used to be half as wide again as the
+      // medium's, which was air it had and the medium did not; what it bought was a
+      // column that read no differently and a seventh flight that did not fit. Three
+      // points off it is the seventh row, so that is where they went: the gap is still
+      // wider than the one under a heading, which is all it has to be to say that a
+      // break between two flights is not a break between two lines of one.
+      widget.addSpacer(family === "large" ? LARGE_GAP : 8);
     }
     const row = widget.addStack();
     row.layoutVertically();
@@ -546,23 +575,25 @@ function titleRow(container, flight, logos) {
   number.font = Font.semiboldMonospacedSystemFont(TYPE.heading);
   number.textColor = TEXT;
   number.lineLimit = 1;
-  row.addSpacer(3);
+  // Two runs of figures on one line keep more air between them than a mark keeps from
+  // its own - except on the square, where that air is part of what the route needs to be
+  // drawn at the size below rather than at whatever this row had spare.
+  if (family !== "small") {
+    row.addSpacer(3);
+  }
   const route = row.addText(flight.route);
   route.font = Font.regularMonospacedSystemFont(TYPE.route);
   route.textColor = MUTED;
   route.lineLimit = 1;
-  // Only where the route has to give: a 155pt square has no room for a number and a
-  // route at the size the rest of that widget is read at.
-  //
-  // On the wide sizes it does have the room, and a shrink there is a size chosen by
-  // whatever else landed on that particular line - a longer number, a friend's disc, a
-  // longer word in the pill. Which is the same fault the type sizes above were fixed to
-  // settle, one row down: the flight at the foot of a large widget was drawn larger than
-  // the flight above it, for no reason a reader could see. A size chosen here is the
-  // size on every row.
-  if (family === "small") {
-    route.minimumScaleFactor = 0.7;
-  }
+  // No shrink on any size, the square included. A shrink factor hands the size to
+  // whatever else landed on that particular line - a longer number, a friend's disc -
+  // so the same route came out smaller under one flight than under the flight above it,
+  // which is a difference the reader has to account for and which says nothing. It was
+  // the square's answer to a line holding a number and a route at once; the answers now
+  // are a route set two points under the number, an arrow the server sends without the
+  // spaces around it, and the air between the two runs spent on the figures instead.
+  // Every route is the same seven characters, so one size fits all of them or none.
+
   // What holds whatever shares this line - the pill on the wide sizes - against the far
   // end of it, and what leaves the heading itself hard against the near one.
   row.addSpacer();

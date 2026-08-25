@@ -740,6 +740,30 @@ def test_in_the_order_they_now_leave_cut_to_what_the_size_holds(settings: Settin
     assert [_id(flight) for flight in lock["flights"]] == [4]
 
 
+def test_the_large_widget_holds_seven_and_cuts_the_eighth(settings: Settings) -> None:
+    """Twice the medium's height, and one row more than twice its rows.
+
+    What a size holds is what its height holds once the gap between two flights is the
+    gap a break between two flights needs. The large widget's used to be half as wide
+    again as the medium's, which was air the size happened to have rather than air the
+    column asked for, and three points off each of six of them is a seventh flight. Past
+    seven it is a trip itinerary, which is what the web UI is for.
+    """
+    rows: list[FlightRow] = [
+        (booking(id=n, scheduled_departure_utc=NOW + timedelta(hours=n)), None) for n in range(1, 9)
+    ]
+    large = payload(rows, settings, family="large")
+    assert [_id(flight) for flight in large["flights"]] == [1, 2, 3, 4, 5, 6, 7]
+
+
+def test_the_payload_names_the_board(settings: Settings) -> None:
+    """Where a tap goes when there is no row to give it to: the list both flights are on,
+    on the address the widget links to everything else by."""
+    body = payload([(booking(), None)], settings)
+    assert body["board_url"] == "https://flights.example.com"
+    assert body["flights"][0]["detail_url"].startswith(f"{body['board_url']}/f/")
+
+
 def test_a_size_nobody_has_heard_of_gets_the_middle_one(settings: Settings) -> None:
     """A family the server does not know is a widget iOS grew after this was written.
 
@@ -1139,6 +1163,21 @@ def test_every_row_keeps_the_same_line_under_its_heading() -> None:
     assert "hasDetail" not in small
 
 
+def test_the_large_widget_spends_its_air_on_a_seventh_row() -> None:
+    """The one distance the two wide sizes do not share, and the tightest figure here.
+
+    A row is a shade under 36 points - the heading, the line under it, and the three
+    between them - so seven of them, the gap between each pair, the footer and the
+    widget's own inset come to within a point or two of what a 6.1in phone's large
+    widget holds. Which is why the gap is a name rather than a bare number in the line
+    that draws it: it is the first figure to put back if a row is ever drawn clipped.
+    """
+    source = script_source()
+    assert "const LARGE_GAP = 9;" in source
+    wide = source[source.index("function renderList(") : source.index("function titleRow(")]
+    assert 'widget.addSpacer(family === "large" ? LARGE_GAP : 8);' in wide
+
+
 def test_the_time_is_the_weight_the_row_is_read_for() -> None:
     """Semibold and bold are the same weight to look at when a Mac draws an iPhone's
     widget, so a figure set in semibold reads as heavier than its row on a mirrored
@@ -1170,12 +1209,81 @@ def test_a_small_widget_holds_two_flights_of_three_lines() -> None:
     assert "detailText(line, flight);" in drawn
     assert "targetValue(line, flight);" in drawn
     # Every line of a flight is the same distance under the one above it, and the only
-    # wider gap is the one that separates two flights.
+    # wider gap is the one that separates two flights - which is no longer a distance at
+    # all, but whatever the square has left after the six lines and the footer.
     assert drawn.count("widget.addSpacer(SMALL_GAP)") == 2
-    assert "widget.addSpacer(SMALL_GAP * 2)" in drawn
+    assert "widget.addSpacer();" in drawn
     # And nothing on those lines carries air of its own inside that distance: a pill with
     # its own padding is a line held further from its neighbours than any other.
     assert 'const pad = family === "small" ? 0 : 2;' in source
+
+
+def test_the_small_widget_fills_its_square() -> None:
+    """Two blocks of three lines, and the room left over handed to the gap between them.
+
+    The room used to be left where it fell, in a heap between the second flight and the
+    footer, and the inset was cut to eleven points on the reading that a 155pt square
+    holding six lines has nothing to spare. It has: the lines are the size they are, and
+    what the square has left over is enough to stand the two blocks apart and still keep
+    the words the distance from the rounded corner that every other size gives them.
+    """
+    source = script_source()
+    assert "const INSET = 14;" in source
+    assert "widget.setPadding(INSET, INSET, INSET, INSET);" in source
+    # No size drawn tighter than the rest.
+    assert 'family === "small" ? 11' not in source
+    drawn = source[source.index("function renderSmall(") : source.index("function renderList(")]
+    assert "widget.addSpacer();" in drawn
+    assert "SMALL_GAP * 2" not in drawn
+
+
+def test_the_small_widget_draws_every_route_at_one_size() -> None:
+    """The airports under one flight, set the size of the airports under the other.
+
+    The route was the half of the heading that gave way, and what it gave way to was
+    whatever else landed on that row: a longer number or a friend's disc left it less to
+    fit into, so the same seven characters came out smaller on the second flight than on
+    the first. Nothing about the flight was different, only the row.
+
+    It is set now: two points under the number, with an arrow the server sends without
+    the spaces around it and the air between the two runs handed back to the figures.
+    """
+    source = script_source()
+    drawn = source[source.index("function titleRow(") : source.index("// Whose flight it is")]
+    assert "minimumScaleFactor" not in drawn
+    # The air between the number and the route is the wide sizes' alone.
+    assert 'if (family !== "small") {' in drawn
+    assert "row.addSpacer(3);" in drawn
+
+
+def test_the_square_gets_the_arrow_without_the_spaces_around_it(settings: Settings) -> None:
+    """Seven characters rather than nine, on the one size where the heading is holding
+    the number as well and those two spaces are most of an airport code's worth of it."""
+    small = payload([(booking(), None)], settings, family="small")
+    assert small["flights"][0]["route"] == "JFK→LAX"
+    # Every other size sets the route the way a board sets it.
+    for asked in ("medium", "large", "accessoryRectangular"):
+        wide = payload([(booking(), None)], settings, family=asked)
+        assert wide["flights"][0]["route"] == "JFK → LAX", asked
+
+
+def test_the_small_widget_sends_its_one_tap_to_the_board() -> None:
+    """iOS gives a small widget a single tap target for the whole square - Link is a
+    medium and large size thing - so whichever of the two flights the thumb lands on, the
+    square opens what it was pointed at. It was pointed at the top flight, which made a
+    tap on the second one open the first: a row that is a thing to press on every other
+    size, answering with the wrong flight here.
+
+    The board is the one page that is not the wrong answer to either tap. The Lock Screen
+    keeps its flight, because the one it draws and the one it opens are the same flight.
+    """
+    source = script_source()
+    drawn = source[source.index("function renderSmall(") : source.index("function renderList(")]
+    assert "widget.url = board;" in drawn
+    assert "flights[0].detail_url" not in drawn
+    assert "renderSmall(widget, flights.slice(0, SMALL_FLIGHTS), logos, data.board_url);" in source
+    lock = source[source.index("function renderAccessory(") : source.index("function renderSmall(")]
+    assert "widget.url = flight.detail_url;" in lock
 
 
 def test_a_friends_disc_has_the_letter_drawn_on_it_rather_than_set() -> None:
@@ -1219,18 +1327,19 @@ def test_the_wide_sizes_draw_every_row_at_one_size() -> None:
     """A type size on a widget is chosen once, and a shrink factor un-chooses it.
 
     The sizes above are picked so that a flight is drawn the same on a medium widget as
-    on a large one. A shrink factor on the route, the pill or the rung does the same
-    thing one row further down: it hands the size to whatever else landed on that
-    particular line, so the flight at the foot of a large widget comes out larger than
-    the flight above it because its number was shorter or its status a shorter word.
+    on a large one. A shrink factor on the pill or the rung does the same thing one row
+    further down: it hands the size to whatever else landed on that particular line, so
+    the flight at the foot of a large widget comes out larger than the flight above it
+    because its status was a shorter word.
 
-    The narrow size keeps them. There the route shares its line with the number and the
-    rung shares its line with the pill, on a 155pt square where neither pair fits, so
-    something has to give on every row rather than on the fullest one.
+    The narrow size keeps them on the two that share a line with the pill, where the
+    longest status and the longest rung do not fit beside each other on a 155pt square
+    and a word cut in half is worse than a word read small. The route no longer gives:
+    it is set two points under the number and its arrow comes without spaces, so one
+    size draws it on every row.
     """
     source = script_source()
     for drawn in (
-        source[source.index("function titleRow(") : source.index("// Whose flight it is")],
         source[source.index("function targetLabel(") : source.index("// The other half")],
         source[source.index("function pill(") : source.index("// The bottom of the widget")],
     ):
@@ -1293,7 +1402,7 @@ def test_the_route_is_set_rather_than_left_to_fit() -> None:
     """
     source = script_source()
     scale = source[source.index("const TYPE =") : source.index("const server = connect();")]
-    assert "{ heading: 12, route: 11, detail: 10, pill: 10, label: 10, time: 13 }" in scale
+    assert "{ heading: 12, route: 10, detail: 10, pill: 10, label: 10, time: 13 }" in scale
     assert "{ heading: 14, route: 12, detail: 11, pill: 10, label: 11, time: 13 }" in scale
     # And the one branch in it is the small size's: medium and large are one scale, so
     # neither can drift from the other.
