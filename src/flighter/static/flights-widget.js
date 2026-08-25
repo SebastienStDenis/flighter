@@ -102,6 +102,11 @@ const BETWEEN_RUNS = 8;
 const SMALL_FLIGHTS = 2;
 const SMALL_GAP = 3;
 
+// What every size but the Lock Screen keeps between its words and its own edge. A widget
+// whose words start against its rounded corner reads as one that ran out of room,
+// whatever it is holding.
+const INSET = 14;
+
 const family = config.widgetFamily || "medium";
 const isAccessory = family.startsWith("accessory");
 // Per-element tap targets exist only on medium and large. Everywhere else the whole
@@ -395,11 +400,13 @@ function newWidget() {
     widget.setPadding(2, 2, 2, 2);
   } else {
     widget.backgroundColor = BACKGROUND;
-    // A little tighter on the small size, which holds two flights of three lines each.
-    // Tighter, and not as tight as it will go: a widget whose words start against its
-    // own rounded corner reads as one that ran out of room, whatever it is holding.
-    const inset = family === "small" ? 11 : 14;
-    widget.setPadding(inset, inset, inset, inset);
+    // The same inset on every size. The small one was drawn three points tighter, on
+    // the reading that two flights of three lines each is what a 155pt square barely
+    // holds - but the lines are what they are, and what that widget actually has is
+    // room to spare below them. Tightening the one size with air left over was three
+    // points spent to make a widget look full, and what it bought was words nearer the
+    // rounded corner than any other size sets them.
+    widget.setPadding(INSET, INSET, INSET, INSET);
   }
   return widget;
 }
@@ -452,10 +459,14 @@ function renderSmall(widget, flights, logos) {
 
   flights.forEach((flight, index) => {
     if (index > 0) {
-      // The one distance here that is not SMALL_GAP. Every line of a flight is the same
-      // distance under the line above it, so the only gap that reads as a break is the
-      // one between two flights.
-      widget.addSpacer(SMALL_GAP * 2);
+      // The one distance here that is not SMALL_GAP, and the one that is not a distance
+      // at all: every line of a flight is the same three points under the line above it,
+      // so the only gap that reads as a break is the one between two flights, and that
+      // is the gap the square's spare height is handed to. It was six points with the
+      // rest of the room left in a heap under the second flight, which drew two blocks
+      // pinned to the top of a widget with space to give them. Given the room, the
+      // two blocks stand apart and the widget is filled by what is on it.
+      widget.addSpacer();
     }
     // The number and the route on one line. The two do not fit at the size the rest of
     // this widget is read at, so the route is the half that gives: it shrinks against

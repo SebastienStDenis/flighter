@@ -87,6 +87,12 @@ on it, most visibly. The small size is the exception: there the route shares its
 with the number and the rung shares its line with the pill, on a square where neither
 pair fits, so something gives on every row rather than on the fullest one.
 
+The small size draws its two flights as blocks of three lines, and what the square has
+left over after those six lines and the footer goes between the two blocks rather than
+under them: they stand apart and fill the widget instead of sitting pinned to the top of
+it. Its words keep the same distance from the rounded corner as every other size's, which
+they did not while the room was thought to be spare.
+
 The row is the board's card, narrowed. The pill is the card's pill, the places are the
 card's places and the end of the row is the card's footer, each drawn on exactly the
 rows the card draws it on, because a widget that answers a question the card has already
