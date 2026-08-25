@@ -52,15 +52,17 @@ router = APIRouter()
 # What each size has room for, in rows of two lines. The phone says which size is
 # asking; the server cuts the list to it rather than sending a list every size has to
 # cut for itself. A lock screen has room for one flight, a 155pt square for two, and a
-# large widget for twice what the medium one holds - past that it is a trip itinerary,
-# which is what the web UI is for.
+# large widget for seven - twice the medium's height, and one row more than twice its
+# rows once the air between them is the air a break between two flights needs rather
+# than the air the size happened to have. Past seven it is a trip itinerary, which is
+# what the web UI is for.
 FLIGHTS_BY_FAMILY: Final = {
     "accessoryRectangular": 1,
     "accessoryCircular": 1,
     "accessoryInline": 1,
     "small": 2,
     "medium": 3,
-    "large": 6,
+    "large": 7,
 }
 # What a request that did not name its size gets: the medium widget's share. A script
 # that has not replaced itself yet is the only thing that asks without saying, and it

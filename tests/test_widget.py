@@ -740,6 +740,22 @@ def test_in_the_order_they_now_leave_cut_to_what_the_size_holds(settings: Settin
     assert [_id(flight) for flight in lock["flights"]] == [4]
 
 
+def test_the_large_widget_holds_seven_and_cuts_the_eighth(settings: Settings) -> None:
+    """Twice the medium's height, and one row more than twice its rows.
+
+    What a size holds is what its height holds once the gap between two flights is the
+    gap a break between two flights needs. The large widget's used to be half as wide
+    again as the medium's, which was air the size happened to have rather than air the
+    column asked for, and three points off each of six of them is a seventh flight. Past
+    seven it is a trip itinerary, which is what the web UI is for.
+    """
+    rows: list[FlightRow] = [
+        (booking(id=n, scheduled_departure_utc=NOW + timedelta(hours=n)), None) for n in range(1, 9)
+    ]
+    large = payload(rows, settings, family="large")
+    assert [_id(flight) for flight in large["flights"]] == [1, 2, 3, 4, 5, 6, 7]
+
+
 def test_a_size_nobody_has_heard_of_gets_the_middle_one(settings: Settings) -> None:
     """A family the server does not know is a widget iOS grew after this was written.
 
@@ -1137,6 +1153,21 @@ def test_every_row_keeps_the_same_line_under_its_heading() -> None:
     small = source[source.index("function renderSmall(") : source.index("function renderList(")]
     assert "line.size = new Size(0, UNDER_HEADING);" in small
     assert "hasDetail" not in small
+
+
+def test_the_large_widget_spends_its_air_on_a_seventh_row() -> None:
+    """The one distance the two wide sizes do not share, and the tightest figure here.
+
+    A row is a shade under 36 points - the heading, the line under it, and the three
+    between them - so seven of them, the gap between each pair, the footer and the
+    widget's own inset come to within a point or two of what a 6.1in phone's large
+    widget holds. Which is why the gap is a name rather than a bare number in the line
+    that draws it: it is the first figure to put back if a row is ever drawn clipped.
+    """
+    source = script_source()
+    assert "const LARGE_GAP = 9;" in source
+    wide = source[source.index("function renderList(") : source.index("function titleRow(")]
+    assert 'widget.addSpacer(family === "large" ? LARGE_GAP : 8);' in wide
 
 
 def test_the_time_is_the_weight_the_row_is_read_for() -> None:

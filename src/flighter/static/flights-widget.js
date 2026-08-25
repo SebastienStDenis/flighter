@@ -141,6 +141,13 @@ const TYPE =
 // column on the words rather than on the spacing.
 const UNDER_HEADING = Math.ceil(TYPE.time * LINE_HEIGHT);
 
+// The distance between two flights on the large widget, and what a seventh row costs.
+// A row is the heading, the line under it and the three points between them - a shade
+// under 36 - so seven of them with this between and the footer under them come to
+// within a point or two of what the size holds on a 6.1in phone. It is the tightest
+// figure here, and the one to put back first if a row ever comes out clipped.
+const LARGE_GAP = 9;
+
 const server = connect();
 const result = server ? await load(server) : null;
 const widget = result ? await buildWidget(result) : setupWidget();
@@ -483,7 +490,14 @@ function renderSmall(widget, flights, logos) {
 function renderList(widget, flights, logos) {
   flights.forEach((flight, index) => {
     if (index > 0) {
-      widget.addSpacer(family === "large" ? 12 : 8);
+      // What separates one flight from the next, and the only distance the two wide
+      // sizes do not share. The large widget's used to be half as wide again as the
+      // medium's, which was air it had and the medium did not; what it bought was a
+      // column that read no differently and a seventh flight that did not fit. Three
+      // points off it is the seventh row, so that is where they went: the gap is still
+      // wider than the one under a heading, which is all it has to be to say that a
+      // break between two flights is not a break between two lines of one.
+      widget.addSpacer(family === "large" ? LARGE_GAP : 8);
     }
     const row = widget.addStack();
     row.layoutVertically();

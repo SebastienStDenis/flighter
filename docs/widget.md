@@ -51,7 +51,7 @@ does the same thing at once, and says so.
 | `accessoryRectangular` (Lock Screen) | Next flight only, three tight lines. **iOS 16 or later.** |
 | Small | Two flights, three lines each |
 | Medium | Up to three flights, two lines each, each row tappable |
-| Large | Up to six of the same rows, with more air between them |
+| Large | Up to seven of the same rows, with a little more air between them |
 
 The widget tells the server which size it is, and the server sends a list that long. How
 many rows fit is the one thing about the layout the server cannot work out for itself,
@@ -114,6 +114,14 @@ heading, and a flight with nothing at all, take the same room as a flight with a
 The gap between two rows is a fixed one, and a row that closed up its own spare space
 would sit nearer its neighbour than the rest of the column for no reason a reader could
 see.
+
+On the large size the gap between two rows is nine points rather than the twelve it was.
+Twelve was air the size happened to have rather than air the column needed - beside the
+medium's eight it read no differently - and three points off each of six gaps is a
+seventh flight, which the size now holds. It is the tightest figure in the layout: seven
+rows, the footer and the widget's own inset come to within a point or two of what the
+large widget holds on a 6.1in phone, so it is the first figure to put back should a row
+ever come out clipped.
 
 The marks are `plane-takeoff`, `plane-landing` and `armchair` from Lucide, which is the
 icon set the web UI is drawn with, and they stand where TERM, GATE and SEAT used to. The
