@@ -13,7 +13,7 @@ import pytest
 from flighter import prefs
 from flighter.config import Settings
 from flighter.models import Booking, EventKind, FlightEvent
-from flighter.notify import MESSAGES_URL, PRIORITY_QUIET, Notifier, PushFailed
+from flighter.notify import MESSAGES_URL, PRIORITY, Notifier, PushFailed
 from flighter.prefs import Prefs
 
 ORIGIN_TZ = "America/New_York"
@@ -101,13 +101,12 @@ async def test_title_and_url_name_the_flight(settings: Settings) -> None:
 
 
 @pytest.mark.parametrize(
-    ("flight_event", "priority", "message"),
+    ("flight_event", "message"),
     [
-        (event(EventKind.GATE_ASSIGNED, new="B22"), "0", "Gate B22."),
-        (event(EventKind.GATE_CHANGED, old="B22", new="C14"), "1", "Gate changed from B22 to C14."),
+        (event(EventKind.GATE_ASSIGNED, new="B22"), "Gate B22."),
+        (event(EventKind.GATE_CHANGED, old="B22", new="C14"), "Gate changed from B22 to C14."),
         (
             event(EventKind.DEPARTURE_DELAYED, old=DEPARTS.isoformat(), new=DELAYED.isoformat()),
-            "0",
             "Delayed 35m. Departs 19:35 EDT.",
         ),
         (
@@ -116,27 +115,24 @@ async def test_title_and_url_name_the_flight(settings: Settings) -> None:
                 old=DEPARTS.isoformat(),
                 new=(DEPARTS + timedelta(days=1, hours=2, minutes=5)).isoformat(),
             ),
-            "0",
             "Delayed 1d 2h. Departs 21:05 EDT.",
         ),
-        (event(EventKind.DEPARTED, new=DELAYED.isoformat()), "0", "Departed 19:35 EDT."),
-        (event(EventKind.LANDED, new=DELAYED.isoformat()), "0", "Landed 16:35 PDT."),
-        (
-            event(EventKind.BAGGAGE_CLAIM_ASSIGNED, new="carousel 3"),
-            "0",
-            "Baggage claim carousel 3.",
-        ),
-        (event(EventKind.CANCELLED, old="false", new="true"), "1", "Cancelled."),
-        (event(EventKind.DIVERTED, old="false", new="true"), "1", "Diverted."),
-        (event(EventKind.DIVERTED, new="YOW"), "1", "Diverted to YOW."),
+        (event(EventKind.DEPARTED, new=DELAYED.isoformat()), "Departed 19:35 EDT."),
+        (event(EventKind.LANDED, new=DELAYED.isoformat()), "Landed 16:35 PDT."),
+        (event(EventKind.BAGGAGE_CLAIM_ASSIGNED, new="carousel 3"), "Baggage claim carousel 3."),
+        (event(EventKind.CANCELLED, old="false", new="true"), "Cancelled."),
+        (event(EventKind.DIVERTED, old="false", new="true"), "Diverted."),
+        (event(EventKind.DIVERTED, new="YOW"), "Diverted to YOW."),
     ],
 )
-async def test_message_and_priority_per_kind(
-    settings: Settings, flight_event: FlightEvent, priority: str, message: str
+async def test_message_per_kind(
+    settings: Settings, flight_event: FlightEvent, message: str
 ) -> None:
     sent = (await push(settings, flight_event)).only
     assert sent["message"] == message
-    assert sent["priority"] == priority
+    # Every push arrives the same way, whatever it says: a cancellation is not louder
+    # than a gate, and neither of them overrides the phone's quiet hours.
+    assert sent["priority"] == str(PRIORITY)
     # Plain text on the lock screen: no symbols, no emoji, nothing to decode. The
     # route arrow in the title is the one glyph, and it reads as itself.
     assert sent["message"].isascii()
@@ -268,21 +264,22 @@ async def test_a_refusal_carries_pushovers_own_reason(settings: Settings) -> Non
         )
 
 
-async def test_budget_alert_is_high_priority(settings: Settings) -> None:
+async def test_budget_alert_names_the_cap_it_reached(settings: Settings) -> None:
     recorder = Recorder()
     await Notifier(settings, transport=recorder.transport).budget_tripped(
         Decimal("4.12"), Decimal("4.00")
     )
     sent = recorder.only
-    assert sent["priority"] == "1"
+    assert sent["priority"] == str(PRIORITY)
     assert sent["title"] == "AeroAPI budget reached"
     assert "$4.12 of the $4.00 monthly cap" in sent["message"]
 
 
-async def test_the_check_push_does_not_buzz_a_pocket(settings: Settings) -> None:
+async def test_the_check_push_arrives_like_any_other(settings: Settings) -> None:
     recorder = Recorder()
     await Notifier(settings, transport=recorder.transport).check()
-    assert recorder.only["priority"] == str(PRIORITY_QUIET)
+    assert recorder.only["message"] == "Test notification."
+    assert recorder.only["priority"] == str(PRIORITY)
 
 
 # -- importing a marked email --------------------------------------------------------
@@ -304,7 +301,7 @@ async def test_an_import_links_to_the_flight_page(settings: Settings) -> None:
     assert sent["title"] == "Flight added"
     assert sent["message"] == "DL1234 JFK → LAX."
     assert sent["url"] == "https://flights.example.com/f/7"
-    assert sent["priority"] == "0"
+    assert sent["priority"] == str(PRIORITY)
 
 
 async def test_a_duplicate_import_says_nothing_was_added(settings: Settings) -> None:
@@ -326,7 +323,7 @@ async def test_a_failed_import_links_to_the_problems_page(settings: Settings) ->
     assert sent["title"] == "Email could not be imported"
     assert sent["url"] == "https://flights.example.com/mail"
     assert sent["url_title"] == "Open flighter"
-    assert sent["priority"] == "0"
+    assert sent["priority"] == str(PRIORITY)
     # The headline is the same for every failure, so the body names the email, says what
     # went wrong as a sentence, and says where the email is now.
     assert sent["message"] == (

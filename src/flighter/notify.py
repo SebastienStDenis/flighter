@@ -31,22 +31,12 @@ MAX_MESSAGE_LENGTH = 1024
 MAX_TITLE_LENGTH = 250
 MAX_URL_LENGTH = 512
 
-# The scale runs -2 (no notification at all) to 2 (repeats until acknowledged).
-#
-# Priority 1 is the only one that sounds during the quiet hours a person has set, so it is
-# reserved for the changes that cost you the flight if you sleep through them: a gate
-# change, a cancellation, a diversion. Everything else - an assigned gate, a delay, a
-# landing, a bag belt - is news you act on when you next look at the phone, so it goes out
-# at 0 and respects quiet hours.
-#
-# Nothing here uses 2: emergency priority re-alerts every few minutes until the phone is
-# unlocked and the notification acknowledged, and none of this is an outage page. Even a
-# cancellation is read once and then acted on with the airline.
-PRIORITY_HIGH = 1
-PRIORITY_NORMAL = 0
-PRIORITY_QUIET = -1
-
-_HIGH_PRIORITY_KINDS = frozenset({EventKind.CANCELLED, EventKind.DIVERTED, EventKind.GATE_CHANGED})
+# The scale runs -2 (no notification at all) to 2 (repeats until acknowledged). Every
+# push goes out at 0: it arrives like any other app's notification, sounds unless the
+# phone is in a quiet period its owner set, and is read when they next look at it. A
+# gate change is worth knowing about, but somebody who has asked not to be woken has
+# already answered the question of whether it is worth waking them.
+PRIORITY = 0
 
 # The preference each kind of change is pushed under. A person chooses between classes of
 # news rather than between ten event kinds, so several kinds share one switch. A kind that
@@ -215,11 +205,9 @@ class Notifier:
         field = _NOTIFY_FIELDS.get(EventKind(event.kind))
         if field is None or not wanted(field):
             return
-        priority = PRIORITY_HIGH if event.kind in _HIGH_PRIORITY_KINDS else PRIORITY_NORMAL
         await self._send(
             title=flight_label(booking),
             message=event_message(event, origin_tz=origin_tz, dest_tz=dest_tz),
-            priority=priority,
             url=f"{prefs.public_base_url()}/f/{booking.id}",
             url_title=OPEN_FLIGHT,
         )
@@ -227,10 +215,9 @@ class Notifier:
     async def mail_imported(self, bookings: Sequence[Booking], *, outcome: str) -> None:
         """A marked email became flights.
 
-        Priority 0: knowing the import worked is worth a glance at the phone, never worth
-        waking somebody up, and the flight page is the link because it carries the live
-        gate and status. iCloud publishes no web address for a single calendar event, so
-        there is nothing to link to on that side even when one has been written.
+        The flight page is the link because it carries the live gate and status. iCloud
+        publishes no web address for a single calendar event, so there is nothing to link
+        to on that side even when one has been written.
 
         Best effort: the ingest log is the record of the decision and is written whether
         or not the phone heard about it, and there is no column to retry a push from.
@@ -243,7 +230,6 @@ class Notifier:
             await self._send(
                 title=title,
                 message=body.format(flights=flights or "The flight"),
-                priority=PRIORITY_NORMAL,
                 url=self._flight_url(bookings),
                 url_title=OPEN_FLIGHT,
             )
@@ -253,9 +239,8 @@ class Notifier:
     async def mail_failed(self, *, message_id: str, subject: str, reason: str | None) -> None:
         """Nothing came of an email that was marked.
 
-        Priority 0 as well: an import that did not happen costs nobody a flight. The link
-        opens the email page, which is where the email can be tried again, written off,
-        or opened in Mail. Best effort, for the same reason as above.
+        The link opens the email page, which is where the email can be tried again,
+        written off, or opened in Mail. Best effort, for the same reason as above.
 
         The words come from `notices` so that the push and that page say the same thing.
         """
@@ -266,7 +251,6 @@ class Notifier:
             await self._send(
                 title=notice.headline,
                 message=notice.body,
-                priority=PRIORITY_NORMAL,
                 url=f"{prefs.public_base_url()}/mail",
                 url_title=OPEN_APP,
             )
@@ -281,14 +265,13 @@ class Notifier:
                 f"${spend:.2f} of the ${cap:.2f} monthly cap spent. "
                 "Updates are paused until the cap is raised or the month ends."
             ),
-            priority=PRIORITY_HIGH,
             url=prefs.public_base_url(),
             url_title=OPEN_APP,
         )
 
     async def check(self) -> None:
-        """A real push, quietly, because a token that is never spent proves nothing."""
-        await self._send(title="flighter", message="Test notification.", priority=PRIORITY_QUIET)
+        """A real push, because a token that is never spent proves nothing."""
+        await self._send(title="flighter", message="Test notification.")
 
     @staticmethod
     def _flight_url(bookings: Sequence[Booking]) -> str:
@@ -300,7 +283,6 @@ class Notifier:
         *,
         title: str,
         message: str,
-        priority: int,
         url: str | None = None,
         url_title: str | None = None,
     ) -> None:
@@ -312,7 +294,7 @@ class Notifier:
             "user": settings.pushover_user_key,
             "title": title[:MAX_TITLE_LENGTH],
             "message": message[:MAX_MESSAGE_LENGTH],
-            "priority": str(priority),
+            "priority": str(PRIORITY),
         }
         if url:
             data["url"] = url[:MAX_URL_LENGTH]

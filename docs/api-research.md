@@ -402,7 +402,7 @@ scheme: there is no header, no bearer token and no signature.
 | `html` / `monospace` | no | `1` | Mutually exclusive |
 | `retry` / `expire` / `callback` | priority 2 only | see below | |
 
-### 3.2 Priority, and why this service only uses three of the five
+### 3.2 Priority, and why this service only uses one of the five
 
 | Value | Name | Behaviour |
 | --- | --- | --- |
@@ -412,11 +412,9 @@ scheme: there is no header, no bearer token and no signature.
 | `1` | high | **Bypasses quiet hours**, always plays a sound and vibrates, displayed in red |
 | `2` | emergency | Repeats until acknowledged on the device |
 
-The quiet-hours line is the one that decides the mapping. A gate change, a cancellation and a
-diversion are exactly the events that cost you the flight if you sleep through them, so they go at
-`1`; everything else is read when you next look at the phone and goes at `0`, respecting quiet
-hours. The connectivity check sends at `-1` so that proving the credentials work does not buzz a
-pocket.
+Everything this service sends goes at `0`, whatever it says: a push arrives like any other
+app's notification and respects the quiet hours its owner set. Sorting the news into loud and quiet
+is a judgement the phone's owner has already made, and `1` overrules it.
 
 `2` is deliberately unused. It requires `retry` (minimum 30 seconds) and `expire` (maximum 10800),
 re-alerts up to 50 times until someone acknowledges it on the device, and returns a `receipt` to
@@ -455,8 +453,8 @@ The cost is on the receiving side: the client app is a one-time purchase per pla
 
 `POST https://api.pushover.net/1/users/validate.json` with `token` and `user` answers `status: 1`
 and lists the account's devices. Useful for a setup check that should not push. This service sends
-a real message at priority `-1` instead, on the grounds that a check which proves delivery end to
-end is worth more than one that proves only that a key parses.
+a real message instead, on the grounds that a check which proves delivery end to end is worth more
+than one that proves only that a key parses.
 
 
 ---
@@ -1128,5 +1126,5 @@ malformed key still returns 4xx, but the reason lives in the JSON `errors` array
 status code alone throws away the one sentence that says which key is wrong. Parse the body.
 
 The other correction is the quiet-hours rule: priority `0` is silently demoted to `-1` while the
-user is in quiet hours, so a gate change sent at the default priority can arrive silently at 3am.
-Only `1` bypasses it.
+user is in quiet hours, so a gate change can arrive silently at 3am. Only `1` bypasses it, and
+nothing here does.
