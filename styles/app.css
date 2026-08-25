@@ -235,9 +235,15 @@
   .brand {
     @apply inline-flex items-center gap-[0.3em];
 
-    /* The route runs under the word, a hair below the baseline - which is this far
-       below the middle of the line box, the only place CSS gives a rule to hang from. */
-    --under: 0.5em;
+    /* The word is painted over the route rather than struck through by it. The rule is
+       a layer of this box rather than of the button around it, so it passes behind the
+       letters and stands in the gaps between them. */
+    isolation: isolate;
+
+    /* The route crosses the word at the middle of its lowercase letters, which is this
+       far below the middle of the line box: the box is deep enough for an F and a g,
+       and the word is mostly neither. */
+    --cross: 0.145em;
     --mark: #0c60a3;
   }
 
@@ -251,28 +257,32 @@
     @apply relative;
   }
 
-  /* Unbroken under the letters: a line that stepped aside for the descender would read
-     as two lines, and the whole of it is that it is one. It ends under the tail, so the
+  /* Unbroken across the word: a line that stepped aside for the letters would read as
+     several, and the whole of it is that it is one. It ends under the tail, so the
      aircraft sits on the line rather than after it. */
   .brand-name::after {
     @apply pointer-events-none absolute left-0 h-px -translate-y-1/2 rounded-full
       content-[''];
-    top: calc(50% + var(--under));
+    top: calc(50% + var(--cross));
     right: -0.5em;
+    z-index: -1;
     background-color: var(--mark);
   }
 
   .brand-plane {
     color: var(--mark);
-    translate: 0 var(--under);
+    translate: 0 var(--cross);
   }
 
   /* The leg still to come: grey and short, so the mark ends on the aircraft rather
      than on the dash behind it. */
   .brand-ahead {
-    @apply h-px w-[0.28em] rounded-full;
-    background-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
-    translate: 0 var(--under);
+    @apply h-[0.5px] w-[0.18em] rounded-full;
+    /* Closer than the flex gap sets, because the aircraft's nose stops short of the
+       edge of its own box and the gap is measured from the box. */
+    margin-left: -0.26em;
+    background-color: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
+    translate: 0 var(--cross);
   }
 
   /* The route: two airports, one rule between them, and the aircraft at the fraction of
