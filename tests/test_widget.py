@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import re
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime, timedelta
@@ -82,9 +83,13 @@ AIRPORTS = {
 }
 
 
-def detail(flight: dict[str, Any]) -> Any:
-    """The line under the heading: where to be, or the day it leaves while nobody is."""
-    return flight["detail"]
+def detail(flight: dict[str, Any]) -> list[tuple[Any, str]]:
+    """The line under the heading, in the runs it is drawn in: a mark and what it heads.
+
+    The phone draws these in order - the glyph, then the figures behind it - so a run is
+    the pair, and a line with nothing on it is no runs at all.
+    """
+    return [(run["icon"], run["text"]) for run in flight["detail"]]
 
 
 def target(flight: dict[str, Any]) -> tuple[Any, Any]:
@@ -111,7 +116,7 @@ def test_upcoming_flight(settings: Settings) -> None:
         "route": "JFK → LAX",
         "status_label": "Scheduled",
         "status_tone": "quiet",
-        "detail": "Fri 18 Sep 18:00 UTC",
+        "detail": [{"icon": None, "text": "Fri 18 Sep 18:00 UTC"}],
         "target_label": None,
         "target_value": None,
     }
@@ -138,7 +143,7 @@ def test_the_script_draws_the_disc_the_way_the_page_mixes_it(settings: Settings)
 def test_the_day_it_leaves_is_read_at_the_origin(settings: Settings) -> None:
     far = booking(origin_iata="HND", scheduled_departure_utc=NOW + timedelta(days=6))
     flight = payload([(far, None)], settings, airports=AIRPORTS)["flights"][0]
-    assert detail(flight) == "Sat 19 Sep 03:00 JST"
+    assert detail(flight) == [(None, "Sat 19 Sep 03:00 JST")]
 
 
 def test_a_departure_carries_its_date(settings: Settings) -> None:
@@ -151,12 +156,14 @@ def test_a_departure_carries_its_date(settings: Settings) -> None:
     """
     late = booking(scheduled_departure_utc=NOW + timedelta(hours=30))
     flight = payload([(late, None)], settings, airports=AIRPORTS)["flights"][0]
-    assert detail(flight) == "Sun 13 Sep 20:00 EDT"
+    assert detail(flight) == [(None, "Sun 13 Sep 20:00 EDT")]
     assert flight["status_label"] == "Scheduled"
     assert flight["status_tone"] == "quiet"
 
     # With no airport on file the day is read off UTC rather than left blank.
-    assert detail(payload([(late, None)], settings)["flights"][0]) == "Mon 14 Sep 00:00 UTC"
+    assert detail(payload([(late, None)], settings)["flights"][0]) == [
+        (None, "Mon 14 Sep 00:00 UTC")
+    ]
 
 
 def test_a_flight_inside_its_day_turns_its_line_over_to_the_building(
@@ -175,7 +182,9 @@ def test_a_flight_inside_its_day_turns_its_line_over_to_the_building(
     # And the rung appears with it: days out there was nothing to be waiting on, and now
     # there is, which is the same line the card's footer comes and goes on.
     assert target(flight) == ("Departs", "Sun 02:00")
-    assert detail(flight) == "TERM - · GATE -"
+    # Nothing has been named yet, so there is nothing to name: the mark is what a row
+    # waiting on a gate used to draw a dash for, and it arrives with the gate.
+    assert detail(flight) == []
 
 
 def test_day_of_shows_the_terminal_the_gate_and_the_seat(settings: Settings) -> None:
@@ -184,17 +193,25 @@ def test_day_of_shows_the_terminal_the_gate_and_the_seat(settings: Settings) -> 
     gated = snapshot(scheduled_out=DEPARTURE, gate_origin="B22", terminal_origin="4")
     flight = payload([(booking(seat="14A"), gated)], settings, airports=AIRPORTS)["flights"][0]
     assert flight["phase"] == "day_of"
-    assert detail(flight) == "TERM 4 · GATE B22 · SEAT 14A"
+    # The end being walked to behind a plane climbing, then the seat behind a seat. The
+    # terminal keeps the T a boarding pass prints in front of it, because a bare 4 beside
+    # a bare B22 is two figures with nothing to tell them apart.
+    assert detail(flight) == [("takeoff", "T 4 B22"), ("seat", "14A")]
     assert target(flight) == ("Departs", "14:40")
     assert flight["status_label"] == "On time"
     assert flight["status_tone"] == "ok"
 
 
-def test_day_of_with_nothing_assigned_yet_is_the_boxes_waiting(settings: Settings) -> None:
-    """Dashed rather than dropped: an empty box is the airport not having said yet, and
-    a line that comes and goes as gates are published is a row that moves under the eye."""
+def test_day_of_with_nothing_assigned_yet_draws_no_line(settings: Settings) -> None:
+    """A place the airport has not named is left out rather than dashed.
+
+    The dashes were there to hold the line still while gates are published. But a dash is
+    an empty box, and a row that has three boxes at most and two of them empty says
+    nothing in the space where it says everything. What holds the line still now is the
+    mark in front of it, which is drawn as soon as one figure lands behind it.
+    """
     flight = payload([(booking(), snapshot())], settings)["flights"][0]
-    assert detail(flight) == "TERM - · GATE -"
+    assert detail(flight) == []
 
 
 def test_a_delayed_departure_states_the_time_it_now_leaves(settings: Settings) -> None:
@@ -205,7 +222,9 @@ def test_a_delayed_departure_states_the_time_it_now_leaves(settings: Settings) -
     # Delayed to when is the whole question the pill leaves open, and the time answers
     # it from the estimate rather than from the schedule.
     assert target(flight) == ("Departs", "19:10")
-    assert detail(flight) == "TERM - · GATE - · SEAT 14A"
+    # No terminal and no gate yet, so no plane and nothing behind it. The seat is the
+    # one thing that was known when the flight was booked, and it stands on its own.
+    assert detail(flight) == [("seat", "14A")]
 
 
 def test_the_run_up_to_departure_keeps_the_gate(settings: Settings) -> None:
@@ -214,7 +233,7 @@ def test_the_run_up_to_departure_keeps_the_gate(settings: Settings) -> None:
     imminent = snapshot(scheduled_out=NOW + timedelta(minutes=20), gate_origin="B22")
     flight = payload([(booking(), imminent)], settings)["flights"][0]
     assert flight["phase"] == "day_of"
-    assert detail(flight) == "TERM - · GATE B22"
+    assert detail(flight) == [("takeoff", "B22")]
     assert target(flight) == ("Departs", "18:20")
 
 
@@ -234,7 +253,7 @@ def test_pushback_turns_the_line_round_to_the_far_end(settings: Settings) -> Non
     assert flight["phase"] == "taxiing"
     assert flight["status_label"] == "Taxiing"
     assert flight["status_tone"] == "live"
-    assert detail(flight) == "GATE 12 · TERM B"
+    assert detail(flight) == [("landing", "12 T B")]
     assert target(flight) == ("Lands", "18:15")
 
 
@@ -253,7 +272,7 @@ def test_airborne_states_the_landing_and_reads_the_line_backwards(settings: Sett
     assert flight["phase"] == "airborne"
     # Where they are, then where they are going: the seat first because that is where
     # the line is being read from, and the gate and the terminal at the far end after it.
-    assert detail(flight) == "SEAT 32A · GATE 12 · TERM B"
+    assert detail(flight) == [("seat", "32A"), ("landing", "12 T B")]
     assert target(flight) == ("Lands", "22:40")
     assert flight["status_label"] == "Arriving late"
     assert flight["status_tone"] == "warn"
@@ -274,7 +293,7 @@ def test_landed_states_when_it_is_at_the_gate(settings: Settings) -> None:
     assert flight["phase"] == "landed"
     assert flight["status_label"] == "Landed"
     assert flight["status_tone"] == "ok"
-    assert detail(flight) == "GATE 12 · TERM B"
+    assert detail(flight) == [("landing", "12 T B")]
     assert target(flight) == ("At the gate", "22:15")
 
 
@@ -294,7 +313,7 @@ def test_at_the_gate_the_belt_takes_the_end_of_the_row(settings: Settings) -> No
     assert target(flight) == ("Baggage claim", "7")
     # The card goes on drawing where the flight came in while it draws the belt, and so
     # does this: the terminal on that line is the one the belt is in.
-    assert detail(flight) == "GATE 12 · TERM B"
+    assert detail(flight) == [("landing", "12 T B")]
 
 
 def test_a_belt_nobody_has_named_yet_is_dashed(settings: Settings) -> None:
@@ -348,7 +367,7 @@ def test_cancelled_has_no_time_to_give(settings: Settings) -> None:
     assert flight["phase"] == "cancelled"
     assert flight["status_label"] == "Cancelled"
     assert flight["status_tone"] == "stop"
-    assert detail(flight) is None
+    assert detail(flight) == []
     assert target(flight) == (None, None)
 
 
@@ -361,9 +380,9 @@ def test_a_booking_the_poller_closed_in_the_air_has_no_time_to_give(
     flight = payload([(closed, lost)], settings)["flights"][0]
     assert flight["status_label"] == "Flown"
     assert target(flight) == (None, None)
-    # The card still draws the ends of a flight it is watching, dashes and all, and the
-    # phase is what it is watching by - so a booking closed in the air keeps its line.
-    assert detail(flight) == "GATE - · TERM -"
+    # Nothing was ever named at the far end, so there is nothing under the heading. The
+    # pill says the feed lost it, which is the whole of what is known.
+    assert detail(flight) == []
 
 
 def test_a_diversion_renames_the_destination_and_reads_its_clock(settings: Settings) -> None:
@@ -473,7 +492,15 @@ def test_the_row_is_the_cards_two_conditions_and_nothing_else(settings: Settings
     rows: list[FlightRow] = [
         (booking(id=1, scheduled_departure_utc=NOW + timedelta(days=6)), None),
         (booking(id=2), snapshot(booking_id=2, scheduled_out=DEPARTURE, gate_origin="B22")),
-        (booking(id=3), snapshot(booking_id=3, actual_off=DEPARTURE, estimated_in=ARRIVAL)),
+        (
+            booking(id=3),
+            snapshot(
+                booking_id=3,
+                actual_off=DEPARTURE,
+                estimated_in=ARRIVAL,
+                gate_destination="12",
+            ),
+        ),
         (
             booking(id=4),
             snapshot(
@@ -482,6 +509,7 @@ def test_the_row_is_the_cards_two_conditions_and_nothing_else(settings: Settings
                 actual_on=ARRIVAL,
                 actual_in=ARRIVAL,
                 baggage_claim="7",
+                gate_destination="12",
             ),
         ),
         (booking(id=5), snapshot(booking_id=5, cancelled=True)),
@@ -495,8 +523,9 @@ def test_the_row_is_the_cards_two_conditions_and_nothing_else(settings: Settings
         )
         assert (flight["target_label"] is not None) is footer, phase
         # The card's places, compressed to the end being walked to, appear on exactly the
-        # rows the card draws them on.
-        assert ("GATE " in (flight["detail"] or "")) is watched, phase
+        # rows the card draws them on. Each of these has a gate at that end, so what is
+        # being read is the condition rather than whether the airport has said yet.
+        assert bool(flight["detail"] and flight["detail"][-1]["icon"]) is watched, phase
 
 
 # --- the phone's own clock --------------------------------------------------------------
@@ -537,7 +566,7 @@ def test_the_day_it_leaves_is_the_airports_and_names_its_zone(settings: Settings
     """
     far = booking(origin_iata="HND", scheduled_departure_utc=NOW + timedelta(days=6))
     flight = payload([(far, None)], settings, airports=AIRPORTS, viewer_tz=HOME)["flights"][0]
-    assert detail(flight) == "Sat 19 Sep 03:00 JST"
+    assert detail(flight) == [(None, "Sat 19 Sep 03:00 JST")]
     assert target(flight) == (None, None)
 
 
@@ -608,6 +637,17 @@ def test_the_script_tells_the_server_where_the_phone_is() -> None:
     assert "resolvedOptions().timeZone" in source
 
 
+def test_the_script_tells_the_server_which_size_is_asking() -> None:
+    """The other thing the server cannot work out for itself.
+
+    How many rows fit is the widget's own business, and a list cut to the smallest size
+    that might be asking is a large widget with its bottom half empty.
+    """
+    source = script_source()
+    assert "family=${encodeURIComponent(family)}" in source
+    assert 'const family = config.widgetFamily || "medium";' in source
+
+
 def test_the_script_says_once_which_clock_the_times_are_on() -> None:
     """No time on the widget carries a zone, so the footer carries it for all of them.
 
@@ -651,13 +691,13 @@ def test_a_non_utc_input_is_read_at_the_origins_clock(settings: Settings) -> Non
     """AeroAPI states offsets; whatever arrives is a clock at the airport on the way out."""
     tokyo = datetime(2026, 9, 18, 18, 40, tzinfo=UTC).astimezone()
     flight = payload([(booking(scheduled_departure_utc=tokyo), None)], settings)["flights"][0]
-    assert detail(flight) == "Fri 18 Sep 18:40 UTC"
+    assert detail(flight) == [(None, "Fri 18 Sep 18:40 UTC")]
 
 
 # --- ordering and cadence -------------------------------------------------------------
 
 
-def test_in_the_order_they_now_leave_capped_at_three(settings: Settings) -> None:
+def test_in_the_order_they_now_leave_cut_to_what_the_size_holds(settings: Settings) -> None:
     """The board's order, so the widget leads with the card the board leads with."""
     rows: list[FlightRow] = [
         (booking(id=1, scheduled_departure_utc=NOW + timedelta(days=1)), None),
@@ -678,7 +718,36 @@ def test_in_the_order_they_now_leave_capped_at_three(settings: Settings) -> None
     body = payload(rows, settings)
     # Landed, airborne, then tomorrow's. The one booked for ten minutes from now is
     # held until the day after, so it sorts by when it actually leaves and loses its seat.
+    # Three of them, because a request that did not say which widget it is for is a
+    # script that has not replaced itself yet, and the medium widget is the middle size.
     assert [_id(flight) for flight in body["flights"]] == [4, 3, 1]
+
+    # A large widget is twice the medium's height and holds twice its rows, so the two
+    # that did not fit are on it - in the same order, cut later.
+    large = payload(rows, settings, family="large")
+    assert [_id(flight) for flight in large["flights"]] == [4, 3, 1, 5, 2]
+    assert [_id(flight) for flight in payload(rows, settings, family="medium")["flights"]] == [
+        4,
+        3,
+        1,
+    ]
+    assert [_id(flight) for flight in payload(rows, settings, family="small")["flights"]] == [4, 3]
+    lock = payload(rows, settings, family="accessoryRectangular")
+    assert [_id(flight) for flight in lock["flights"]] == [4]
+
+
+def test_a_size_nobody_has_heard_of_gets_the_middle_one(settings: Settings) -> None:
+    """A family the server does not know is a widget iOS grew after this was written.
+
+    The medium widget's share is the answer to that and to a script old enough not to
+    say: too few rows leaves a widget half empty, and too many are cut by the phone.
+    """
+    rows: list[FlightRow] = [
+        (booking(id=n, scheduled_departure_utc=NOW + timedelta(hours=n)), None) for n in range(1, 6)
+    ]
+    for asked in ("systemExtraLarge", "", None):
+        body = payload(rows, settings, family=asked)
+        assert [_id(flight) for flight in body["flights"]] == [1, 2, 3], asked
 
 
 def test_refresh_slows_down_when_nothing_is_close(settings: Settings) -> None:
@@ -1081,21 +1150,92 @@ def test_a_small_widget_holds_two_flights_of_three_lines() -> None:
     assert 'const pad = family === "small" ? 0 : 2;' in source
 
 
-def test_a_friends_disc_is_squared_to_the_number_beside_it() -> None:
-    """The board draws a friend's initial in a round disc, and so does this: a mark drawn
-    taller than the line of type beside it sets the height of the heading itself.
+def test_a_friends_disc_has_room_on_it_for_the_letter() -> None:
+    """The disc is squared to the number beside it, and the letter is drawn on it.
 
-    The letter is centred on both axes. `centerAlignContent` is the stack's answer for
-    the one axis it does not lay out along, so the other one takes a spacer either side
-    or the letter sits against the wall of its own disc.
+    A stack in a widget carries the system's own insets unless it is told not to, and a
+    disc the height of a flight number has nothing left inside those insets to draw a
+    letter in - so the letter was dropped rather than drawn small, and what was left was
+    a disc with nothing on it. Zeroing the padding and the spacing is what puts it back.
+
+    Centred on both axes: `centerAlignContent` is the stack's answer for the one axis it
+    does not lay out along, and the other takes a spacer either side or the letter sits
+    against the wall of its own disc.
     """
     source = script_source()
-    drawn = source[source.index("function friendMark(") : source.index("function detailText(")]
+    drawn = source[source.index("function friendMark(") : source.index("function hasDetail(")]
     assert "const side = TYPE.heading;" in drawn
     assert "disc.size = new Size(side, side);" in drawn
     assert "disc.cornerRadius = side / 2;" in drawn
+    assert "disc.setPadding(0, 0, 0, 0);" in drawn
+    assert "disc.spacing = 0;" in drawn
     assert drawn.count("disc.addSpacer();") == 2
     assert "disc.centerAlignContent();" in drawn
+    # And a glyph wider than the disc shrinks to fit rather than being dropped, which is
+    # the same failure the padding was causing by another route.
+    assert "initial.minimumScaleFactor" in drawn
+
+
+def test_the_line_under_the_heading_is_marks_in_front_of_figures() -> None:
+    """The glyph, then what it is the terminal or the gate or the seat of.
+
+    The words TERM, GATE and SEAT were most of a line with room for figures or for
+    labels and not for both, and they spelled out the one thing on the widget nobody has
+    to be told: which of three figures is the gate. The mark says the thing a reader can
+    get wrong instead, which is which end of the flight the row is naming.
+    """
+    source = script_source()
+    drawn = source[source.index("function detailText(") : source.index("// The board's own")]
+    assert "const glyph = mark(run.icon);" in drawn
+    assert "line.addImage(glyph)" in drawn
+    assert "line.addText(run.text)" in drawn
+    # The mark is drawn before the figures it heads, and holds its own air from them.
+    assert drawn.index("addImage") < drawn.index("addText")
+    assert "line.addSpacer(BESIDE_MARK)" in drawn
+    assert "line.addSpacer(BETWEEN_RUNS)" in drawn
+    # In the row's quieter colour: the mark says which figures these are, and the
+    # figures are what the line is read for.
+    assert "drawn.tintColor = MUTED;" in drawn
+    assert "text.textColor = TEXT;" in drawn
+
+
+def test_the_script_carries_every_mark_the_payload_can_name() -> None:
+    """The glyphs are in the script rather than fetched, and they are real images.
+
+    An airline's mark is decoration: the number beside it already names the carrier, so
+    one that never arrives costs nothing. These are not. "T 4 B22" with no plane in front
+    of it is a line that is read wrong rather than read short, so the script carries them
+    and draws them on the first reload, network or no network.
+    """
+    source = script_source()
+    marks = source[source.index("  const MARKS = {") : source.index("  const data = name ?")]
+    for name in (widget.ICON_TAKEOFF, widget.ICON_LANDING, widget.ICON_SEAT):
+        assert f"    {name}:" in marks
+    blobs = re.findall(r'"([A-Za-z0-9+/=]{40,})"', marks)
+    assert len(blobs) >= 3
+    # Every run of them, concatenated the way the script concatenates them, is a PNG.
+    for chunk in re.split(r"    \w+:", marks)[1:]:
+        data = base64.b64decode("".join(re.findall(r'"([A-Za-z0-9+/=]+)"', chunk)))
+        assert data.startswith(b"\x89PNG\r\n\x1a\n")
+    assert "Image.fromData(Data.fromBase64String(data))" in source
+
+
+def test_the_route_is_set_rather_than_left_to_fit() -> None:
+    """One size for the route on both wide widgets, chosen rather than left over.
+
+    Given the number's own size the route was the longest thing on the heading, so it
+    was the half that shrank to fit - by however much that line had going spare, which
+    is not the same on a medium widget as on a large one. The same flight came out
+    larger on the bigger widget, for no reason a reader could see.
+    """
+    source = script_source()
+    scale = source[source.index("const TYPE =") : source.index("const server = connect();")]
+    assert "{ heading: 12, route: 11, detail: 10, pill: 10, label: 10, time: 13 }" in scale
+    assert "{ heading: 14, route: 12, detail: 11, pill: 10, label: 11, time: 13 }" in scale
+    # And the one branch in it is the small size's: medium and large are one scale, so
+    # neither can drift from the other.
+    assert scale.count("family ===") == 1
+    assert "Font.regularMonospacedSystemFont(TYPE.route)" in source
 
 
 def test_every_home_screen_size_says_when_it_was_last_updated() -> None:
@@ -1172,7 +1312,7 @@ def test_the_lock_screen_gives_the_rung_its_own_line() -> None:
     assert "if (flight.target_label) {" in drawn
     assert "line.addText(flight.target_label)" in drawn
     assert "line.addText(flight.target_value)" in drawn
-    assert "state.addText(flight.detail)" in drawn
+    assert "detailText(state, flight" in drawn
 
 
 def test_a_widget_reload_takes_the_servers_newer_script_quietly() -> None:

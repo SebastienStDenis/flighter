@@ -160,9 +160,27 @@
            rather than under it, and is drawn here so the two line up; the form that
            actually posts it is below, outside this summary. #}
         <div class="mt-4 flex items-center gap-2">
-          <span class="btn" data-variant="outline" data-size="sm">Edit</span>
-          <button class="btn text-stop" data-variant="ghost" data-size="sm" type="button"
-                  onclick="removeAccount(event, '{{ key }}')">Remove</button>
+          {# The two of them are drawn as marks rather than words: what they do to an
+             account already connected is a pencil and a link cut, and a row that reads
+             as a sentence invites reading rather than pressing. The word is still there
+             for anything that speaks the page rather than showing it. #}
+          <span class="btn" data-variant="outline" data-size="icon-sm" title="Edit">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>
+              <path d="m15 5 4 4"/>
+            </svg>
+            <span class="sr-only">Edit</span>
+          </span>
+          <button class="btn text-stop" data-variant="ghost" data-size="icon-sm" type="button"
+                  title="Remove" aria-label="Remove"
+                  onclick="removeAccount(event, '{{ key }}')">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9 17H7A5 5 0 0 1 7 7"/><path d="M15 7h2a5 5 0 0 1 4 8"/>
+              <line x1="8" x2="12" y1="12" y2="12"/><line x1="2" x2="22" y1="2" y2="22"/>
+            </svg>
+          </button>
         </div>
       </summary>
       <form method="post" action="/settings/credentials" data-save-scope>
@@ -425,12 +443,30 @@
               <span class="flex items-center justify-between gap-3">
                 <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
                   {{- detected_base_url -}}</span>
+                {# Setting an address and changing one you set are the same act on the
+                   same box, so they are the same pencil; what differs is only what it
+                   is called for anything that speaks the page. Reset is an undo: it
+                   hands the address back to whatever the app was last opened on. #}
                 <span class="flex shrink-0 gap-2">
-                  <span class="btn" data-variant="outline" data-size="sm"
-                        id="address-edit-label">{{ 'Edit' if manual else 'Override' }}</span>
-                  <button class="btn" data-variant="ghost" data-size="sm" type="button"
+                  <span class="btn" data-variant="outline" data-size="icon-sm"
+                        id="address-edit" title="{{ 'Edit' if manual else 'Override' }}">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>
+                      <path d="m15 5 4 4"/>
+                    </svg>
+                    <span class="sr-only" id="address-edit-label">
+                      {{- 'Edit' if manual else 'Override' -}}</span>
+                  </span>
+                  <button class="btn" data-variant="ghost" data-size="icon-sm" type="button"
                           id="address-reset" onclick="resetAddress(event)"
-                          {{- ' hidden' if not manual }}>Reset</button>
+                          title="Reset" aria-label="Reset"{{ ' hidden' if not manual }}>
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M3 7v6h6"/>
+                      <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
+                    </svg>
+                  </button>
                 </span>
               </span>
             </summary>
@@ -727,7 +763,10 @@
     box.closest("details").querySelector("summary .font-mono").textContent = manual
       ? box.value.trim()
       : box.placeholder;
-    document.getElementById("address-edit-label").textContent = manual ? "Edit" : "Override";
+    // The mark is a pencil either way; the word behind it is what changes.
+    var label = manual ? "Edit" : "Override";
+    document.getElementById("address-edit-label").textContent = label;
+    document.getElementById("address-edit").title = label;
     document.getElementById("address-reset").hidden = !manual;
     document.querySelector('#url-help [data-when="auto"]').hidden = manual;
   }

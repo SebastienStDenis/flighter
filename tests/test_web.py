@@ -515,14 +515,19 @@ def test_a_set_aside_email_is_kept_off_the_board(client: TestClient) -> None:
 
 
 def test_the_email_tab_is_marked_only_while_something_is_waiting(client: TestClient) -> None:
+    """The tab is an envelope either way; what changes is whether it carries a mark.
+
+    The count is said in words for anything that speaks the page rather than showing it,
+    because the mark itself is a stroke on a glyph and says nothing out loud.
+    """
     quiet = client.get("/").text
     assert 'href="/mail"' in quiet
-    assert "waiting:" not in quiet
+    assert "waiting" not in quiet
 
     client.session.rows["IngestLog"] = [set_aside_row()]  # type: ignore[attr-defined]
     # On every page, not only the board: the mark is how you learn there is anything.
     for path in ("/", "/settings", "/mail"):
-        assert "1 waiting:" in client.get(path).text
+        assert "1 waiting" in client.get(path).text
 
 
 def test_the_email_page_lists_what_became_of_every_email(client: TestClient) -> None:
