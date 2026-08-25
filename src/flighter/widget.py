@@ -49,9 +49,24 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# A lock screen has room for one flight and a home screen for three. Anything past that
-# is a trip itinerary, which is what the web UI is for.
-MAX_FLIGHTS: Final = 3
+# What each size has room for, in rows of two lines. The phone says which size is
+# asking; the server cuts the list to it rather than sending a list every size has to
+# cut for itself. A lock screen has room for one flight, a 155pt square for two, and a
+# large widget for twice what the medium one holds - past that it is a trip itinerary,
+# which is what the web UI is for.
+FLIGHTS_BY_FAMILY: Final = {
+    "accessoryRectangular": 1,
+    "accessoryCircular": 1,
+    "accessoryInline": 1,
+    "small": 2,
+    "medium": 3,
+    "large": 6,
+}
+# What a request that did not name its size gets: the medium widget's share. A script
+# that has not replaced itself yet is the only thing that asks without saying, and it
+# draws a medium widget's worth however many it is sent.
+DEFAULT_FLIGHTS: Final = FLIGHTS_BY_FAMILY["medium"]
+MAX_FLIGHTS: Final = max(FLIGHTS_BY_FAMILY.values())
 
 REFRESH_IDLE_SECONDS: Final = 900
 REFRESH_ACTIVE_SECONDS: Final = 600
@@ -75,14 +90,38 @@ SCRIPT_ICON: Final = {"color": "deep-blue", "glyph": "plane-departure"}
 
 LAST_SEEN_KEY: Final = "widget_last_seen"
 
-# Between the places on a line. A boarding pass sets them apart with rules and white
-# space, neither of which a widget row has to spend, and three words run together read
-# as one thing rather than three.
-BETWEEN_PLACES: Final = " · "
+# The marks the row draws in front of the places, which the script holds the glyphs for:
+# a plane climbing in front of the end being left, a plane coming down in front of the
+# end being arrived at, and a seat in front of the seat. The words they replace - TERM,
+# GATE, SEAT - were most of a line that has room for figures or for labels and not for
+# both, and a widget row is the one place where the reader already knows which three
+# figures are on it.
+ICON_TAKEOFF: Final = "takeoff"
+ICON_LANDING: Final = "landing"
+ICON_SEAT: Final = "seat"
+
+# Between the terminal and the gate behind the same mark. A gate is a figure nobody
+# mistakes for anything else; a terminal on its own is a bare 4 or a bare B, so it keeps
+# the T a boarding pass prints in front of it and the two of them need nothing between
+# them but the space.
+BETWEEN_PLACES: Final = " "
+TERMINAL_PREFIX: Final = "T"
 
 
 def _iso_z(value: datetime) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class WidgetDetail(BaseModel):
+    """One run of the line under the heading: a mark, and the places behind it.
+
+    Two runs at most - one end of the flight, and the seat - because the line names the
+    end being walked to and where the reader is sitting, and nothing else. A run with no
+    mark is the day the flight leaves, which is a date rather than a place.
+    """
+
+    icon: str | None
+    text: str
 
 
 class WidgetFlight(BaseModel):
@@ -90,9 +129,10 @@ class WidgetFlight(BaseModel):
     # For the server's own refresh cadence. The script never reads it: what it draws is
     # the status and the times, which are words already chosen.
     phase: Phase
-    # Whose flight it is, where it is not the reader's own: the initial the board draws
-    # in a disc, and the hue it takes for that disc from the name.
-    friend_initial: str | None
+    # Whose flight it is, where it is not the reader's own: the hue the board takes from
+    # their name, drawn as a mark in front of the number. A hue and no letter, because a
+    # letter set inside a mark the height of the type beside it is drawn at eight points
+    # and read at none: what tells one person from another at that size is the colour.
     friend_hue: int | None
     logo_url: str
     number: str
@@ -101,8 +141,8 @@ class WidgetFlight(BaseModel):
     status_tone: str
     # The line under the heading: the day it leaves while that is the whole story, then
     # where in the building to be, and once it is off the ground, where to be at the
-    # other end.
-    detail: str | None
+    # other end. Empty is a flight with nothing to say there.
+    detail: list[WidgetDetail]
     # The end of the row, under the pill: the rung the flight is next due to climb and
     # the time it is due, on the phone's own clock. Parked, no rung is left and the belt
     # takes the line instead.
@@ -148,6 +188,7 @@ async def read_widget(
     authorization: Annotated[str | None, Header()] = None,
     token: Annotated[str | None, Query()] = None,
     tz: Annotated[str | None, Query()] = None,
+    family: Annotated[str | None, Query()] = None,
 ) -> WidgetPayload:
     authorize(settings, authorization, token)
     now = datetime.now(UTC)
@@ -158,6 +199,9 @@ async def read_widget(
         settings=settings,
         now=now,
         airports=await load_airports(session, rows),
+        # Which widget is asking, which is how many rows it has room for and how much
+        # room there is on one of them. The phone knows it and nothing else does.
+        family=family,
         # Where the phone is, so the times it draws are the ones on its own clock. An
         # unknown name resolves to UTC rather than failing, the way every zone here does.
         viewer_tz=tz,
@@ -313,6 +357,7 @@ def build_payload(
     base_url: str,
     airports: Mapping[str, Airport | None] | None = None,
     viewer_tz: str | None = None,
+    family: str | None = None,
     degraded_reason: str | None = None,
 ) -> WidgetPayload:
     known = airports or {}
@@ -330,9 +375,10 @@ def build_payload(
         ordered.append((departure_estimate(booking, snapshot), built))
         if built.flight.phase in PHASES_IMMINENT and snapshot is not None and snapshot.observed_at:
             observed.append(snapshot.observed_at)
-    # The board's order: by the time each is now leaving, landed or not.
+    # The board's order: by the time each is now leaving, landed or not, cut to what the
+    # size that asked has room for.
     ordered.sort(key=lambda row: row[0])
-    drawn = [built for _, built in ordered[:MAX_FLIGHTS]]
+    drawn = [built for _, built in ordered[: FLIGHTS_BY_FAMILY.get(family or "", DEFAULT_FLIGHTS)]]
 
     reason = degraded_reason or _stale_reason(min(observed, default=None), now)
     return WidgetPayload(
@@ -364,7 +410,6 @@ def _flight(
         WidgetFlight(
             detail_url=f"{base_url}/f/{booking.id}",
             phase=phase,
-            friend_initial=friend[0].upper() if friend else None,
             friend_hue=views.friend_hue(friend) if friend else None,
             logo_url=views.logo_url(booking.marketing_carrier),
             number=f"{booking.marketing_carrier}{booking.marketing_number}",
@@ -434,17 +479,22 @@ def _detail(
     *,
     now: datetime,
     origin_tz: str,
-) -> str | None:
+) -> list[WidgetDetail]:
     """The line under the heading: the day it leaves, and then where to be.
 
     Where to be is on the row for exactly as long as the card draws it, which is for as
     long as there is anything on the flight to watch. The card has the width to draw both
     ends of it at once; a row has one line, so it draws the end being walked to. Inside
-    its day that is the terminal, the gate and the seat, in the order a boarding pass
-    prints them and dashed where the airport has not said yet. Off the ground it is the
-    same three read the other way about, because the seat is where they are now and the
-    gate and the terminal are where they are going - including once they are parked,
-    when the terminal is the one the belt is in.
+    its day that is the terminal and the gate it leaves from, behind a climbing plane,
+    and then the seat behind a seat. Off the ground it is the same three the other way
+    about - the seat first, because that is where the reader is, and then the gate and
+    the terminal at the far end behind a plane coming down - including once they are
+    parked, when the terminal is the one the belt is in.
+
+    A place the airport has not named is left out rather than dashed. A dash is a box
+    with nothing in it, which is a thing to read on a row that has three of them at most,
+    and the mark in front of the row says which end is being named whether one figure is
+    behind it or two.
 
     Days out there is nothing to walk to and the only thing to say is when it goes. It is
     said on the clock at the airport it goes from, with the zone named: that clock is not
@@ -453,20 +503,41 @@ def _detail(
     """
     if not views.watched(phase):
         if views.milestone(phase, booking, snapshot, now=now) is None:
-            return None
-        return views.at(departure_estimate(booking, snapshot), origin_tz, with_date=True)
+            return []
+        left = views.at(departure_estimate(booking, snapshot), origin_tz, with_date=True)
+        return [WidgetDetail(icon=None, text=left)]
+    seat = _run(ICON_SEAT, booking.seat)
     if phase == DAY_OF:
-        parts = [
-            f"TERM {views.dash(snapshot.terminal_origin if snapshot else None)}",
-            f"GATE {views.dash(snapshot.gate_origin if snapshot else None)}",
+        runs = [
+            _run(
+                ICON_TAKEOFF,
+                _terminal(snapshot.terminal_origin if snapshot else None),
+                snapshot.gate_origin if snapshot else None,
+            ),
+            seat,
         ]
-        if booking.seat:
-            parts.append(f"SEAT {booking.seat}")
-        return BETWEEN_PLACES.join(parts)
-    parts = [f"SEAT {booking.seat}"] if booking.seat else []
-    parts.append(f"GATE {views.dash(snapshot.gate_destination if snapshot else None)}")
-    parts.append(f"TERM {views.dash(snapshot.terminal_destination if snapshot else None)}")
-    return BETWEEN_PLACES.join(parts)
+    else:
+        runs = [
+            seat,
+            _run(
+                ICON_LANDING,
+                snapshot.gate_destination if snapshot else None,
+                _terminal(snapshot.terminal_destination if snapshot else None),
+            ),
+        ]
+    return [run for run in runs if run is not None]
+
+
+def _run(icon: str, *places: str | None) -> WidgetDetail | None:
+    """One mark and the places behind it, or nothing where the airport has named none."""
+    said = [place for place in places if place]
+    if not said:
+        return None
+    return WidgetDetail(icon=icon, text=BETWEEN_PLACES.join(said))
+
+
+def _terminal(value: str | None) -> str | None:
+    return f"{TERMINAL_PREFIX}{value}" if value else None
 
 
 def _stated(instant: datetime, now: datetime, origin_tz: str, viewer_tz: str | None) -> str:

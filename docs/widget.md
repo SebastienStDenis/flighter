@@ -51,7 +51,12 @@ does the same thing at once, and says so.
 | `accessoryRectangular` (Lock Screen) | Next flight only, three tight lines. **iOS 16 or later.** |
 | Small | Two flights, three lines each |
 | Medium | Up to three flights, two lines each, each row tappable |
-| Large | Same rows, with room to breathe |
+| Large | Up to six of the same rows, with more air between them |
+
+The widget tells the server which size it is, and the server sends a list that long. How
+many rows fit is the one thing about the layout the server cannot work out for itself,
+and a list cut to the smallest size that might be asking is a large widget with its
+bottom half empty.
 
 Tapping opens the flight's page on your server. On medium and large each row deep-links
 to its own flight; small and Lock Screen widgets get a single tap target, which is an iOS
@@ -65,13 +70,20 @@ mark, the number and the route - and ends with the board's status pill. The seco
 carries where to be, and ends with what the flight is next due to do and the time it is
 due.
 
+Whose it is, is a dot in the colour the board gives that person, with no initial on it:
+the mark is half the height of the number beside it, which would draw a letter at eight
+points, where it is a smudge that reads as a glyph which failed to load rather than as a
+name. The colour is what tells one friend from another on the page as well.
+
 The row is the board's card, narrowed. The pill is the card's pill, the places are the
 card's places and the end of the row is the card's footer, each drawn on exactly the
 rows the card draws it on, because a widget that answers a question the card has already
-answered is a second answer to it and the reader has no way to tell which is stale. Only
-two things about it are the widget's own: the card has the width to show both ends of a
-flight at once and a row has one line, so it shows the end being walked to; and the card
-counts down to a rung where the row states the time it is due.
+answered is a second answer to it and the reader has no way to tell which is stale. What
+is the widget's own is what the width forces: the card has room to show both ends of a
+flight at once and a row has one line, so it shows the end being walked to; the card
+heads its places with words where the row has a mark; the card holds an unnamed gate open
+with a dash where the row leaves it out; and the card counts down to a rung where the row
+states the time it is due. The figures are the same figures either way.
 
 The line under the heading is where to be, for as long as there is anything on the
 flight to watch:
@@ -79,13 +91,27 @@ flight to watch:
 | While it is | The line reads |
 | --- | --- |
 | Days off, with nothing to watch yet | `Fri 18 Sep 18:00 EDT` |
-| Still at the gate it leaves from | `TERM 4 · GATE B22 · SEAT 14A` |
-| Pushed back, in the air, or parked | `SEAT 14A · GATE 12 · TERM B` |
+| Still at the gate it leaves from | *plane climbing* `T4 B22`, *seat* `14A` |
+| Pushed back, in the air, or parked | *seat* `14A`, *plane landing* `12 TB` |
 | Called off, or given up on | nothing; the pill has said it |
 
-The terminal, the gate and the seat are in the order a boarding pass prints them, and the
-terminal and gate are dashed rather than dropped while the airport has not said: a line
-that comes and goes as gates are published is a row that moves under the eye. Once the
+The marks are `plane-takeoff`, `plane-landing` and `armchair` from Lucide, which is the
+icon set the web UI is drawn with, and they stand where TERM, GATE and SEAT used to. The
+line
+has room for figures or for labels and not for both, and the labels were most of it
+spelling out the one thing nobody has to be told: which of three figures is the gate.
+What a mark says instead is which end of the flight the row is naming, which is the half
+of it a reader can get wrong. They are carried in the script rather than fetched from the
+server, because `T4 B22` with no plane in front of it is a line read wrong rather than
+read short - unlike an airline's mark, which is decoration the number beside it has
+already covered.
+
+The terminal and the gate are in the order a boarding pass prints them, and the terminal
+keeps the `T` that pass prints, because a bare `4` beside a bare `B22` is two figures with
+nothing to tell them apart. A place the airport has not named is left out rather than
+dashed: a dash is an empty box, and a row with three boxes at most and two of them empty
+says nothing in the space where it says everything. What holds the line still while gates
+are published is the mark, which is drawn as soon as one figure lands behind it. Once the
 aircraft has left the gate the same three are read the other way about, because the seat
 is where the reader is and the gate and the terminal are where they are going - and they
 stay on the row after it parks, where the terminal is the one the belt is in.

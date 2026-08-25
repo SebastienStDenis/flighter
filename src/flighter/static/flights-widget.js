@@ -57,19 +57,19 @@ const TONES = {
 // What the pill lets through behind the word, as the page mixes it into its card.
 const TINT_ALPHA = 0.14;
 
-// A friend's disc and the initial on it, as styles/app.css mixes them: the hue is the
-// one the server took from their name, and these are the saturation, the lightness and
-// the strength the page reads it at, light scheme then dark. Mixed here rather than
-// rendered to a colour up here like the rest of the palette, because a hue that belongs
-// to a name is not known until the name is.
-const FRIEND_DISC = [
-  { s: 55, l: 50, a: 0.12 },
-  { s: 45, l: 65, a: 0.16 },
-];
-const FRIEND_INITIAL = [
+// A friend's mark: the hue the server took from their name, at the saturation and the
+// lightness styles/app.css reads it at where it has to be seen rather than sat behind -
+// the strength the page draws their initial in - light scheme then dark. Mixed here
+// rather than rendered to a colour up there with the rest of the palette, because a hue
+// that belongs to a name is not known until the name is.
+const FRIEND_MARK = [
   { s: 35, l: 38, a: 1 },
   { s: 42, l: 78, a: 1 },
 ];
+// How much of the heading's own height the mark takes. A dot rather than a disc: there
+// is no letter in it to leave room for, and a filled circle as tall as the type beside
+// it is a hole in the line rather than a mark on it.
+const FRIEND_MARK_SCALE = 0.5;
 
 // The one repair for a missing or rejected token, and the same sentence for both.
 const RECONNECT_TEXT = "Open the settings page on this phone and tap Connect.";
@@ -84,6 +84,12 @@ const CLOCK_NOTE_SHORT = "your clock";
 // a class, unlike a function, does not exist until its line does.
 class TokenRejected extends Error {}
 
+// The air on the line under the heading: what a mark keeps from its own figures, and
+// what one end of the flight keeps from the seat. Two gaps rather than one, because
+// what the line is read as is two things and not four.
+const BESIDE_MARK = 3;
+const BETWEEN_RUNS = 8;
+
 // What a small widget holds: two flights, and the same distance under every line of
 // them. It is the one size with no room to spare, so the figures it does have room for
 // are the ones the board leads with.
@@ -96,13 +102,21 @@ const isAccessory = family.startsWith("accessory");
 // widget gets one URL.
 const supportsRowLinks = family === "medium" || family === "large";
 
-// What a row is set in: the heading carrying the number and the route, the line under it
-// saying where to be, the pill's own word, and the words and the time that end the row.
-// A small widget is the same four things at the sizes a 155pt square has room for.
+// What a row is set in: the heading carrying the number, the route beside it, the line
+// under them saying where to be, the pill's own word, and the words and the time that
+// end the row. A small widget is the same things at the sizes a 155pt square has room
+// for.
+//
+// The route is set below the number rather than level with it, and set rather than left
+// to fit. Given the number's own size it is the longest thing on the heading, so it was
+// the half that shrank - and it shrank by however much the line it landed on had left
+// over, which is not the same amount on a medium widget as on a large one. The same
+// flight was then drawn larger on the bigger widget, for no reason a reader could see.
+// A size chosen here is the same size on both.
 const TYPE =
   family === "small"
-    ? { heading: 12, detail: 10, pill: 10, label: 10, time: 13 }
-    : { heading: 14, detail: 11, pill: 10, label: 11, time: 13 };
+    ? { heading: 12, route: 11, detail: 10, pill: 10, label: 10, time: 13 }
+    : { heading: 14, route: 12, detail: 11, pill: 10, label: 11, time: 13 };
 
 const server = connect();
 const result = server ? await load(server) : null;
@@ -172,9 +186,13 @@ async function load(server) {
 
 async function request({ api, token }) {
   // The zone goes with the ask so the times come back on this phone's clock rather than
-  // on the airport's. It is the one thing the server cannot know and the phone cannot
-  // work out for itself once the strings are built.
-  const req = new Request(`${api}/api/widget?tz=${encodeURIComponent(timeZone())}`);
+  // on the airport's, and the size goes with it so the list comes back as long as this
+  // widget has room for. They are the two things the server cannot know and the phone
+  // cannot work out for itself once the strings are built: a large widget holds twice
+  // the rows a medium one does, and a list cut to the smaller of them is a large widget
+  // with its bottom half empty.
+  const query = `tz=${encodeURIComponent(timeZone())}&family=${encodeURIComponent(family)}`;
+  const req = new Request(`${api}/api/widget?${query}`);
   req.headers = { Authorization: `Bearer ${token}` };
   req.timeoutInterval = REQUEST_TIMEOUT_SECONDS;
   const body = await req.loadJSON();
@@ -375,13 +393,9 @@ function renderAccessory(widget, flight, result) {
   const word = state.addText(flight.status_label);
   word.font = Font.semiboldSystemFont(15);
   word.lineLimit = 1;
-  if (flight.detail) {
+  if (hasDetail(flight)) {
     state.addSpacer();
-    const where = state.addText(flight.detail);
-    where.font = Font.systemFont(11);
-    where.textOpacity = 0.7;
-    where.lineLimit = 1;
-    where.minimumScaleFactor = 0.8;
+    detailText(state, flight, { size: 11, opacity: 0.7, shrink: 0.8 });
   }
 
   // The rung and its time keep their own line with the words in front of them: "Lands"
@@ -430,7 +444,7 @@ function renderSmall(widget, flights, logos) {
     state.addSpacer();
     targetLabel(state, flight);
 
-    if (flight.detail || flight.target_value) {
+    if (hasDetail(flight) || flight.target_value) {
       widget.addSpacer(SMALL_GAP);
       const line = widget.addStack();
       line.centerAlignContent();
@@ -464,7 +478,7 @@ function renderList(widget, flights, logos) {
     // it stand against the same edge without either of them being measured: what holds
     // them there is the spacer in the middle of each line, which is the one thing on a
     // widget that costs nothing to be exactly as wide as it has to be.
-    if (flight.detail || flight.target_value) {
+    if (hasDetail(flight) || flight.target_value) {
       // Well under the gap between two flights, because these two lines are one flight:
       // what the widget is sorted into by eye is rows rather than lines.
       row.addSpacer(3);
@@ -504,7 +518,7 @@ function titleRow(container, flight, logos) {
   number.lineLimit = 1;
   row.addSpacer(3);
   const route = row.addText(flight.route);
-  route.font = Font.regularMonospacedSystemFont(TYPE.heading);
+  route.font = Font.regularMonospacedSystemFont(TYPE.route);
   route.textColor = MUTED;
   route.lineLimit = 1;
   route.minimumScaleFactor = 0.7;
@@ -514,44 +528,87 @@ function titleRow(container, flight, logos) {
   return row;
 }
 
-// Whose flight it is, drawn the way the board draws it: their initial in a disc tinted
-// by the hue the server takes from their name, so one person is one colour on the phone
-// and on the page both.
+// Whose flight it is, drawn in the colour the board draws them in: the hue the server
+// took from their name, so one person is one colour on the phone and on the page both.
+//
+// A colour and nothing written on it. The board's disc is the height of a line of body
+// text and holds an initial comfortably; the same disc on a widget row is fourteen
+// points across, which draws the letter in it at eight - a smudge rather than a name,
+// and a smudge on a mark reads as a glyph that failed rather than as a person. The hue
+// is what tells one friend from another at either size, so here it is the whole mark.
 function friendMark(container, flight) {
-  if (!flight.friend_initial) {
+  if (flight.friend_hue === null || flight.friend_hue === undefined) {
     return null;
   }
-  const side = TYPE.heading;
-  const disc = container.addStack();
-  disc.size = new Size(side, side);
-  disc.cornerRadius = side / 2;
-  disc.backgroundColor = friendColor(flight.friend_hue, FRIEND_DISC);
-  disc.centerAlignContent();
-  // A spacer either side rather than an alignment: `centerAlignContent` is the stack's
-  // answer for the one axis it does not lay out along, and the letter has to be centred
-  // on both or it sits against the side of its own disc.
-  disc.addSpacer();
-  const initial = disc.addText(flight.friend_initial);
-  initial.font = Font.semiboldSystemFont(Math.round(side * 0.6));
-  initial.textColor = friendColor(flight.friend_hue, FRIEND_INITIAL);
-  initial.lineLimit = 1;
-  disc.addSpacer();
-  return disc;
+  const side = Math.round(TYPE.heading * FRIEND_MARK_SCALE);
+  const dot = container.addStack();
+  dot.size = new Size(side, side);
+  dot.cornerRadius = side / 2;
+  dot.backgroundColor = friendColor(flight.friend_hue, FRIEND_MARK);
+  return dot;
 }
 
-// Where to be, at the near end of the second line: the terminal, the gate and the seat
-// while somebody is walking to them, and the day the flight leaves while nobody is.
-function detailText(container, flight) {
-  if (!flight.detail) {
+// Where to be, at the near end of the second line: the terminal and the gate behind a
+// plane pointing the way this flight is - climbing while the walk is towards it, coming
+// down once the walk is at the other end - and the seat behind a seat.
+//
+// The marks stand where the words TERM, GATE and SEAT used to. On a line with room for
+// figures or for labels and not for both, the labels were most of it, and they were
+// spelling out the one thing on the widget nobody has to be told: which of three
+// figures is the gate. What the mark does that a word did not is say which end of the
+// flight the row is naming, which is the half of it a reader can get wrong.
+//
+// A place the airport has not named is left out rather than dashed. It was dashed to
+// hold the line still while gates are published; but a dash is an empty box, and two of
+// them on a row that has three boxes at most is a line that says nothing at all in the
+// space where it says everything. What holds the line still now is the mark, which is
+// there from the first draw whether one figure has arrived behind it or both.
+function hasDetail(flight) {
+  return (flight.detail || []).length > 0;
+}
+
+function detailText(container, flight, options = {}) {
+  const runs = flight.detail || [];
+  if (runs.length === 0) {
     return null;
   }
-  // One line and no shrinking: what a narrow widget loses is the end of the line - the
-  // seat, or the terminal at the other end - rather than the size of every word on it.
-  const text = container.addText(flight.detail);
-  text.font = Font.systemFont(TYPE.detail);
-  text.textColor = TEXT;
-  text.lineLimit = 1;
-  return text;
+  const size = options.size || TYPE.detail;
+  const line = container.addStack();
+  line.centerAlignContent();
+  runs.forEach((run, index) => {
+    if (index > 0) {
+      // Between one end of the flight and the seat. Wider than the air a mark keeps
+      // from its own figures, or the two runs read as one run of four things.
+      line.addSpacer(BETWEEN_RUNS);
+    }
+    const glyph = mark(run.icon);
+    if (glyph) {
+      const drawn = line.addImage(glyph);
+      // Squared to the type beside it and drawn in the row's quieter colour: the mark
+      // says which figures these are and the figures are what is read.
+      drawn.imageSize = new Size(size + 1, size + 1);
+      if (isAccessory) {
+        drawn.imageOpacity = options.opacity || 1;
+      } else {
+        drawn.tintColor = MUTED;
+      }
+      line.addSpacer(BESIDE_MARK);
+    }
+    // One line and no shrinking: what a narrow widget loses is the end of the line - the
+    // seat, or the terminal at the other end - rather than the size of every word on it.
+    const text = line.addText(run.text);
+    text.font = Font.systemFont(size);
+    if (isAccessory) {
+      text.textOpacity = options.opacity || 1;
+    } else {
+      text.textColor = TEXT;
+    }
+    text.lineLimit = 1;
+    if (options.shrink) {
+      text.minimumScaleFactor = options.shrink;
+    }
+  });
+  return line;
 }
 
 // The board's own words for the rung ahead - "Departs", "Due to land" - or for the one
@@ -800,4 +857,62 @@ async function present(widget) {
   } else {
     await widget.presentMedium();
   }
+}
+
+// --- marks -------------------------------------------------------------------------------
+
+// The three glyphs the line under the heading draws in front of a place: a plane
+// climbing, a plane coming down, and a seat. Lucide's plane-takeoff, plane-landing and
+// armchair, which are the icons the web UI draws, rendered white at 48px and carried in
+// the script rather than fetched from the server.
+//
+// Carried, because these are not decoration the way an airline's mark is. The row says
+// "T4 B22" and the glyph in front of it is the whole of what says those are the terminal
+// and the gate this flight leaves from; a mark that had not arrived yet would leave a
+// line that is read wrong rather than read short. So they cost the script two kilobytes
+// and are on every widget from the first draw, network or no network.
+//
+// White, because the phone tints them: one file is then the light scheme's colour and
+// the dark one's both, and on the lock screen it is whatever tint iOS is drawing that
+// screen in. Lucide is ISC licensed; the paths are the library's own, unchanged.
+function mark(name) {
+  const MARKS = {
+    takeoff:
+      "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAACXBIWXMAAAsTAAALEwEAmpwYAAACwklEQVRo"
+      + "3u2YTUhVQRTHr+Z3ZmqptXEtmJs20TYMIozAdRjupEKJwo960qIWRUQfFERQQYtoU5t21dIWbgVxGdp79vnU"
+      + "PmwX0//AEW6XuXPPnTvP95T5ww8e782dc+aemXPOvCDw8vLy8vISSilVBQ6AfnAQ1GwVx1tADiyq/7UGLoHG"
+      + "Snb+BCgqs+ZAT6UuIK9k+gWGMtqqBYPgIXgDXoEr4DDYYTvposZRmvxzzEKegKaUNurBWbBkeEEFMEKLTLuA"
+      + "XGSiIp+JZvAsxtg86BXM3QjG2DmpXlMySXuAo2cgF/p9GKxrDNF3wzFz7gQXDFFM0qiTKIR+7+W3rhNFqZnH"
+      + "7QKT4KvBuT/gPjgOToPnmhc4a5NGY6PAY5p4/+v0BbwDqwbHf4NbYJ/Gfhv4G1lktdMohMYN8UFXKbLXDdBp"
+      + "sH0k8swH22JmjEJobA/XBpN+gGtgT4LdajATefaxbUoVRYHHNnCVXos8s8S5vU1grw7c0yz+UJaWQhSF0DM1"
+      + "3Df1cx9VJawLZ2LqwsuslVkcBYu5KWrnwEdDMdsrrYwnwRRDn+ttoyB0fDShbVkAfZItMg2+ayb4xmnugSbL"
+      + "LFs6vlGJlxPqwm0qfi66zjjlUzpONeM8+CRwfL/rrlMXmQGhDUkLsc6R7sradVL6u8PoKig5MUHtgWBuavzG"
+      + "uSKbKvFNU0Gzzi68Vwf5QI9zn1IrdHySo5RUiTtcXBudZBd2fCxhq5Djd3W9T5ZFTEeM0NZpLZHjXUFQmst7"
+      + "6ihwmzyRkMXI8eugvdR3YHEUQo6vGBz/uSmOJ0SBOstHvD2OUjMFrmoatbBWuGlrDYLN/ycip+xV5CjuLvcf"
+      + "WWmrMrUfl101di4WMWDoCqOVeEpS0Mq1kG5wDFwET8F78Ba8AKc2LuxeXl5eTtJmQVW+CtoLVIYbWTmU35YL"
+      + "2NpbyKtM+gexJKWvs56E8gAAAABJRU5ErkJggg==",
+    landing:
+      "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAACXBIWXMAAAsTAAALEwEAmpwYAAACk0lEQVRo"
+      + "3u1Zvy8EQRQ+EhHiTikUGoUEiWio6AlRkAg6iYT4D9ydH4XyGiGhUWhpRKFBtEL0Or8rdwiNIOub5EnWy+zO"
+      + "3LqZ3ZN9yZe7zHv7Zr53b2bnvUskYoklWuI4zhBwD1wBaSBZTotPAXnntzwC00BFORDION6yWY7R5zJlc0GD"
+      + "lMvXFNlUkdF/AZ7Y2LWVVMIktZS7bhHRnZEtwCP6glAL8MrGO2wQmPVJg3WN6Od/fjF87jHdhOnFVwKXilwe"
+      + "VkXfpc956Uye4255Bwps7FAn+qSfY/ot0wSO2YTbQBtfpE70yaaf6U9MLr5Lki5dpOMLbVdFn55rZTY3Jgls"
+      + "s8mOXbojpivQUemb3xirBr5cNuJ7tYnFN1G+u2XIpR9WbOy817tCRJ3ZtpogsMImESdRJbNZ9yGQ8fF9wmz7"
+      + "TRC4ZZPkJDYV9DKTXdhSPr63mP2cCQJ3bJIPYMzn3iM28ANdNwaLvGbkTBAYoUVrkSjS9wTzu2fqFBrzILH0"
+      + "l8JE3H+YT3E/arFJ4ifP54MQob3DT6JnYAGot0kiMBFRC3j4KxghAoe9kqhxIkXVvLDd8PFXeiLCGbAoKUwC"
+      + "EaFUmpbUGm55MkVkQXIr5W/itKpyI39JSkMVEeGvKgwimRISOQWaS70/bBO5AGpMnFaCSFaDSLYERNZMt1RU"
+      + "RApkU6/pb5c9/wl02ugNZRX9IS0iVEfw2vzAZpMro0HE97iEboA9I4qhRtvduj8Rwfg5s+8Lq+2YVhAR5/4y"
+      + "0AN0A6P0zBuz60wkwuufJmlRj04wueVVYphE5gMQGY9aR1uXiEijmSi35uuASWAHOKONuw+s0jW8If7vK5ZY"
+      + "9P9SirrI+1CSxlaU5e5fEijvFIolJPkGoRujl1V5R9MAAAAASUVORK5CYII=",
+    seat:
+      "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAACXBIWXMAAAsTAAALEwEAmpwYAAABRklEQVRo"
+      + "3u1YQVKDQBAED/gDMfglniGYi3mG5j3R8qTJzcgpPoJ4j3pfhyouzgEW6BnWcrqqb+x0N1VssxtFBoPB8Cfg"
+      + "nIuJN8SK+O3waGbuibfEBG0+I26dHg6NJsr8GXHn9NG8sBgRYOnmQ4kIULGhj8RU4Bu7IG6Y1h4x+IsNvRTc"
+      + "KBZM6xMx9BcUdjusngWwANOblwPflGg9j+bFNSVab0DzQpoSrjewectIt+nL0c0r1ZRwva7mlWhKuF7fNobe"
+      + "VuF6/y4AGhoBPgT91xoB7gUD3GkESIhr4hFo/Ni+mEQ8wAy3IRbAAmgH4NWezmg+Y15OPove2KIHyZuInhuK"
+      + "J+bl1WfhyoWLwifAOfE9QPPP3gcoevCK+BKY+cWYQ3YRgPnrSUdXuxcKIEDd9bsrEACrR0Py9m+xYa4QQFXP"
+      + "YDAYpuEHBby2Hukm43IAAAAASUVORK5CYII=",
+  };
+  const data = name ? MARKS[name] : null;
+  return data ? Image.fromData(Data.fromBase64String(data)) : null;
 }
