@@ -195,8 +195,9 @@ def test_day_of_shows_the_terminal_the_gate_and_the_seat(settings: Settings) -> 
     assert flight["phase"] == "day_of"
     # The end being walked to behind a plane climbing, then the seat behind a seat. The
     # terminal keeps the T a boarding pass prints in front of it, because a bare 4 beside
-    # a bare B22 is two figures with nothing to tell them apart.
-    assert detail(flight) == [("takeoff", "T 4 B22"), ("seat", "14A")]
+    # a bare B22 is two figures with nothing to tell them apart, and the dot between them
+    # says which of the gaps on the line is the one that divides.
+    assert detail(flight) == [("takeoff", "T4 • B22"), ("seat", "14A")]
     assert target(flight) == ("Departs", "14:40")
     assert flight["status_label"] == "On time"
     assert flight["status_tone"] == "ok"
@@ -239,8 +240,9 @@ def test_the_run_up_to_departure_keeps_the_gate(settings: Settings) -> None:
 
 def test_pushback_turns_the_line_round_to_the_far_end(settings: Settings) -> None:
     """The gate it left is behind the person reading this, so the line stops naming it
-    and names the one at the other end instead; nothing upstream estimates wheels up, so
-    the time at the end of the row is the landing."""
+    and names the one at the other end instead - terminal then gate, as on the way out;
+    nothing upstream estimates wheels up, so the time at the end of the row is the
+    landing."""
     taxiing = snapshot(
         scheduled_out=NOW - timedelta(minutes=5),
         actual_out=NOW - timedelta(minutes=2),
@@ -253,7 +255,7 @@ def test_pushback_turns_the_line_round_to_the_far_end(settings: Settings) -> Non
     assert flight["phase"] == "taxiing"
     assert flight["status_label"] == "Taxiing"
     assert flight["status_tone"] == "live"
-    assert detail(flight) == [("landing", "12 T B")]
+    assert detail(flight) == [("landing", "TB • 12")]
     assert target(flight) == ("Lands", "18:15")
 
 
@@ -271,8 +273,9 @@ def test_airborne_states_the_landing_and_reads_the_line_backwards(settings: Sett
     flight = payload([(booking(seat="32A"), flying)], settings)["flights"][0]
     assert flight["phase"] == "airborne"
     # Where they are, then where they are going: the seat first because that is where
-    # the line is being read from, and the gate and the terminal at the far end after it.
-    assert detail(flight) == [("seat", "32A"), ("landing", "12 T B")]
+    # the line is being read from, and the terminal and the gate at the far end after it -
+    # the same pair in the same order the line out drew them in.
+    assert detail(flight) == [("seat", "32A"), ("landing", "TB • 12")]
     assert target(flight) == ("Lands", "22:40")
     assert flight["status_label"] == "Arriving late"
     assert flight["status_tone"] == "warn"
@@ -293,7 +296,7 @@ def test_landed_states_when_it_is_at_the_gate(settings: Settings) -> None:
     assert flight["phase"] == "landed"
     assert flight["status_label"] == "Landed"
     assert flight["status_tone"] == "ok"
-    assert detail(flight) == [("landing", "12 T B")]
+    assert detail(flight) == [("landing", "TB • 12")]
     assert target(flight) == ("At the gate", "22:15")
 
 
@@ -313,7 +316,7 @@ def test_at_the_gate_the_belt_takes_the_end_of_the_row(settings: Settings) -> No
     assert target(flight) == ("Baggage claim", "7")
     # The card goes on drawing where the flight came in while it draws the belt, and so
     # does this: the terminal on that line is the one the belt is in.
-    assert detail(flight) == [("landing", "12 T B")]
+    assert detail(flight) == [("landing", "TB • 12")]
 
 
 def test_a_belt_nobody_has_named_yet_is_dashed(settings: Settings) -> None:
@@ -1203,7 +1206,7 @@ def test_the_script_carries_every_mark_the_payload_can_name() -> None:
     """The glyphs are in the script rather than fetched, and they are real images.
 
     An airline's mark is decoration: the number beside it already names the carrier, so
-    one that never arrives costs nothing. These are not. "T 4 B22" with no plane in front
+    one that never arrives costs nothing. These are not. "T4 • B22" with no plane in front
     of it is a line that is read wrong rather than read short, so the script carries them
     and draws them on the first reload, network or no network.
     """

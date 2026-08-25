@@ -871,7 +871,7 @@ async function present(widget) {
 // the script rather than fetched from the server.
 //
 // Carried, because these are not decoration the way an airline's mark is. The row says
-// "T4 B22" and the glyph in front of it is the whole of what says those are the terminal
+// "T4 • B22" and the glyph in front of it is the whole of what says those are the terminal
 // and the gate this flight leaves from; a mark that had not arrived yet would leave a
 // line that is read wrong rather than read short. So they cost the script two kilobytes
 // and are on every widget from the first draw, network or no network.
