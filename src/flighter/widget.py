@@ -26,7 +26,7 @@ import secrets
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Final
+from typing import Annotated, Final, NamedTuple
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -98,12 +98,26 @@ class WidgetFlight(BaseModel):
     # once there is a building to be in. Days out there is neither, and it is the time
     # the flight leaves instead.
     detail: str | None
-    # The board's footer, which is the right-hand side of a row here: what the flight is
-    # counting to, in the board's own words, and the instant it counts to. The phone
-    # draws the figure itself and it ticks between reloads, which is why this is the one
-    # instant that goes over rather than a figure that would be stale on arrival.
-    milestone_label: str | None
-    milestone_at: str | None
+    # The board's footer, which is the right-hand side of a row here: the words, and
+    # beside them either an instant or a figure. The phone counts an instant down itself
+    # and it ticks between reloads, which is why that one goes over as the instant rather
+    # than as a figure that would be stale on arrival; the belt does not move once the
+    # airport has said it, so that one goes over as it reads.
+    footer_label: str | None
+    footer_at: str | None
+    footer_value: str | None
+
+
+class Footer(NamedTuple):
+    """The right-hand end of a row: the words, and the one figure that goes beside them.
+
+    A rung the flight has yet to climb is an instant, because the phone is what counts it
+    down; anything else the row has left to say is already a figure.
+    """
+
+    label: str
+    at: datetime | None = None
+    value: str | None = None
 
 
 class WidgetPayload(BaseModel):
@@ -334,7 +348,7 @@ def _flight(
     # reads Departed on the phone and Taxiing on the page is two answers to one
     # question, and the reader has no way to tell which is the stale one.
     pill = views.status(phase, booking, snapshot, now=now, origin_tz=origin_tz)
-    counting_to = _milestone(phase, booking, snapshot, now=now)
+    footer = _footer(phase, booking, snapshot, now=now)
     return WidgetFlight(
         detail_url=f"{base_url}/f/{booking.id}",
         phase=phase,
@@ -351,8 +365,9 @@ def _flight(
             origin_tz=origin_tz,
             viewer_tz=viewer_tz,
         ),
-        milestone_label=counting_to[0] if counting_to else None,
-        milestone_at=_iso_z(counting_to[1]) if counting_to else None,
+        footer_label=footer.label if footer else None,
+        footer_at=_iso_z(footer.at) if footer and footer.at else None,
+        footer_value=footer.value if footer else None,
     )
 
 
@@ -361,26 +376,32 @@ def _zone(airports: Mapping[str, Airport | None], iata: str) -> str:
     return airport.tz if airport else FALLBACK_TZ
 
 
-def _milestone(
+def _footer(
     phase: Phase,
     booking: Booking,
     snapshot: FlightSnapshot | None,
     *,
     now: datetime,
-) -> tuple[str, datetime] | None:
-    """What the flight is counting to, and when, in the board's own words.
+) -> Footer | None:
+    """The right-hand end of the row: what the flight is counting to, and when.
 
     The board's footer exactly: the same rung, named the same way - "Departs in" while
     it is ahead, "Due to depart" once its time has gone by with no word that it happened
     - and dropped in the same two places the board drops it. A flight days out is not
-    counted in hours by anyone, and a parked one has the belt to give instead.
+    counted in hours by anyone, and a parked one has the belt to give instead, which is
+    a figure rather than a rung and so goes over as one. The belt is dashed until the
+    airport says it, the way the card draws it: the words are the news either way, and a
+    footer that arrives late is a row that moves under the eye.
     """
-    if not views.watched(phase) or views.at_the_gate(phase, booking, snapshot, now):
+    if views.at_the_gate(phase, booking, snapshot, now):
+        belt = snapshot.baggage_claim if snapshot else None
+        return Footer("Baggage claim", value=views.dash(belt))
+    if not views.watched(phase):
         return None
     next_up = views.milestone(phase, booking, snapshot, now=now)
     if next_up is None:
         return None
-    return views.milestone_label(next_up, now), next_up.target
+    return Footer(views.milestone_label(next_up, now), at=next_up.target)
 
 
 def _detail(
@@ -397,28 +418,35 @@ def _detail(
     What the flight is counting to is on the right of the row and counts itself down, so
     this line never states a time twice over: the day a flight leaves is worth a line
     only while it is far enough off that nothing is counting to it. Inside its day the
-    terminal, the gate and the seat are what somebody is walking to, drawn as the boxes
-    the card draws and dashed where the airport has not said yet. Off the ground all of
-    that is behind them and the seat is the last of it worth carrying.
+    terminal, the gate and the seat are what somebody is walking to, in the order a
+    boarding pass prints them and dashed where the airport has not said yet.
 
-    Parked there is nothing left to find but the belt, and a flight the feed lost, or
-    called off, has nothing to say the pill has not said.
+    Only the terminal is named, because a bare number is not a place; a gate and a seat
+    read as themselves. The words the other two would carry are three quarters of the
+    line, and this line shares a row with a pill and a count - what it spends on saying
+    what a gate is, it loses off the far end, where the seat is.
+
+    Off the ground all of that is behind them and the seat is the last of it worth
+    carrying. Alone on the line it has room for its word again, and needs it: one token
+    with nothing either side of it has no order to be read in.
+
+    Parked there is nothing left to find but the belt, which is the footer's. A flight
+    the feed lost, or called off, has nothing to say the pill has not said.
     """
     if views.at_the_gate(phase, booking, snapshot, now):
-        belt = snapshot.baggage_claim if snapshot else None
-        return f"Baggage claim {belt}" if belt else None
+        return None
     if not views.watched(phase):
         if views.milestone(phase, booking, snapshot, now=now) is None:
             return None
         return _when(departure_estimate(booking, snapshot), now, origin_tz, viewer_tz)
     if phase == DAY_OF:
         parts = [
-            f"TERM {views.dash(snapshot.terminal_origin if snapshot else None)}",
-            f"GATE {views.dash(snapshot.gate_origin if snapshot else None)}",
+            f"T{views.dash(snapshot.terminal_origin if snapshot else None)}",
+            views.dash(snapshot.gate_origin if snapshot else None),
         ]
         if booking.seat:
-            parts.append(f"SEAT {booking.seat}")
-        return " · ".join(parts)
+            parts.append(booking.seat)
+        return "  ".join(parts)
     return f"SEAT {booking.seat}" if booking.seat else None
 
 
@@ -466,9 +494,9 @@ def _refresh_seconds(flights: Sequence[WidgetFlight], now: datetime) -> int:
         else REFRESH_IDLE_SECONDS
     )
     ahead = [
-        _from_iso_z(flight.milestone_at)
+        _from_iso_z(flight.footer_at)
         for flight in flights
-        if flight.milestone_at is not None and _from_iso_z(flight.milestone_at) > now
+        if flight.footer_at is not None and _from_iso_z(flight.footer_at) > now
     ]
     if not ahead:
         return cadence

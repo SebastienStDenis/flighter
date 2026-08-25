@@ -89,7 +89,12 @@ def detail(flight: dict[str, Any]) -> Any:
 
 def counting(flight: dict[str, Any]) -> tuple[Any, Any]:
     """The right-hand side of the row: what it counts to, and the instant it counts to."""
-    return flight["milestone_label"], flight["milestone_at"]
+    return flight["footer_label"], flight["footer_at"]
+
+
+def footer(flight: dict[str, Any]) -> tuple[Any, Any]:
+    """The same end of the row when what it holds is a figure rather than a count."""
+    return flight["footer_label"], flight["footer_value"]
 
 
 # --- payload shaping ------------------------------------------------------------------
@@ -111,8 +116,9 @@ def test_upcoming_flight(settings: Settings) -> None:
         "detail": "Fri 18 Sep 18:00 UTC",
         # Nobody counts the hours to a flight next week, and the board's card carries no
         # footer for one either.
-        "milestone_label": None,
-        "milestone_at": None,
+        "footer_label": None,
+        "footer_at": None,
+        "footer_value": None,
     }
 
 
@@ -161,7 +167,7 @@ def test_day_of_shows_the_terminal_the_gate_and_the_seat(settings: Settings) -> 
     gated = snapshot(scheduled_out=DEPARTURE, gate_origin="B22", terminal_origin="4")
     flight = payload([(booking(seat="14A"), gated)], settings, airports=AIRPORTS)["flights"][0]
     assert flight["phase"] == "day_of"
-    assert detail(flight) == "TERM 4 · GATE B22 · SEAT 14A"
+    assert detail(flight) == "T4  B22  14A"
     assert counting(flight) == ("Departs in", "2026-09-12T18:40:00Z")
     assert flight["status_label"] == "On time"
     assert flight["status_tone"] == "ok"
@@ -171,7 +177,7 @@ def test_day_of_with_nothing_assigned_yet_is_the_boxes_waiting(settings: Setting
     """Dashed rather than dropped: an empty box is the airport not having said yet, and
     a line that comes and goes as gates are published is a row that moves under the eye."""
     flight = payload([(booking(), snapshot())], settings)["flights"][0]
-    assert detail(flight) == "TERM - · GATE -"
+    assert detail(flight) == "T-  -"
 
 
 def test_a_delayed_departure_counts_to_the_time_it_now_leaves(settings: Settings) -> None:
@@ -182,7 +188,7 @@ def test_a_delayed_departure_counts_to_the_time_it_now_leaves(settings: Settings
     # Delayed to when is the whole question the pill leaves open, and the count answers
     # it from the estimate rather than from the schedule.
     assert counting(flight) == ("Departs in", "2026-09-12T19:10:00Z")
-    assert detail(flight) == "TERM - · GATE - · SEAT 14A"
+    assert detail(flight) == "T-  -  14A"
 
 
 def test_the_run_up_to_departure_keeps_the_gate(settings: Settings) -> None:
@@ -191,7 +197,7 @@ def test_the_run_up_to_departure_keeps_the_gate(settings: Settings) -> None:
     imminent = snapshot(scheduled_out=NOW + timedelta(minutes=20), gate_origin="B22")
     flight = payload([(booking(), imminent)], settings)["flights"][0]
     assert flight["phase"] == "day_of"
-    assert detail(flight) == "TERM - · GATE B22"
+    assert detail(flight) == "T-  B22"
     assert counting(flight) == ("Departs in", "2026-09-12T18:20:00Z")
 
 
@@ -254,7 +260,7 @@ def test_landed_counts_to_the_gate(settings: Settings) -> None:
     assert counting(flight) == ("At the gate in", "2026-09-12T22:15:00Z")
 
 
-def test_at_the_gate_the_belt_takes_the_column(settings: Settings) -> None:
+def test_at_the_gate_the_belt_takes_the_footer(settings: Settings) -> None:
     done = snapshot(
         actual_off=DEPARTURE,
         actual_on=ARRIVAL,
@@ -265,17 +271,20 @@ def test_at_the_gate_the_belt_takes_the_column(settings: Settings) -> None:
     )
     flight = payload([(booking(), done)], settings)["flights"][0]
     assert flight["status_label"] == "Arrived"
-    assert detail(flight) == "Baggage claim 7"
-    # Parked, there is nothing left ahead to count to, exactly as the card has nothing
-    # left in its footer but the belt.
-    assert counting(flight) == (None, None)
+    # Where the card puts it: the last thing the flight points at, at the end of the row
+    # the counts were read off. Nothing is left ahead of it to count to.
+    assert footer(flight) == ("Baggage claim", "7")
+    assert counting(flight) == ("Baggage claim", None)
+    assert detail(flight) is None
 
 
-def test_a_belt_nobody_has_named_leaves_the_line_empty(settings: Settings) -> None:
-    """The card has a labelled cell to put a dash in; a line has nothing to say."""
+def test_a_belt_nobody_has_named_yet_is_dashed(settings: Settings) -> None:
+    """The words are the news either way, and a footer that arrives with the belt is a
+    row that moves under the eye. The card draws the same dash in the same place."""
     done = snapshot(actual_off=DEPARTURE, actual_on=ARRIVAL, actual_in=ARRIVAL)
     flight = payload([(booking(), done)], settings)["flights"][0]
     assert flight["status_label"] == "Arrived"
+    assert footer(flight) == ("Baggage claim", "-")
     assert detail(flight) is None
 
 
@@ -296,7 +305,7 @@ def test_a_landed_flight_past_its_gate_time_is_sent_to_the_belt(settings: Settin
     )
     flight = late.model_dump(mode="json")["flights"][0]
     assert flight["status_label"] == "Landed"
-    assert detail(flight) == "Baggage claim 7"
+    assert footer(flight) == ("Baggage claim", "7")
 
 
 def test_a_time_that_has_passed_says_it_is_due(settings: Settings) -> None:
@@ -542,7 +551,7 @@ def test_the_only_instants_are_the_ones_the_phone_counts_down(settings: Settings
     ]
     built = payload(rows, settings)
     assert list(_instants(built)) == [
-        flight["milestone_at"] for flight in built["flights"] if flight["milestone_at"]
+        flight["footer_at"] for flight in built["flights"] if flight["footer_at"]
     ]
     assert list(_instants(built)) == ["2026-09-12T18:20:00Z", "2026-09-12T22:15:00Z"]
 
@@ -651,8 +660,9 @@ def test_the_count_is_the_instant_and_nothing_but_the_instant(settings: Settings
         "status_label",
         "status_tone",
         "detail",
-        "milestone_label",
-        "milestone_at",
+        "footer_label",
+        "footer_at",
+        "footer_value",
     }
 
 
@@ -918,7 +928,7 @@ def test_the_script_draws_what_it_is_told() -> None:
     assert ".phase" not in source
     assert "applyTimerStyle()" in source
     assert source.count("new Date(flight") == 1
-    assert "new Date(flight.milestone_at)" in source
+    assert "new Date(flight.footer_at)" in source
 
 
 def test_the_count_is_held_against_the_end_of_the_row() -> None:
@@ -993,9 +1003,9 @@ def test_the_age_sits_in_the_middle_of_the_widget() -> None:
     A spacer at each end rather than one at the right: the two share what the phrase
     leaves and hold it between them. The word alone is centred the same way, which is why
     the cache with no date on it cannot take an early return out of the middle of this.
-    And no glyph of slack in the timer's box here, the way there is on a count held
-    against the end of a row: a centred phrase is measured from both ends, so room the box
-    has over pushes the words off-centre rather than falling off where the line stops.
+    And no glyph of slack in the timer's box here, the way there is on the lock screen's
+    count: a centred phrase is measured from both ends, so room the box has over pushes
+    the words off-centre rather than falling off where the line stops.
     """
     source = script_source()
     line = source[source.index("function updatedLine(") : source.index("function timerWidth(")]
@@ -1019,7 +1029,7 @@ def test_a_small_widget_holds_two_flights_of_four_lines() -> None:
     drawn = source[source.index("function renderSmall(") : source.index("function renderList(")]
     assert "titleRow(widget, flight, logos, 11, true)" in drawn
     assert "pill(state, flight)" in drawn
-    assert "milestoneWord(line, flight, 9)" in drawn
+    assert "footerWord(line, flight, 9)" in drawn
     # Every line of a flight is the same distance under the one above it, and the only
     # wider gap is the one that separates two flights.
     assert drawn.count("widget.addSpacer(SMALL_GAP)") == 3
@@ -1055,7 +1065,7 @@ def test_the_count_is_drawn_bigger_than_the_row_it_is_read_off() -> None:
         ("renderList(", "function titleRow("),
     ):
         drawn = source[source.index(f"function {name}") : source.index(ends)]
-        found = re.search(r"countdown\([a-z]+, flight, (\w+)[,)]", drawn)
+        found = re.search(r"figure\([a-z]+, flight, (\w+)[,)]", drawn)
         assert found, name
         sizes[name] = found.group(1)
     # One size on every home screen size. Sized against the room each widget had going
@@ -1082,7 +1092,7 @@ def test_the_count_is_pulled_up_under_the_words_naming_it() -> None:
     source = script_source()
     assert "const COUNT_LIFT = 6;" in source
     wide = source[source.index("function renderList(") : source.index("function titleRow(")]
-    assert "countdown(line, flight, COUNT_SIZE, 1, COUNT_LIFT)" in wide
+    assert "figure(line, flight, COUNT_SIZE, 0, COUNT_LIFT)" in wide
     for name, ends in (
         ("renderAccessory(", "function renderSmall("),
         ("renderSmall(", "function renderList("),
@@ -1092,6 +1102,48 @@ def test_the_count_is_pulled_up_under_the_words_naming_it() -> None:
     # line of text has no say in its own height, and the box is the only handle there is.
     timer = source[source.index("function countdown(") : source.index("function pill(")]
     assert "box.setPadding(-lift, 0, 0, 0);" in timer
+
+
+def test_the_row_spends_its_width_where_it_can_be_read() -> None:
+    """The line under the pill is cut short well before it reaches the count, and three
+    things were taking the room in between.
+
+    A stack's spacing falls either side of the spacer holding the count against the end
+    of the row, as well as between the things that are actually beside each other, so it
+    was paid twice over in the one place with none to spare. And the count's box carried
+    a glyph of slack it did not need: what a box has over is taken off the end of the
+    line beside it, which is where the seat is. Both are gone; the gap between the pill
+    and where to be is put back by hand, because that one is read.
+    """
+    source = script_source()
+    wide = source[source.index("function renderList(") : source.index("function titleRow(")]
+    assert "line.spacing = 0;" in wide
+    assert "line.addSpacer(6);" in wide
+    assert "figure(line, flight, COUNT_SIZE, 0, COUNT_LIFT)" in wide
+
+
+def test_a_figure_the_server_already_knows_is_drawn_where_the_count_is() -> None:
+    """The belt is a fact rather than a clock: it is said once and stays. So it needs
+    none of the timer's machinery, and gets the size and weight of the count it stands
+    in for, because it is the same half of the same footer."""
+    source = script_source()
+    drawn = source[source.index("function figure(") : source.index("function countdown(")]
+    assert "applyTimerStyle" not in drawn
+    assert "Font.boldMonospacedSystemFont(size)" in drawn
+    assert "countdown(container, flight, size, slack, lift)" in drawn
+
+
+def test_the_lock_screen_gives_the_belt_its_own_line() -> None:
+    """Three lines is the whole widget, and by the time there is a belt the line the gate
+    was on is free. Beside the status word instead, the figure would be a bare number
+    with the words saying what it is nowhere on screen."""
+    source = script_source()
+    drawn = source[
+        source.index("function renderAccessory(") : source.index("function renderSmall(")
+    ]
+    assert "if (flight.footer_value) {" in drawn
+    assert "belt.addText(flight.footer_label)" in drawn
+    assert "belt.addText(flight.footer_value)" in drawn
 
 
 def test_a_widget_reload_takes_the_servers_newer_script_quietly() -> None:
