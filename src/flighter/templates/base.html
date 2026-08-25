@@ -58,22 +58,37 @@
       </svg>
     </a>
     {# The tab is always there, so it is always in the same place; the mark on it is what
-       says whether anything behind it is waiting on a person. #}
-    <a class="btn" data-size="sm" href="/mail"
+       says whether anything behind it is waiting on a person. The envelope carries that
+       mark itself rather than standing next to a second glyph: two icons in one button
+       is a button with two meanings, and the one that matters is still Email. #}
+    <a class="btn" data-size="icon-sm" href="/mail" aria-label="Email"
        data-variant="{{ 'secondary' if mail else 'ghost' }}"
        {% if mail %}aria-current="page"{% endif %}>
       {% if problems %}
       <svg class="text-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="10"/>
+        <path d="M22 10.5V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h12.5"/>
+        <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+        <path d="M20 14v4"/><path d="M20 22v.01"/>
       </svg>
-      <span class="sr-only">{{ problems }} waiting:</span>
+      <span class="sr-only">{{ problems }} waiting</span>
+      {% else %}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect width="20" height="16" x="2" y="4" rx="2"/>
+        <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+      </svg>
       {% endif %}
-      Email
     </a>
-    <a class="btn" data-size="sm" href="/settings"
+    <a class="btn" data-size="icon-sm" href="/settings" aria-label="Settings"
        data-variant="{{ 'secondary' if here.startswith('/settings') else 'ghost' }}"
-       {% if here.startswith('/settings') %}aria-current="page"{% endif %}>Settings</a>
+       {% if here.startswith('/settings') %}aria-current="page"{% endif %}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/>
+        <circle cx="12" cy="12" r="3"/>
+      </svg>
+    </a>
   </nav>
 </header>
 {# A page the server rendered a while ago, whether left open or served from the cache
