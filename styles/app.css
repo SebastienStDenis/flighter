@@ -240,6 +240,12 @@
        letters and stands in the gaps between them. */
     isolation: isolate;
 
+    /* The route is already running when it reaches the word, so the rule starts this far
+       before the F - and the box is pushed off its own edge by as much, or the mark sits
+       that much nearer the button's left edge than its right. */
+    --lead: 0.25em;
+    margin-left: var(--lead);
+
     --mark: #0c60a3;
   }
 
@@ -259,7 +265,7 @@
   .brand-name::after {
     @apply pointer-events-none absolute top-1/2 h-px -translate-y-1/2 rounded-full
       content-[''];
-    left: -0.25em;
+    left: calc(-1 * var(--lead));
     right: -0.5em;
     z-index: -1;
     background-color: var(--mark);
@@ -276,6 +282,9 @@
   .brand-ahead {
     @apply h-[0.5px] w-[0.18em] rounded-full;
     margin-left: -0.26em;
+    /* Half a pixel high and centred on the rule, it straddles a device pixel and is
+       painted into the row above the rule's. This drops it into the row below. */
+    translate: 0 0.25px;
     background-color: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
   }
 
