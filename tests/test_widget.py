@@ -1170,12 +1170,32 @@ def test_a_small_widget_holds_two_flights_of_three_lines() -> None:
     assert "detailText(line, flight);" in drawn
     assert "targetValue(line, flight);" in drawn
     # Every line of a flight is the same distance under the one above it, and the only
-    # wider gap is the one that separates two flights.
+    # wider gap is the one that separates two flights - which is no longer a distance at
+    # all, but whatever the square has left after the six lines and the footer.
     assert drawn.count("widget.addSpacer(SMALL_GAP)") == 2
-    assert "widget.addSpacer(SMALL_GAP * 2)" in drawn
+    assert "widget.addSpacer();" in drawn
     # And nothing on those lines carries air of its own inside that distance: a pill with
     # its own padding is a line held further from its neighbours than any other.
     assert 'const pad = family === "small" ? 0 : 2;' in source
+
+
+def test_the_small_widget_fills_its_square() -> None:
+    """Two blocks of three lines, and the room left over handed to the gap between them.
+
+    The room used to be left where it fell, in a heap between the second flight and the
+    footer, and the inset was cut to eleven points on the reading that a 155pt square
+    holding six lines has nothing to spare. It has: the lines are the size they are, and
+    what the square has left over is enough to stand the two blocks apart and still keep
+    the words the distance from the rounded corner that every other size gives them.
+    """
+    source = script_source()
+    assert "const INSET = 14;" in source
+    assert "widget.setPadding(INSET, INSET, INSET, INSET);" in source
+    # No size drawn tighter than the rest.
+    assert 'family === "small" ? 11' not in source
+    drawn = source[source.index("function renderSmall(") : source.index("function renderList(")]
+    assert "widget.addSpacer();" in drawn
+    assert "SMALL_GAP * 2" not in drawn
 
 
 def test_a_friends_disc_has_the_letter_drawn_on_it_rather_than_set() -> None:
