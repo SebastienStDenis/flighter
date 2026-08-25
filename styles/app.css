@@ -226,6 +226,56 @@
     }
   }
 
+  /* The mark: the name with the flight drawn straight through it. The line behind the
+     aircraft has been flown, the one dash ahead of it has not - the figure the app icon
+     carries, with the word standing where its runway was.
+
+     The two blues are the icon's own rather than the theme's: the icon is a file the
+     page cannot read a variable out of, and the header sits a tab's width from it. */
+  .brand {
+    @apply inline-flex items-center gap-[0.3em];
+
+    /* The route crosses the word at the middle of its lowercase letters. The middle of
+       the line box sits above that - the box is deep enough for an F and a g, and the
+       word is mostly neither. */
+    --cross: 0.145em;
+    --mark: #0c60a3;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .brand {
+      --mark: #7cc6ff;
+    }
+  }
+
+  .brand-name {
+    @apply relative;
+  }
+
+  /* Over the letters rather than broken around them: a line that stepped aside for the
+     word would read as two lines, and the whole of it is that it is one. It ends under
+     the tail, so the aircraft sits on the line rather than after it. */
+  .brand-name::after {
+    @apply pointer-events-none absolute left-0 h-[1.5px] -translate-y-1/2 rounded-full
+      content-[''];
+    top: calc(50% + var(--cross));
+    right: -0.5em;
+    background-color: var(--mark);
+  }
+
+  .brand-plane {
+    color: var(--mark);
+    translate: 0 var(--cross);
+  }
+
+  /* The leg still to come: grey and short, so the mark ends on the aircraft rather
+     than on the dash behind it. */
+  .brand-ahead {
+    @apply h-[1.5px] w-[0.28em] rounded-full;
+    background-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
+    translate: 0 var(--cross);
+  }
+
   /* The route: two airports, one rule between them, and the aircraft at the fraction of
      the way it has actually flown. Dashed ahead of the mark, solid behind it. */
   .route {
