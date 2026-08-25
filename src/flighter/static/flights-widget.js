@@ -383,7 +383,7 @@ async function buildWidget(result) {
   }
   const logos = await loadLogos(flights);
   if (family === "small") {
-    renderSmall(widget, flights.slice(0, SMALL_FLIGHTS), logos);
+    renderSmall(widget, flights.slice(0, SMALL_FLIGHTS), logos, data.board_url);
   } else {
     renderList(widget, flights, logos);
   }
@@ -452,10 +452,14 @@ function renderAccessory(widget, flight, result) {
   }
 }
 
-function renderSmall(widget, flights, logos) {
-  // One tap target, set on the widget rather than a row: a small widget has only the one
-  // to give, and the flight at the top is the one it is being looked at for.
-  widget.url = flights[0].detail_url;
+function renderSmall(widget, flights, logos, board) {
+  // One tap target for the whole square, set on the widget rather than on a row: iOS
+  // gives a small widget only the one, whichever row the thumb landed on. It used to
+  // carry the top flight, which meant a tap on the second one opened the first - the
+  // reader is shown two flights and told, by every other size, that a row is a thing to
+  // press. So it goes to the board instead, which is the one page that is not the wrong
+  // answer to either tap: both flights are on it, in the order they are in here.
+  widget.url = board;
 
   flights.forEach((flight, index) => {
     if (index > 0) {

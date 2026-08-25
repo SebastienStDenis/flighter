@@ -756,6 +756,14 @@ def test_the_large_widget_holds_seven_and_cuts_the_eighth(settings: Settings) ->
     assert [_id(flight) for flight in large["flights"]] == [1, 2, 3, 4, 5, 6, 7]
 
 
+def test_the_payload_names_the_board(settings: Settings) -> None:
+    """Where a tap goes when there is no row to give it to: the list both flights are on,
+    on the address the widget links to everything else by."""
+    body = payload([(booking(), None)], settings)
+    assert body["board_url"] == "https://flights.example.com"
+    assert body["flights"][0]["detail_url"].startswith(f"{body['board_url']}/f/")
+
+
 def test_a_size_nobody_has_heard_of_gets_the_middle_one(settings: Settings) -> None:
     """A family the server does not know is a widget iOS grew after this was written.
 
@@ -1227,6 +1235,25 @@ def test_the_small_widget_fills_its_square() -> None:
     drawn = source[source.index("function renderSmall(") : source.index("function renderList(")]
     assert "widget.addSpacer();" in drawn
     assert "SMALL_GAP * 2" not in drawn
+
+
+def test_the_small_widget_sends_its_one_tap_to_the_board() -> None:
+    """iOS gives a small widget a single tap target for the whole square - Link is a
+    medium and large size thing - so whichever of the two flights the thumb lands on, the
+    square opens what it was pointed at. It was pointed at the top flight, which made a
+    tap on the second one open the first: a row that is a thing to press on every other
+    size, answering with the wrong flight here.
+
+    The board is the one page that is not the wrong answer to either tap. The Lock Screen
+    keeps its flight, because the one it draws and the one it opens are the same flight.
+    """
+    source = script_source()
+    drawn = source[source.index("function renderSmall(") : source.index("function renderList(")]
+    assert "widget.url = board;" in drawn
+    assert "flights[0].detail_url" not in drawn
+    assert "renderSmall(widget, flights.slice(0, SMALL_FLIGHTS), logos, data.board_url);" in source
+    lock = source[source.index("function renderAccessory(") : source.index("function renderSmall(")]
+    assert "widget.url = flight.detail_url;" in lock
 
 
 def test_a_friends_disc_has_the_letter_drawn_on_it_rather_than_set() -> None:

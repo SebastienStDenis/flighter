@@ -178,6 +178,12 @@ class Built(NamedTuple):
 
 class WidgetPayload(BaseModel):
     flights: list[WidgetFlight]
+    # Where a tap goes when it cannot be given to a row. iOS hands a small widget one
+    # tap target for the whole square - Link is medium and large only - so a tap on the
+    # second flight there opens whatever the square points at, and pointing it at the
+    # first flight opened a flight the reader had not touched. The board is the one
+    # answer that is right wherever the tap landed: both flights are on it.
+    board_url: str
     refresh_seconds: int
     degraded: bool
     degraded_reason: str | None
@@ -389,6 +395,7 @@ def build_payload(
     reason = degraded_reason or _stale_reason(min(observed, default=None), now)
     return WidgetPayload(
         flights=[built.flight for built in drawn],
+        board_url=base_url,
         refresh_seconds=_refresh_seconds(drawn, now),
         degraded=reason is not None,
         degraded_reason=reason,
