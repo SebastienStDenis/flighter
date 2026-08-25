@@ -59,8 +59,11 @@ and a list cut to the smallest size that might be asking is a large widget with 
 bottom half empty.
 
 Tapping opens the flight's page on your server. On medium and large each row deep-links
-to its own flight; small and Lock Screen widgets get a single tap target, which is an iOS
-restriction and not a choice made here.
+to its own flight; small and Lock Screen widgets get a single tap target for the whole
+widget, which is an iOS restriction and not a choice made here. The Lock Screen's opens
+the flight it draws, which is the only one it draws. The small size draws two, so its tap
+opens the board instead: pointed at either of them it would be the wrong flight half the
+time, and both of them are on the board, in the order the square has them.
 
 ## What it shows
 
