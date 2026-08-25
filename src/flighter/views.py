@@ -582,10 +582,10 @@ def milestone_label(next_up: Milestone, now: datetime) -> str:
 
 
 # The same rungs named for a time that is stated rather than counted down: the "in" that
-# belongs to a countdown comes off, and a flight nobody counts the hours to yet still
-# departs at a time, so it is named for its rung rather than for the plan.
+# belongs to a countdown comes off, and nothing else does. "Scheduled" is not in here
+# because it is not a rung anybody is watching - it is the label the ladder gives a
+# flight days out, and neither the card's footer nor the widget's row draws one for it.
 STATED: Final = {
-    "Scheduled": "Departs",
     "Departs in": "Departs",
     "Lands in": "Lands",
     "At the gate in": "At the gate",

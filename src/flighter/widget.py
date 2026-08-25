@@ -395,19 +395,28 @@ def _target(
 ) -> Target | None:
     """The end of the row: what the flight is next due to do, and when it is due.
 
-    The board's own rung, named the board's own way - "Departs" while it is ahead, "Due
-    to depart" once its time has gone by with no word that it happened - and dropped in
-    the same two places the board drops it. The time it is due rather than the hours
-    left to it: the hours would be a quarter of an hour stale by the time anybody read
+    The card's footer, condition for condition: the belt once the aircraft is parked,
+    otherwise the rung ahead if there is one and the flight is being watched at all, and
+    otherwise nothing. A flight days out is on a rung - the ladder starts at its
+    departure - but nobody is waiting on it yet, so the card draws no footer for one and
+    neither does this. The pill has already said it is booked, and the day it leaves is
+    under the heading.
+
+    The board's own words for the rung, too - "Departs" while it is ahead, "Due to
+    depart" once its time has gone by with no word that it happened. The one thing that
+    is not the card's is the figure: the time it is due rather than the hours left to
+    it, because the hours would be a quarter of an hour stale by the time anybody read
     them, and a time that has passed is still the time it was due.
 
-    Parked, there is no rung ahead of the flight and the belt takes the line, dashed
-    until the airport says it, the way the card draws it: the words are the news either
-    way, and a line that arrives late is a row that moves under the eye.
+    Parked, the belt takes the line, dashed until the airport says it, the way the card
+    draws it: the words are the news either way, and a line that arrives late is a row
+    that moves under the eye.
     """
     if views.at_the_gate(phase, booking, snapshot, now):
         belt = snapshot.baggage_claim if snapshot else None
         return Target("Baggage claim", views.dash(belt))
+    if not views.watched(phase):
+        return None
     next_up = views.milestone(phase, booking, snapshot, now=now)
     if next_up is None:
         return None
@@ -428,22 +437,20 @@ def _detail(
 ) -> str | None:
     """The line under the heading: the day it leaves, and then where to be.
 
-    Days out there is nothing to walk to yet, and the only thing to say is when it goes.
-    It is said on the clock at the airport it goes from, with the zone named: that clock
-    is not the one in the reader's hand, and every other time on the widget is. The other
-    end of the row states the same departure on the phone's own clock, so the two of them
-    together answer "when, and when is that here".
+    Where to be is on the row for exactly as long as the card draws it, which is for as
+    long as there is anything on the flight to watch. The card has the width to draw both
+    ends of it at once; a row has one line, so it draws the end being walked to. Inside
+    its day that is the terminal, the gate and the seat, in the order a boarding pass
+    prints them and dashed where the airport has not said yet. Off the ground it is the
+    same three read the other way about, because the seat is where they are now and the
+    gate and the terminal are where they are going - including once they are parked,
+    when the terminal is the one the belt is in.
 
-    Inside its day the terminal, the gate and the seat are what somebody is walking to,
-    in the order a boarding pass prints them and dashed where the airport has not said
-    yet. Off the ground it is the same three read the other way about, because the seat
-    is where they are now and the gate and the terminal are where they are going.
-
-    Parked there is nothing left to find but the belt, which is the other end of the row,
-    and a flight the poller has closed the book on has nothing left to walk to at all.
+    Days out there is nothing to walk to and the only thing to say is when it goes. It is
+    said on the clock at the airport it goes from, with the zone named: that clock is not
+    the one in the reader's hand, and every other time on the widget is. Called off, or
+    given up on by the poller, there is nothing to say at all that the pill has not said.
     """
-    if views.flown(booking) or views.at_the_gate(phase, booking, snapshot, now):
-        return None
     if not views.watched(phase):
         if views.milestone(phase, booking, snapshot, now=now) is None:
             return None

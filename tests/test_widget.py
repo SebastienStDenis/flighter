@@ -98,10 +98,9 @@ def target(flight: dict[str, Any]) -> tuple[Any, Any]:
 def test_upcoming_flight(settings: Settings) -> None:
     far = booking(scheduled_departure_utc=NOW + timedelta(days=6))
     flight = payload([(far, None)], settings)["flights"][0]
-    # Days out the day and time it leaves is the whole story: there is no gate to find
-    # yet, and the pill says only that it is booked. It is stated twice, once on each
-    # clock it could be read on - the airport's under the heading, with the zone on it,
-    # and the reader's own at the end of the row - and that is the whole of the row.
+    # Days out the day and time it leaves is the whole story, and it is told once: there
+    # is no gate to find yet, no rung anybody is waiting on, and the pill says only that
+    # it is booked. The card carries no footer for one of these either.
     assert flight == {
         "detail_url": "https://flights.example.com/f/42",
         "phase": "upcoming",
@@ -113,8 +112,8 @@ def test_upcoming_flight(settings: Settings) -> None:
         "status_label": "Scheduled",
         "status_tone": "quiet",
         "detail": "Fri 18 Sep 18:00 UTC",
-        "target_label": "Departs",
-        "target_value": "Fri 18:00",
+        "target_label": None,
+        "target_value": None,
     }
 
 
@@ -173,6 +172,8 @@ def test_a_flight_inside_its_day_turns_its_line_over_to_the_building(
         "flights"
     ][0]
     assert flight["status_label"] == "On time"
+    # And the rung appears with it: days out there was nothing to be waiting on, and now
+    # there is, which is the same line the card's footer comes and goes on.
     assert target(flight) == ("Departs", "Sun 02:00")
     assert detail(flight) == "TERM - · GATE -"
 
@@ -291,8 +292,9 @@ def test_at_the_gate_the_belt_takes_the_end_of_the_row(settings: Settings) -> No
     # Where the card puts it: the last thing the flight points at, at the end of the row
     # every other time is read off. Nothing is left ahead of it to be due.
     assert target(flight) == ("Baggage claim", "7")
-    # And nothing left to walk to but the belt, which is already on the row.
-    assert detail(flight) is None
+    # The card goes on drawing where the flight came in while it draws the belt, and so
+    # does this: the terminal on that line is the one the belt is in.
+    assert detail(flight) == "GATE 12 · TERM B"
 
 
 def test_a_belt_nobody_has_named_yet_is_dashed(settings: Settings) -> None:
@@ -302,7 +304,6 @@ def test_a_belt_nobody_has_named_yet_is_dashed(settings: Settings) -> None:
     flight = payload([(booking(), done)], settings)["flights"][0]
     assert flight["status_label"] == "Arrived"
     assert target(flight) == ("Baggage claim", "-")
-    assert detail(flight) is None
 
 
 def test_a_landed_flight_past_its_gate_time_is_sent_to_the_belt(settings: Settings) -> None:
@@ -359,10 +360,10 @@ def test_a_booking_the_poller_closed_in_the_air_has_no_time_to_give(
     closed = booking(status=BookingStatus.COMPLETED)
     flight = payload([(closed, lost)], settings)["flights"][0]
     assert flight["status_label"] == "Flown"
-    # Nothing ahead of it and nothing left to walk to: a gate at the far end that the
-    # feed never named is a pair of dashes about a flight that is over.
-    assert detail(flight) is None
     assert target(flight) == (None, None)
+    # The card still draws the ends of a flight it is watching, dashes and all, and the
+    # phase is what it is watching by - so a booking closed in the air keeps its line.
+    assert detail(flight) == "GATE - · TERM -"
 
 
 def test_a_diversion_renames_the_destination_and_reads_its_clock(settings: Settings) -> None:
@@ -460,40 +461,99 @@ def test_the_pill_is_the_boards_pill_and_nothing_else(settings: Settings) -> Non
     assert [drawn[n]["status_label"] for n in (1, 2, 3)] == ["Today", "Taxiing", "In the air"]
 
 
+def test_the_row_is_the_cards_two_conditions_and_nothing_else(settings: Settings) -> None:
+    """The card draws where to be for as long as it is watching the flight, and a footer
+    for the belt or for a rung on a flight it is watching. Nothing else.
+
+    A widget that names a rung the card leaves out is a second answer to a question the
+    card has already answered - the same fault as a pill that rephrases the board's word
+    - so both halves of the row are read off the card's own two conditions rather than
+    off a rule of the widget's own.
+    """
+    rows: list[FlightRow] = [
+        (booking(id=1, scheduled_departure_utc=NOW + timedelta(days=6)), None),
+        (booking(id=2), snapshot(booking_id=2, scheduled_out=DEPARTURE, gate_origin="B22")),
+        (booking(id=3), snapshot(booking_id=3, actual_off=DEPARTURE, estimated_in=ARRIVAL)),
+        (
+            booking(id=4),
+            snapshot(
+                booking_id=4,
+                actual_off=DEPARTURE,
+                actual_on=ARRIVAL,
+                actual_in=ARRIVAL,
+                baggage_claim="7",
+            ),
+        ),
+        (booking(id=5), snapshot(booking_id=5, cancelled=True)),
+    ]
+    for this, snap in rows:
+        flight = payload([(this, snap)], settings, airports=AIRPORTS)["flights"][0]
+        phase = compute_phase(this, snap, NOW)
+        watched = views.watched(phase)
+        footer = views.at_the_gate(phase, this, snap, NOW) or (
+            watched and views.milestone(phase, this, snap, now=NOW) is not None
+        )
+        assert (flight["target_label"] is not None) is footer, phase
+        # The card's places, compressed to the end being walked to, appear on exactly the
+        # rows the card draws them on.
+        assert ("GATE " in (flight["detail"] or "")) is watched, phase
+
+
 # --- the phone's own clock --------------------------------------------------------------
 
 
 HOME = "America/Toronto"
 
 
-def test_the_row_states_both_clocks_and_says_which_is_which(settings: Settings) -> None:
-    """A time four zones away is arithmetic, and a time with no zone is a guess.
+# One flight, read from Ottawa: it leaves Tokyo at 03:40 on the 13th JST, which is 14:40
+# on the 12th where it is being read, and it is inside its day either way.
+def tokyo_row() -> FlightRow:
+    return (
+        booking(origin_iata="HND", scheduled_departure_utc=DEPARTURE),
+        snapshot(scheduled_out=DEPARTURE),
+    )
 
-    Watching from Ottawa, a flight leaving Tokyo at 03:00 on the 19th leaves at 14:00 on
-    the 18th on the watch of the person reading it. Both readings are worth having and
-    they are not worth having on one line, so the row takes one each: the airport's under
-    the heading, carrying the zone that says it is the airport's, and the reader's own at
-    the end of the row, carrying none, because the widget's footer says once that every
-    time on it without a zone is theirs.
+
+def test_the_time_a_flight_is_due_is_on_the_phones_clock(settings: Settings) -> None:
+    """A time four zones away is arithmetic, not information.
+
+    Watching from Ottawa, a flight leaving Tokyo at 03:40 is due at 14:40 on the watch of
+    the person reading it, and that is the figure. The airport's own reading of the same
+    instant is not set beside it - a line with two times on it is a line that has to be
+    worked out rather than read - and the zone is not named either, because the widget's
+    footer says once that every time on it is on the clock in the same hand.
+    """
+    flight = payload([tokyo_row()], settings, airports=AIRPORTS, viewer_tz=HOME)["flights"][0]
+    assert target(flight) == ("Departs", "14:40")
+    assert "JST" not in str(target(flight)) and "EDT" not in str(target(flight))
+
+
+def test_the_day_it_leaves_is_the_airports_and_names_its_zone(settings: Settings) -> None:
+    """The one time on the widget that is not the reader's own, and the one that says so.
+
+    Days out there is no rung anybody is waiting on, so the row has one time on it rather
+    than two, and it is the airport's: the day a flight leaves is the day where it leaves
+    from. A bare reading would be taken for the reader's own, so this one keeps its zone.
     """
     far = booking(origin_iata="HND", scheduled_departure_utc=NOW + timedelta(days=6))
     flight = payload([(far, None)], settings, airports=AIRPORTS, viewer_tz=HOME)["flights"][0]
     assert detail(flight) == "Sat 19 Sep 03:00 JST"
-    assert target(flight) == ("Departs", "Fri 14:00")
+    assert target(flight) == (None, None)
 
 
 def test_the_day_in_front_of_the_time_is_the_phones_day(settings: Settings) -> None:
     """The day belongs to the clock the figure is read on, or it contradicts it.
 
-    NOW is the 12th in Toronto, and a flight leaving Tokyo at 10:00 on the 14th JST
-    leaves at 21:00 on the 13th where it is being read: Sunday to the person holding the
-    phone, and Monday at the airport. A day is named at all because a bare 21:00 read on
-    a Saturday afternoon is a time that looks like it is hours away.
+    NOW is the 12th in Toronto, and a flight leaving Tokyo at 15:00 on the 13th JST is
+    due at 02:00 on the 13th where it is being read: not today to the person holding the
+    phone, however plainly it is the afternoon at the airport. A day is named at all
+    because a bare 02:00 read on a Saturday afternoon is a time that looks like it has
+    gone rather than one fourteen hours out.
     """
-    tokyo = booking(origin_iata="HND", scheduled_departure_utc=NOW + timedelta(hours=31))
-    flight = payload([(tokyo, None)], settings, airports=AIRPORTS, viewer_tz=HOME)["flights"][0]
-    assert detail(flight) == "Mon 14 Sep 10:00 JST"
-    assert target(flight) == ("Departs", "Sun 21:00")
+    tokyo = booking(origin_iata="HND", scheduled_departure_utc=NOW + timedelta(hours=12))
+    rows: list[FlightRow] = [(tokyo, snapshot(scheduled_out=NOW + timedelta(hours=12)))]
+    flight = payload(rows, settings, airports=AIRPORTS, viewer_tz=HOME)["flights"][0]
+    assert target(flight) == ("Departs", "Sun 02:00")
 
 
 def test_a_time_today_is_the_time_and_nothing_else(settings: Settings) -> None:
@@ -506,49 +566,40 @@ def test_a_time_today_is_the_time_and_nothing_else(settings: Settings) -> None:
 def test_a_phone_that_says_nothing_gets_the_airports_clock(settings: Settings) -> None:
     """What every copy drew before the zone was sent, and still right, just harder work.
 
-    The line under the heading is the airport's either way. The one at the end of the row
-    has nowhere else to go: it is the only reading on the widget that is not the
-    reader's own, and there is nothing better to draw than the airport's.
+    It is the one reading on the widget that is not the reader's own and does not say so,
+    and there is nothing better to draw: the alternative is a row with no time on it.
     """
-    far = booking(origin_iata="HND", scheduled_departure_utc=NOW + timedelta(days=6))
-    rows: list[FlightRow] = [(far, None)]
+    rows = [tokyo_row()]
     silent = payload(rows, settings, airports=AIRPORTS)["flights"][0]
-    assert detail(silent) == "Sat 19 Sep 03:00 JST"
-    assert target(silent) == ("Departs", "Sat 03:00")
+    assert target(silent) == ("Departs", "03:40")
     blank = payload(rows, settings, airports=AIRPORTS, viewer_tz="")["flights"][0]
-    assert target(blank) == ("Departs", "Sat 03:00")
+    assert target(blank) == ("Departs", "03:40")
 
 
 def test_a_zone_the_phone_made_up_does_not_break_the_widget(settings: Settings) -> None:
     """`zone()` falls back to UTC on a name it does not know, and a widget that draws
     the wrong clock is still better than one that draws an error."""
-    far = booking(scheduled_departure_utc=NOW + timedelta(days=6))
-    flight = payload([(far, None)], settings, airports=AIRPORTS, viewer_tz="Mars/Olympus_Mons")[
-        "flights"
-    ][0]
-    assert detail(flight) == "Fri 18 Sep 14:00 EDT"
-    assert target(flight) == ("Departs", "Fri 18:00")
+    rows = [tokyo_row()]
+    flight = payload(rows, settings, airports=AIRPORTS, viewer_tz="Mars/Olympus_Mons")["flights"][0]
+    assert target(flight) == ("Departs", "18:40")
 
 
 def test_the_phones_zone_reaches_the_payload_from_the_query(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The one thing the server cannot work out for itself."""
-    leaves = (datetime.now(UTC) + timedelta(days=6)).replace(
-        hour=18, minute=40, second=0, microsecond=0
-    )
+    leaves = datetime.now(UTC) + timedelta(hours=6)
 
-    async def far_out(_session: Any, _now: datetime) -> list[FlightRow]:
-        return [(booking(scheduled_departure_utc=leaves), None)]
+    async def close_in(_session: Any, _now: datetime) -> list[FlightRow]:
+        return [(booking(scheduled_departure_utc=leaves), snapshot(scheduled_out=leaves))]
 
-    monkeypatch.setattr(widget, "load_flight_rows", far_out)
+    monkeypatch.setattr(widget, "load_flight_rows", close_in)
     response = client.get(
         "/api/widget?tz=Asia/Tokyo", headers={"Authorization": "Bearer test-token"}
     )
     assert response.status_code == 200
-    # The flight leaves JFK at 18:40 UTC, which is 03:40 the next morning in Tokyo, and
-    # Tokyo is where the phone says it is.
-    assert response.json()["flights"][0]["target_value"].endswith(" 03:40")
+    # The time it is due, read in Tokyo, because Tokyo is where the phone says it is.
+    assert response.json()["flights"][0]["target_value"].endswith(views.clock(leaves, "Asia/Tokyo"))
 
 
 def test_the_script_tells_the_server_where_the_phone_is() -> None:
@@ -1282,4 +1333,3 @@ def test_at_the_gate_the_status_says_arrived(settings: Settings) -> None:
     )
     flight = payload([(booking(), parked)], settings)["flights"][0]
     assert flight["status_label"] == "Arrived"
-    assert detail(flight) is None
