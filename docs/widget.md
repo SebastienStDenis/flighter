@@ -72,8 +72,20 @@ due.
 
 Whose it is, is their initial in a disc in the colour the board gives that person, the
 same disc the page draws. The disc is squared to the number beside it, so the heading is
-the height of its own type; the letter on it is drawn at three fifths of that, and shrinks
-rather than disappearing if a glyph ever asks for more room than the disc has.
+the height of its own type, and the letter on it is drawn at three fifths of that -
+drawn, into an image the size of the disc, rather than set as a line of type on it.
+Centring type in a stack takes a spacer either side of it, and a spacer holds a length of
+its own before it gives any room away; two of them ask for more than a disc this size
+has, which left the letter with nothing and no letter is drawn small when it has nowhere
+to go - it is dropped, and the disc came out bare.
+
+Every row of a wide widget is drawn at one size. The type sizes are chosen for the widget
+rather than measured against the room a line has left over, because a route or a status
+that shrinks to fit its own row is a flight drawn larger than the flight above it for no
+reason a reader can see - the row at the foot of a large widget with the shortest number
+on it, most visibly. The small size is the exception: there the route shares its line
+with the number and the rung shares its line with the pill, on a square where neither
+pair fits, so something gives on every row rather than on the fullest one.
 
 The row is the board's card, narrowed. The pill is the card's pill, the places are the
 card's places and the end of the row is the card's footer, each drawn on exactly the
@@ -91,8 +103,8 @@ flight to watch:
 | While it is | The line reads |
 | --- | --- |
 | Days off, with nothing to watch yet | `Fri 18 Sep 18:00 EDT` |
-| Still at the gate it leaves from | *plane climbing* `T 4 B22`, *seat* `14A` |
-| Pushed back, in the air, or parked | *seat* `14A`, *plane landing* `12 T B` |
+| Still at the gate it leaves from | *plane climbing* `T4 • B22`, *seat* `14A` |
+| Pushed back, in the air, or parked | *seat* `14A`, *plane landing* `TB • 12` |
 | Called off, or given up on | nothing; the pill has said it |
 
 The marks are `plane-takeoff`, `plane-landing` and `armchair` from Lucide, which is the
@@ -102,19 +114,24 @@ has room for figures or for labels and not for both, and the labels were most of
 spelling out the one thing nobody has to be told: which of three figures is the gate.
 What a mark says instead is which end of the flight the row is naming, which is the half
 of it a reader can get wrong. They are carried in the script rather than fetched from the
-server, because `T 4 B22` with no plane in front of it is a line read wrong rather than
+server, because `T4 • B22` with no plane in front of it is a line read wrong rather than
 read short - unlike an airline's mark, which is decoration the number beside it has
 already covered.
 
 The terminal and the gate are in the order a boarding pass prints them, and the terminal
-keeps the `T` that pass prints and keeps it off the figure the way the pass sets it,
-because a bare `4` beside a bare `B22` is two figures with nothing to tell them apart. A place the airport has not named is left out rather than
+keeps the `T` that pass prints and runs it into the figure the way the pass sets it,
+because a bare `4` beside a bare `B22` is two figures with nothing to tell them apart.
+Between the two of them is a dot: `T4 B22` set with nothing but a space is three runs of
+figures separated by two gaps of one width, and the dot says which of those gaps is the
+one that divides. A place the airport has not named is left out rather than
 dashed: a dash is an empty box, and a row with three boxes at most and two of them empty
 says nothing in the space where it says everything. What holds the line still while gates
 are published is the mark, which is drawn as soon as one figure lands behind it. Once the
 aircraft has left the gate the same three are read the other way about, because the seat
-is where the reader is and the gate and the terminal are where they are going - and they
-stay on the row after it parks, where the terminal is the one the belt is in.
+is where the reader is and the terminal and the gate are where they are going - and they
+stay on the row after it parks, where the terminal is the one the belt is in. The runs
+turn round; what is inside one does not, so a terminal and a gate are the same pair in
+the same order at both ends of the flight.
 
 When it goes is the other end of the row, and never on this line: the board's own words
 for the rung ahead, with the time it is due beside them.

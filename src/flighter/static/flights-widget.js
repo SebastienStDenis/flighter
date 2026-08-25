@@ -71,8 +71,11 @@ const FRIEND_INITIAL = [
   { s: 35, l: 38, a: 1 },
   { s: 42, l: 78, a: 1 },
 ];
-// How much of the disc the letter on it takes.
+// How much of the disc the letter on it takes, and how much taller than its own point
+// size a line of the system font stands - which is what has to be centred on the disc
+// rather than the point size, because the line is what the letter is drawn inside.
 const FRIEND_INITIAL_SCALE = 0.6;
+const LINE_HEIGHT = 1.2;
 
 // The one repair for a missing or rejected token, and the same sentence for both.
 const RECONNECT_TEXT = "Open the settings page on this phone and tap Connect.";
@@ -524,7 +527,18 @@ function titleRow(container, flight, logos) {
   route.font = Font.regularMonospacedSystemFont(TYPE.route);
   route.textColor = MUTED;
   route.lineLimit = 1;
-  route.minimumScaleFactor = 0.7;
+  // Only where the route has to give: a 155pt square has no room for a number and a
+  // route at the size the rest of that widget is read at.
+  //
+  // On the wide sizes it does have the room, and a shrink there is a size chosen by
+  // whatever else landed on that particular line - a longer number, a friend's disc, a
+  // longer word in the pill. Which is the same fault the type sizes above were fixed to
+  // settle, one row down: the flight at the foot of a large widget was drawn larger than
+  // the flight above it, for no reason a reader could see. A size chosen here is the
+  // size on every row.
+  if (family === "small") {
+    route.minimumScaleFactor = 0.7;
+  }
   // What holds whatever shares this line - the pill on the wide sizes - against the far
   // end of it, and what leaves the heading itself hard against the near one.
   row.addSpacer();
@@ -535,16 +549,20 @@ function titleRow(container, flight, logos) {
 // by the hue the server takes from their name, so one person is one colour on the phone
 // and on the page both.
 //
-// The disc is a stack with a size on it, and a stack in a widget carries padding of its
-// own unless it is told not to. Fourteen points across with the system's own insets
-// inside it leaves a couple of points for a letter, and a letter with nowhere to be
-// drawn is not drawn small - it is dropped, and what is left is a disc with nothing on
-// it. So the padding goes to nothing, the spacing with it, and the letter has the whole
-// of the disc to stand in.
+// The letter is drawn into an image rather than set as text on the disc, because a disc
+// this size has no way to hold a line of type in the middle of itself. Centring text in
+// a stack takes a spacer either side of it, and a spacer keeps a length of its own
+// before it gives any room away - the stack's default spacing, eight points, whatever
+// the stack's own `spacing` is afterwards, because that figure is the gap between two
+// things rather than the least a spacer will be. Two of them is sixteen points asked for
+// inside a disc that is fourteen across; what is left for the letter is nothing, and a
+// letter with nowhere to be drawn is not drawn small but dropped. Which is why the disc
+// kept coming out bare however little padding it was given.
 //
-// It is centred on both axes. `centerAlignContent` is the stack's answer for the one
-// axis it does not lay out along; the other one takes a spacer either side, and the
-// letter shrinks rather than vanishing if a wide glyph ever asks for more than the disc.
+// Drawn, the letter is centred by the context rather than by the layout, and the disc is
+// the size it was going to be either way. It is drawn white and tinted on the way in,
+// the same deal the marks on the line below make: one image is then the light scheme's
+// colour and the dark one's both, and the friend keeps one hue across the two.
 function friendMark(container, flight) {
   if (!flight.friend_initial) {
     return null;
@@ -554,17 +572,32 @@ function friendMark(container, flight) {
   disc.size = new Size(side, side);
   disc.cornerRadius = side / 2;
   disc.backgroundColor = friendColor(flight.friend_hue, FRIEND_DISC);
-  disc.centerAlignContent();
   disc.setPadding(0, 0, 0, 0);
-  disc.spacing = 0;
-  disc.addSpacer();
-  const initial = disc.addText(flight.friend_initial);
-  initial.font = Font.semiboldSystemFont(Math.round(side * FRIEND_INITIAL_SCALE));
-  initial.textColor = friendColor(flight.friend_hue, FRIEND_INITIAL);
-  initial.lineLimit = 1;
-  initial.minimumScaleFactor = 0.6;
-  disc.addSpacer();
+  const letter = disc.addImage(initialImage(flight.friend_initial, side));
+  letter.imageSize = new Size(side, side);
+  letter.tintColor = friendColor(flight.friend_hue, FRIEND_INITIAL);
   return disc;
+}
+
+// One letter, centred in a square the size of the disc it is going on.
+//
+// `drawTextInRect` hangs the line from the top of the rect it is given, so the rect it
+// is given is one line tall and set down the square by half of what is left over - which
+// is the centring the stack could not do. A line of the system font stands about a fifth
+// taller than its own point size, and that is the height being centred rather than the
+// point size, or the letter sits low on the disc by half the difference.
+function initialImage(letter, side) {
+  const size = Math.round(side * FRIEND_INITIAL_SCALE);
+  const line = size * LINE_HEIGHT;
+  const context = new DrawContext();
+  context.size = new Size(side, side);
+  context.opaque = false;
+  context.respectScreenScale = true;
+  context.setFont(Font.semiboldSystemFont(size));
+  context.setTextColor(Color.white());
+  context.setTextAlignedCenter();
+  context.drawTextInRect(letter, new Rect(0, (side - line) / 2, side, line));
+  return context.getImage();
 }
 
 function hasDetail(flight) {
@@ -627,8 +660,12 @@ function targetLabel(container, flight) {
   word.lineLimit = 1;
   // On the narrow size these words share their line with the pill, and the longest word
   // for a status is most of what a 155pt square has. Being read small beats being cut in
-  // half: this is a label, and the figure it names is the news.
-  word.minimumScaleFactor = 0.7;
+  // half: this is a label, and the figure it names is the news. On the wide sizes the
+  // word has its line to itself bar the places and the time, and a size that moves from
+  // row to row is the one thing a column of rows must not do.
+  if (family === "small") {
+    word.minimumScaleFactor = 0.7;
+  }
   return word;
 }
 
@@ -663,9 +700,15 @@ function pill(container, flight) {
   text.font = Font.semiboldSystemFont(TYPE.pill);
   text.textColor = toneColor(flight.status_tone);
   text.lineLimit = 1;
-  // The longest of them - "Departure delayed" - shares its line with the rung the flight
-  // is on, and a word cut in half is a status nobody can read.
-  text.minimumScaleFactor = 0.8;
+  // On the narrow size the longest of them - "Departure delayed" - shares its line with
+  // the rung the flight is on, and a word cut in half is a status nobody can read. On
+  // the wide sizes the pill ends the heading with the spacer in the middle of that line
+  // giving it whatever it asks for, so a shrink there only ever fires on the row that
+  // happened to be fullest - and a pill drawn smaller than the pill above it reads as a
+  // quieter status rather than as a longer word.
+  if (family === "small") {
+    text.minimumScaleFactor = 0.8;
+  }
   return badge;
 }
 
@@ -871,7 +914,7 @@ async function present(widget) {
 // the script rather than fetched from the server.
 //
 // Carried, because these are not decoration the way an airline's mark is. The row says
-// "T4 B22" and the glyph in front of it is the whole of what says those are the terminal
+// "T4 • B22" and the glyph in front of it is the whole of what says those are the terminal
 // and the gate this flight leaves from; a mark that had not arrived yet would leave a
 // line that is read wrong rather than read short. So they cost the script two kilobytes
 // and are on every widget from the first draw, network or no network.

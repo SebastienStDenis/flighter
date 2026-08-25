@@ -102,10 +102,15 @@ ICON_SEAT: Final = "seat"
 
 # Between the terminal and the gate behind the same mark. A gate is a figure nobody
 # mistakes for anything else; a terminal on its own is a bare 4 or a bare B, so it keeps
-# the T a boarding pass prints in front of it - off the figure rather than run into it,
-# the way the pass sets it - and the two of them need nothing between them but the space.
-BETWEEN_PLACES: Final = " "
-TERMINAL_PREFIX: Final = "T "
+# the T a boarding pass prints in front of it - run into the figure, the way a pass sets
+# it, so that "T4" reads as one thing rather than as a letter and a number.
+#
+# Which leaves the two of them needing something between them: "T4 B22" set with nothing
+# but a space is three runs of figures with two gaps of the same width, and a dot in the
+# middle gap says which gap is the one that divides. The dot has the air either side of
+# it, because a separator run into what it separates is a character in the figure.
+BETWEEN_PLACES: Final = " • "
+TERMINAL_PREFIX: Final = "T"
 
 
 def _iso_z(value: datetime) -> str:
@@ -487,9 +492,14 @@ def _detail(
     ends of it at once; a row has one line, so it draws the end being walked to. Inside
     its day that is the terminal and the gate it leaves from, behind a climbing plane,
     and then the seat behind a seat. Off the ground it is the same three the other way
-    about - the seat first, because that is where the reader is, and then the gate and
-    the terminal at the far end behind a plane coming down - including once they are
+    about - the seat first, because that is where the reader is, and then the terminal
+    and the gate at the far end behind a plane coming down - including once they are
     parked, when the terminal is the one the belt is in.
+
+    The runs turn round; what is inside one does not. A terminal and a gate are read as
+    the pair "T4 • B22" at both ends of the flight, because they are the same two figures
+    either way and a reader who has learnt where the gate is on the line out should not
+    have to learn it again on the line home.
 
     A place the airport has not named is left out rather than dashed. A dash is a box
     with nothing in it, which is a thing to read on a row that has three of them at most,
@@ -521,8 +531,8 @@ def _detail(
             seat,
             _run(
                 ICON_LANDING,
-                snapshot.gate_destination if snapshot else None,
                 _terminal(snapshot.terminal_destination if snapshot else None),
+                snapshot.gate_destination if snapshot else None,
             ),
         ]
     return [run for run in runs if run is not None]
