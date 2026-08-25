@@ -17,5 +17,9 @@ node_modules/
 # Local overrides of the shipped example.
 docker-compose.override.yml
 
-# Claude Code session workspaces.
+# Claude Code session workspaces, and the screenshots its browser writes.
 .claude/
+.playwright-mcp/
+
+# macOS Finder metadata.
+.DS_Store
