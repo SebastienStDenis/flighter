@@ -5,26 +5,23 @@
 // Flight tracker widget.
 //
 // The server decides everything: which flights, in what order, what the pill says and
-// in which tone, the one line under it, what the flight is counting to, and where the
-// airline's mark is to be fetched from. This file draws that and nothing else.
+// in which tone, the line under the heading, the words that end the row and the time
+// beside them, and where the airline's mark is to be fetched from. This file draws that
+// and nothing else.
 //
-// Two figures are not worked out here at all. iOS reloads a widget when it feels like it,
-// about every quarter of an hour, so any number counted from the clock at draw time is
-// that far wrong by the time it is read - and how long until the flight goes, and how old
-// what is on screen is, are the two that have to be right to the minute. WidgetKit ticks a
-// date on its own, between reloads and without waking anything, so both are drawn as dates
-// and it counts them: the server's instant for the first, and the moment this data landed
-// for the second. Every other time in the payload is already a clock face, right until the
-// estimate moves.
+// Nothing on it moves. iOS reloads a widget when it feels like it, about every quarter
+// of an hour, so any figure counted from the clock at draw time - how long until the
+// flight goes, how old what is on screen is - is that far out by the time it is read,
+// and out in the flattering direction, which is worse than saying nothing. So the widget
+// states times rather than counting to them: a flight due at 18:40 is due at 18:40
+// whether the row is read at noon or at seven, and it goes on being true while iOS makes
+// the widget wait for its next reload. The only word that has to keep up is the one in
+// front of the time, which turns from "Departs" to "Due to depart" as the time goes by -
+// and the server asks for a reload at that instant rather than at its usual cadence.
 //
-// A word is not a date, though. The label beside a countdown is frozen at the moment it was
-// drawn, so "Departs in" is still there while the count ticks upwards past zero, and the
-// row reads as three minutes to go when it is three minutes overdue. Nothing on the phone
-// can repair that: swapping a drawn glyph for another one needs a drawing, WidgetKit hands
-// out one per reload, and a reload re-runs this file from the top and asks the server again
-// - by which point the label has rolled over on its own and the count is meant to climb.
-// So the reload is the whole of the answer: the server asks for one at the instant itself
-// rather than at its usual cadence, and the row is wrong for as long as iOS makes it wait.
+// Every time drawn here is on the phone's own clock, which is what the footer says. The
+// one exception is the day a flight leaves, which is on the clock at the airport it
+// leaves from and carries that airport's zone to say so.
 //
 // There is nothing to edit here. The server's address and the token arrive through the
 // Connect button on the settings page, which runs this script with both in the URL, and
@@ -60,8 +57,28 @@ const TONES = {
 // What the pill lets through behind the word, as the page mixes it into its card.
 const TINT_ALPHA = 0.14;
 
+// A friend's disc and the initial on it, as styles/app.css mixes them: the hue is the
+// one the server took from their name, and these are the saturation, the lightness and
+// the strength the page reads it at, light scheme then dark. Mixed here rather than
+// rendered to a colour up here like the rest of the palette, because a hue that belongs
+// to a name is not known until the name is.
+const FRIEND_DISC = [
+  { s: 55, l: 50, a: 0.12 },
+  { s: 45, l: 65, a: 0.16 },
+];
+const FRIEND_INITIAL = [
+  { s: 35, l: 38, a: 1 },
+  { s: 42, l: 78, a: 1 },
+];
+
 // The one repair for a missing or rejected token, and the same sentence for both.
 const RECONNECT_TEXT = "Open the settings page on this phone and tap Connect.";
+
+// What every time on the widget has in common, said once at the foot of it rather than
+// as a zone after each of them. The short form is the small size's, where the phrase
+// shares its line with the moment the data landed.
+const CLOCK_NOTE = "Times on your phone's clock";
+const CLOCK_NOTE_SHORT = "your clock";
 
 // Declared up here because the widget is built before the rest of the file has run, and
 // a class, unlike a function, does not exist until its line does.
@@ -71,30 +88,21 @@ class TokenRejected extends Error {}
 // them. It is the one size with no room to spare, so the figures it does have room for
 // are the ones the board leads with.
 const SMALL_FLIGHTS = 2;
-const SMALL_GAP = 2;
-
-// The count, at one size on every home screen size. It was sized against the room each
-// widget had going spare, which made the figure smallest on the widget with the most
-// room on it - a medium one holding three flights - and left the same number drawn three
-// different ways across a home screen. It is the figure every one of them is looked at
-// for, so it is the same figure on all of them.
-const COUNT_SIZE = 18;
-// What the foot of a figure's box gives back where it stands in a column under its own
-// words. A line of type carries air over its glyphs and under them, and at half again the
-// size of every other word on the widget the count carries half again as much of both:
-// left whole, the box is taller than the two lines it stands beside. The air under the
-// baseline is the half to take, because a count has no descenders to draw in it.
-const COUNT_FOOT = 2;
-// And how far that column starts down the row, which is the difference between the two
-// ascenders: it sets the words naming the figure on the same baseline as the flight
-// number across the row from them, rather than on the top of its line.
-const FOOTER_WORD_DROP = 3;
+const SMALL_GAP = 3;
 
 const family = config.widgetFamily || "medium";
 const isAccessory = family.startsWith("accessory");
 // Per-element tap targets exist only on medium and large. Everywhere else the whole
 // widget gets one URL.
 const supportsRowLinks = family === "medium" || family === "large";
+
+// What a row is set in: the heading carrying the number and the route, the line under it
+// saying where to be, the pill's own word, and the words and the time that end the row.
+// A small widget is the same four things at the sizes a 155pt square has room for.
+const TYPE =
+  family === "small"
+    ? { heading: 12, detail: 10, pill: 10, label: 10, time: 13 }
+    : { heading: 14, detail: 11, pill: 10, label: 11, time: 13 };
 
 const server = connect();
 const result = server ? await load(server) : null;
@@ -308,7 +316,8 @@ async function buildWidget(result) {
     // The lock screen has no room for a footer, so there the age goes in the message.
     message(widget, "No upcoming flights", isAccessory ? staleNote(result) : null);
     if (!isAccessory) {
-      footer(widget, data, result);
+      // No times above it, so nothing to say which clock they are on.
+      footer(widget, data, result, false);
     }
     return widget;
   }
@@ -326,11 +335,7 @@ async function buildWidget(result) {
     renderList(widget, flights, logos);
   }
   widget.addSpacer();
-  // On every home screen size, two flights of four lines included. The height this was
-  // held off the small one for is height the small one turns out to have: the figures
-  // here are worked out from the point sizes, and the phone is what says how tall a
-  // line of them really is.
-  footer(widget, data, result);
+  footer(widget, data, result, true);
   return widget;
 }
 
@@ -342,10 +347,9 @@ function newWidget() {
     widget.setPadding(2, 2, 2, 2);
   } else {
     widget.backgroundColor = BACKGROUND;
-    // A little tighter on the small size, which holds two flights of four lines each with
-    // the count on them set at the size every other widget draws it. Tighter, and not as
-    // tight as it will go: a widget whose words start against its own rounded corner
-    // reads as one that ran out of room, whatever it is holding.
+    // A little tighter on the small size, which holds two flights of three lines each.
+    // Tighter, and not as tight as it will go: a widget whose words start against its
+    // own rounded corner reads as one that ran out of room, whatever it is holding.
     const inset = family === "small" ? 11 : 14;
     widget.setPadding(inset, inset, inset, inset);
   }
@@ -363,39 +367,35 @@ function renderAccessory(widget, flight, result) {
   title.lineLimit = 1;
   title.minimumScaleFactor = 0.7;
 
-  // The word and the count share a line here rather than taking one each: three lines
-  // is what a lock screen has, and the gate is worth one of them.
+  // The word for the flight and where to be share a line rather than taking one each:
+  // three lines is what a lock screen has, and what the flight is due to do next is
+  // worth one of them on its own.
   const state = widget.addStack();
   state.centerAlignContent();
   const word = state.addText(flight.status_label);
   word.font = Font.semiboldSystemFont(15);
   word.lineLimit = 1;
-  if (flight.footer_at) {
-    state.addSpacer();
-    countdown(state, flight, 13);
-  }
-
   if (flight.detail) {
-    const text = widget.addText(flight.detail);
-    text.font = Font.systemFont(11);
-    text.textOpacity = 0.7;
-    text.lineLimit = 1;
-    text.minimumScaleFactor = 0.8;
+    state.addSpacer();
+    const where = state.addText(flight.detail);
+    where.font = Font.systemFont(11);
+    where.textOpacity = 0.7;
+    where.lineLimit = 1;
+    where.minimumScaleFactor = 0.8;
   }
 
-  // A figure the server already knows takes the third line with its own words rather
-  // than the second with the status word's: "Landed" and a bare 7 beside it is a row
-  // that has to be guessed at, and the line the gate was on is free by then anyway.
-  if (flight.footer_value) {
-    const belt = widget.addStack();
-    belt.centerAlignContent();
-    const label = belt.addText(flight.footer_label);
+  // The rung and its time keep their own line with the words in front of them: "Lands"
+  // and a bare 22:15 across a row from it is a line that has to be guessed at.
+  if (flight.target_label) {
+    const line = widget.addStack();
+    line.centerAlignContent();
+    const label = line.addText(flight.target_label);
     label.font = Font.systemFont(11);
     label.textOpacity = 0.7;
     label.lineLimit = 1;
     label.minimumScaleFactor = 0.8;
-    belt.addSpacer();
-    const value = belt.addText(flight.footer_value);
+    line.addSpacer();
+    const value = line.addText(flight.target_value);
     value.font = Font.boldMonospacedSystemFont(13);
     value.lineLimit = 1;
   }
@@ -416,38 +416,27 @@ function renderSmall(widget, flights, logos) {
     // The number and the route on one line. The two do not fit at the size the rest of
     // this widget is read at, so the route is the half that gives: it shrinks against
     // the number rather than taking a line of its own.
-    titleRow(widget, flight, logos, 11, true);
+    titleRow(widget, flight, logos);
 
-    // Then the board's own order, a line each: what state it is in, where to be, and
-    // what it is counting to with the count itself at the end of the line.
+    // Then the two ends of a wide row, a line each rather than a column each - there is
+    // no width here for a heading and a pill side by side. The pill leads its line and
+    // the rung ends it; where to be leads the next and the time ends it. So the words
+    // and the time they name still stand one above the other against the right-hand
+    // edge, and the left of both lines still reads down the flight.
     widget.addSpacer(SMALL_GAP);
     const state = widget.addStack();
+    state.centerAlignContent();
     pill(state, flight);
     state.addSpacer();
+    targetLabel(state, flight);
 
-    if (flight.detail) {
-      widget.addSpacer(SMALL_GAP);
-      const detail = widget.addText(flight.detail);
-      detail.font = Font.systemFont(9);
-      detail.textColor = TEXT;
-      // One line and no shrinking: what a narrow widget loses is the end of the line -
-      // the seat - rather than the size of every word on it.
-      detail.lineLimit = 1;
-    }
-
-    if (flight.footer_at || flight.footer_value) {
+    if (flight.detail || flight.target_value) {
       widget.addSpacer(SMALL_GAP);
       const line = widget.addStack();
       line.centerAlignContent();
-      // A point under the words on the lines above it, because this one shares its line
-      // with a figure set twice its size: at the wider margins the two of them together
-      // are the whole of the line, and the words are the half of it that can afford to
-      // be quieter.
-      footerWord(line, flight, 9);
+      detailText(line, flight);
       line.addSpacer();
-      // No slack on this one: the words naming the count share its line, and at this
-      // width the widest reading a count can take is already most of what there is.
-      figure(line, flight, COUNT_SIZE, 0).textColor = TEXT;
+      targetValue(line, flight);
     }
   });
 }
@@ -458,95 +447,47 @@ function renderList(widget, flights, logos) {
       widget.addSpacer(family === "large" ? 12 : 8);
     }
     const row = widget.addStack();
+    row.layoutVertically();
     if (supportsRowLinks) {
       row.url = flight.detail_url;
     }
-    // The flight down one side of the row and the board's footer down the other, as two
-    // columns rather than as the two ends of two lines. The words and the figure they
-    // name are one stack that way, standing as far apart as the column says - where laid
-    // out as lines they stood as far apart as the lines beside them happened to fall,
-    // which was most of a blank line, and closing it meant hauling the figure back up out
-    // of its own box until its digits were drawn with their tops cut off.
-    row.topAlignContent();
-    const flightColumn = row.addStack();
-    flightColumn.layoutVertically();
 
-    titleRow(flightColumn, flight, logos, 14, true);
-    // Well under the gap between two flights, because these two lines are one flight:
-    // what the widget is sorted into by eye is rows rather than lines.
-    flightColumn.addSpacer(3);
+    // The heading with the pill at the far end of it, which is where the card puts its
+    // own - and where a column of rows can be read straight down for the word alone.
+    const head = row.addStack();
+    head.centerAlignContent();
+    titleRow(head, flight, logos);
+    pill(head, flight);
 
-    // Spaced by hand rather than by the stack. A stack's spacing falls either side of
-    // the spacer that holds the line against the end of the column as well as between
-    // the things that are actually beside each other, so it is paid twice over in the
-    // one place the row has none to spare - between where to be and the count, which is
-    // where the line is being cut short.
-    const line = flightColumn.addStack();
-    line.centerAlignContent();
-    line.spacing = 0;
-    pill(line, flight);
-    if (flight.detail) {
-      line.addSpacer(6);
-      // No scale factor: a text that can shrink is sized before the pill and handed
-      // half the line, and is cut short with room beside it. One that only truncates
-      // is sized after the pill and gets everything the pill left. Where to be leads the
-      // line, so what a narrow row loses is the seat rather than the gate.
-      const detail = line.addText(flight.detail);
-      detail.font = Font.systemFont(11);
-      detail.textColor = TEXT;
-      detail.lineLimit = 1;
-    }
-    // Both lines end in one of these, which is what keeps the column they are in filling
-    // the width the footer's column leaves and what holds their words against the near
-    // end of it.
-    line.addSpacer();
-
-    if (flight.footer_at || flight.footer_value) {
-      footerColumn(row, flight);
+    // Under it, where to be at the near end and what the flight is next due to do at the
+    // far one. Both lines run the whole width of the row, so the pill and the time below
+    // it stand against the same edge without either of them being measured: what holds
+    // them there is the spacer in the middle of each line, which is the one thing on a
+    // widget that costs nothing to be exactly as wide as it has to be.
+    if (flight.detail || flight.target_value) {
+      // Well under the gap between two flights, because these two lines are one flight:
+      // what the widget is sorted into by eye is rows rather than lines.
+      row.addSpacer(3);
+      const line = row.addStack();
+      line.centerAlignContent();
+      detailText(line, flight);
+      line.addSpacer();
+      targetLabel(line, flight);
+      if (flight.target_value) {
+        line.addSpacer(5);
+        targetValue(line, flight);
+      }
     }
   });
 }
 
-// The board's footer as a column at the end of a row: the words it is named for over the
-// figure itself, one directly under the other and nothing between them but the air the
-// two lines carry.
-//
-// Boxed to the figure's own width, which is the one measurement that has to be made here
-// rather than left to WidgetKit. It is what the words are held against the far end by,
-// and it is what leaves the rest of the row to the flight: a column that sized itself
-// would take its width from whichever of the two happened to be wider.
-function footerColumn(container, flight) {
-  const column = container.addStack();
-  column.layoutVertically();
-  column.size = new Size(figureWidth(flight, COUNT_SIZE), 0);
-  column.setPadding(FOOTER_WORD_DROP, 0, 0, 0);
-
-  const words = column.addStack();
-  words.addSpacer();
-  footerWord(words, flight, 11);
-
-  const value = column.addStack();
-  value.addSpacer();
-  // No slack: a figure boxed wider than its widest reading is boxed at the expense of the
-  // line beside it, and the words above it already say what it is counting to.
-  figure(value, flight, COUNT_SIZE, 0, COUNT_FOOT).textColor = TEXT;
-  return column;
-}
-
-// What the figure is about to take: the reading a count is going to turn into, or the
-// glyphs a figure the server already knows is drawn with.
-function figureWidth(flight, size) {
-  return flight.footer_at
-    ? timerWidth(flight.footer_at, size, 0)
-    : glyphWidth(flight.footer_value.length, size);
-}
-
-// The heading: the airline's mark, when it came, then the number, and the route beside
-// it where the row is wide enough to hold both.
-function titleRow(container, flight, logos, size, withRoute) {
+// The heading: whose flight it is where it is not the reader's own, the airline's mark
+// when it came, then the number, and the route beside it.
+function titleRow(container, flight, logos) {
   const row = container.addStack();
   row.centerAlignContent();
   row.spacing = 5;
+  friendMark(row, flight);
   const logo = logos[flight.logo_url];
   if (logo) {
     // Squared to the number's own point size rather than over it. A mark drawn taller
@@ -554,109 +495,94 @@ function titleRow(container, flight, logos, size, withRoute) {
     // held at the other end of that line then reads as adrift in a gap that is the
     // mark's rather than its own.
     const mark = row.addImage(logo);
-    mark.imageSize = new Size(size, size);
+    mark.imageSize = new Size(TYPE.heading, TYPE.heading);
     mark.cornerRadius = 3;
   }
   const number = row.addText(flight.number);
-  number.font = Font.semiboldMonospacedSystemFont(size);
+  number.font = Font.semiboldMonospacedSystemFont(TYPE.heading);
   number.textColor = TEXT;
   number.lineLimit = 1;
-  if (withRoute) {
-    row.addSpacer(3);
-    const route = row.addText(flight.route);
-    route.font = Font.regularMonospacedSystemFont(size);
-    route.textColor = MUTED;
-    route.lineLimit = 1;
-    route.minimumScaleFactor = 0.7;
-  }
+  row.addSpacer(3);
+  const route = row.addText(flight.route);
+  route.font = Font.regularMonospacedSystemFont(TYPE.heading);
+  route.textColor = MUTED;
+  route.lineLimit = 1;
+  route.minimumScaleFactor = 0.7;
+  // What holds whatever shares this line - the pill on the wide sizes - against the far
+  // end of it, and what leaves the heading itself hard against the near one.
   row.addSpacer();
   return row;
 }
 
-// The board's own words for the rung ahead - "Departs in", "Due to land" - or for the
-// one thing a parked flight has left to say, which is where its bag is. Either way the
-// half of the footer that does not move.
-function footerWord(container, flight, size) {
-  if (!flight.footer_label) {
+// Whose flight it is, drawn the way the board draws it: their initial in a disc tinted
+// by the hue the server takes from their name, so one person is one colour on the phone
+// and on the page both.
+function friendMark(container, flight) {
+  if (!flight.friend_initial) {
     return null;
   }
-  const word = container.addText(flight.footer_label);
-  word.font = Font.systemFont(size);
+  const side = TYPE.heading;
+  const disc = container.addStack();
+  disc.size = new Size(side, side);
+  disc.cornerRadius = side / 2;
+  disc.backgroundColor = friendColor(flight.friend_hue, FRIEND_DISC);
+  disc.centerAlignContent();
+  // A spacer either side rather than an alignment: `centerAlignContent` is the stack's
+  // answer for the one axis it does not lay out along, and the letter has to be centred
+  // on both or it sits against the side of its own disc.
+  disc.addSpacer();
+  const initial = disc.addText(flight.friend_initial);
+  initial.font = Font.semiboldSystemFont(Math.round(side * 0.6));
+  initial.textColor = friendColor(flight.friend_hue, FRIEND_INITIAL);
+  initial.lineLimit = 1;
+  disc.addSpacer();
+  return disc;
+}
+
+// Where to be, at the near end of the second line: the terminal, the gate and the seat
+// while somebody is walking to them, and the day the flight leaves while nobody is.
+function detailText(container, flight) {
+  if (!flight.detail) {
+    return null;
+  }
+  // One line and no shrinking: what a narrow widget loses is the end of the line - the
+  // seat, or the terminal at the other end - rather than the size of every word on it.
+  const text = container.addText(flight.detail);
+  text.font = Font.systemFont(TYPE.detail);
+  text.textColor = TEXT;
+  text.lineLimit = 1;
+  return text;
+}
+
+// The board's own words for the rung ahead - "Departs", "Due to land" - or for the one
+// thing a parked flight has left to point at, which is where its bag is.
+function targetLabel(container, flight) {
+  if (!flight.target_label) {
+    return null;
+  }
+  const word = container.addText(flight.target_label);
+  word.font = Font.systemFont(TYPE.label);
   word.textColor = MUTED;
   word.lineLimit = 1;
-  // On the narrow size these words share their line with a count set half again their
-  // size, and the widest reading a count can take leaves them barely room. Being read
-  // small beats being cut in half: this is a label, and the figure beside it is the news.
+  // On the narrow size these words share their line with the pill, and the longest word
+  // for a status is most of what a 155pt square has. Being read small beats being cut in
+  // half: this is a label, and the figure it names is the news.
   word.minimumScaleFactor = 0.7;
   return word;
 }
 
-// The other half: a count where the flight still has a rung ahead of it, and where it
-// has not, the figure the server already knows. A belt is a fact rather than a clock -
-// it is drawn once and stays - so it needs none of the machinery below and is set at the
-// same size and weight, because it is the same half of the same footer.
-function figure(container, flight, size, slack, trim = 0) {
-  if (flight.footer_at) {
-    return countdown(container, flight, size, slack, trim);
+// The other half: the time the flight is due, or the figure a parked one has instead of
+// a time. Monospaced, so a column of them lines up digit under digit down the widget,
+// and set heavier than anything else on the row, because it is what the row is read for.
+function targetValue(container, flight) {
+  if (!flight.target_value) {
+    return null;
   }
-  const box = container.addStack();
-  if (trim) {
-    box.setPadding(0, 0, -trim, 0);
-  }
-  const value = box.addText(flight.footer_value);
-  value.font = Font.boldMonospacedSystemFont(size);
+  const value = container.addText(flight.target_value);
+  value.font = Font.boldMonospacedSystemFont(TYPE.time);
+  value.textColor = TEXT;
   value.lineLimit = 1;
   return value;
-}
-
-// The count, which iOS draws for itself: the instant the server named, counted down
-// where it stands and ticking between reloads. Monospaced, so nothing beside it shuffles
-// as the digits change, and it goes on counting up once the time has gone by - which is
-// the state the word beside it is already saying is a wait.
-//
-// Aligned right explicitly. A timer is the one element whose text WidgetKit cannot measure
-// before it draws it, so it is handed the whole of what the spacer left rather than only
-// what the digits need; the preview in Scriptable, which measures a snapshot, hands it the
-// digits. Left to itself the count therefore sits at the right-hand end of the row in the
-// app and part-way along it on the home screen, which is the same widget disagreeing with
-// itself. Right is the end the spacer was put there to hold it against.
-function countdown(container, flight, size, slack = 1, trim = 0) {
-  const at = new Date(flight.footer_at);
-  // The box is what the count is measured into, and `trim` is what the foot of it gives
-  // back where it stands in a column of its own: WidgetKit gives a line of text no say in
-  // its own height, so a count set half again the size of the words above it stands in a
-  // box half again as deep as they do and carries the column past the flight beside it.
-  // Only ever the foot, and only ever less than the air under the baseline. A box shorter
-  // than the glyphs it holds is one WidgetKit draws them cut off in rather than lets them
-  // out of, and the space under a count's baseline is the one part of its line that
-  // nothing is ever drawn in.
-  const box = container.addStack();
-  if (trim) {
-    box.setPadding(0, 0, -trim, 0);
-  }
-  // Boxed to the width of the reading it is about to show. A timer is the one element
-  // WidgetKit cannot measure before it draws it, so left to itself it is handed all the
-  // room the spacer left - and what it does not use it keeps, off the end of the line
-  // where the gate and the seat are being cut short to make it. Scriptable measures a
-  // snapshot and hands it the digits, which is why the same row reads differently in the
-  // app and on the home screen.
-  box.size = new Size(timerWidth(at, size, slack), 0);
-  const date = box.addDate(at);
-  date.applyTimerStyle();
-  // Bold rather than semibold. The two are the same weight to look at when a Mac draws
-  // an iPhone's widget, so the count reads as heavier than the row on a mirrored screen
-  // and no different from it on the phone itself - and the phone is the screen this is
-  // for. The weight is the point: the count is what the row is looked at for.
-  date.font = Font.boldMonospacedSystemFont(size);
-  // Held against the end of its box, which is the end of the row: what the box has over
-  // is the difference between the reading and the widest one it could turn into.
-  date.rightAlignText();
-  date.lineLimit = 1;
-  // Only a hair of give. A count that shrinks to fit is a count drawn smaller than the
-  // size it was asked for, and the size is the point; the box is measured wide so this
-  // never has to happen.
-  date.minimumScaleFactor = 0.95;
-  return date;
 }
 
 // The board's badge: the word in its tone, on the same tone let through the card.
@@ -673,16 +599,19 @@ function pill(container, flight) {
   badge.cornerRadius = 7;
   badge.backgroundColor = toneColor(flight.status_tone, TINT_ALPHA);
   const text = badge.addText(flight.status_label);
-  text.font = Font.semiboldSystemFont(10);
+  text.font = Font.semiboldSystemFont(TYPE.pill);
   text.textColor = toneColor(flight.status_tone);
   text.lineLimit = 1;
+  // The longest of them - "Departure delayed" - shares its line with the rung the flight
+  // is on, and a word cut in half is a status nobody can read.
+  text.minimumScaleFactor = 0.8;
   return badge;
 }
 
 // The bottom of the widget: why the numbers might be wrong, when there is a reason, and
-// under it how old the numbers are, always. Two lines rather than one because a budget
-// breaker's sentence and a running clock do not share a row on a small widget.
-function footer(widget, data, result) {
+// under it when they were fetched and which clock they are all on. Two lines rather than
+// one because a budget breaker's sentence does not share a row with anything.
+function footer(widget, data, result, timed) {
   if (data.degraded) {
     const text = widget.addText(data.degraded_reason || "Status may be out of date");
     text.font = Font.systemFont(footerSize());
@@ -693,91 +622,62 @@ function footer(widget, data, result) {
     text.lineLimit = 1;
     text.minimumScaleFactor = 0.7;
   }
-  updatedLine(widget, result);
+  updatedLine(widget, result, timed);
 }
 
-// "Last updated 04:12", counted by WidgetKit rather than worked out here.
+// "Last updated 04:12" at one end of the line, and at the other the one thing every time
+// above it has in common.
 //
-// The figure is the reason this line exists: a widget is redrawn a few times an hour, so
-// "4 min ago" written at draw time is the one number on screen guaranteed to be wrong by
-// the time anybody reads it - and wrong in the flattering direction, which is worse than
-// saying nothing. A date drawn in the timer style counts upwards on its own, so the age
-// on screen is the real one whenever the phone is looked at, whether iOS has reloaded
-// this widget in the last minute or has not touched it for half an hour.
+// A clock face rather than an age. A widget is redrawn a few times an hour, so "4 min
+// ago" written at draw time is the one figure on screen guaranteed to be wrong by the
+// time anybody reads it, and wrong in the flattering direction; the time it was fetched
+// at is simply a fact, and stays one for as long as iOS leaves the widget alone.
 //
 // "Cached" rather than "Last updated" when the server could not be reached, because then
-// the figure is the age of a file on the phone rather than of a conversation with a server.
+// the time is when a file on the phone was written rather than when a server last spoke.
 //
-// The word leads and the figure ends it, and the phrase sits in the middle of the widget:
-// it is the one line that belongs to the whole of it rather than to a flight, and every
-// row over it starts hard against the left. Centred, it reads as the widget's own footnote
-// rather than as one more row of the list.
-function updatedLine(widget, result) {
+// The note is the other half of the deal the rest of the widget makes: no time up there
+// carries a zone, so this says once, quietly, whose clock they are on.
+function updatedLine(widget, result, timed) {
   const size = footerSize();
+  // A cache with no modification date on it can still be drawn; it just cannot be dated,
+  // and then the word is the whole phrase.
+  const word = result.stale ? "Cached" : "Last updated";
+  const stamp = result.fetchedAt ? `${word} ${timeOfDay(result.fetchedAt)}` : word;
+
+  if (family === "small") {
+    // No room on a 155pt square for two phrases held apart, so they are one phrase, both
+    // halves of it said as shortly as they can be, and the line centred under the
+    // flights the way a footnote is.
+    const brief = result.fetchedAt
+      ? `${result.stale ? "Cached" : "Updated"} ${timeOfDay(result.fetchedAt)}`
+      : word;
+    const line = widget.addText(timed ? `${brief} · ${CLOCK_NOTE_SHORT}` : brief);
+    line.font = Font.systemFont(size);
+    line.textColor = MUTED;
+    line.centerAlignText();
+    line.lineLimit = 1;
+    line.minimumScaleFactor = 0.7;
+    return;
+  }
+
   const line = widget.addStack();
   line.centerAlignContent();
-  line.spacing = 3;
-  // A spacer at each end rather than one at the right: the two of them share what the
-  // phrase leaves and hold it in the middle between them.
-  line.addSpacer();
-
-  const word = line.addText(result.stale ? "Cached" : "Last updated");
-  word.font = Font.systemFont(size);
-  word.textColor = MUTED;
-  word.lineLimit = 1;
-
-  // A cache with no modification date on it can still be drawn; it just cannot be aged -
-  // and then the word is the whole phrase, centred on its own between the same spacers.
-  if (result.fetchedAt) {
-    // Boxed like the count, and for the same reason: a timer is the one element WidgetKit
-    // cannot measure before it draws it, so left to itself it takes the rest of the line
-    // and holds the digits at whichever end it is told to. No glyph of slack on this one,
-    // the way there is on the lock screen's count: a centred phrase is measured from both
-    // ends, so room the box has over is room the words are pushed left by rather than
-    // room that falls off where the line stops.
-    const box = line.addStack();
-    box.size = new Size(timerWidth(result.fetchedAt, size), 0);
-    const age = box.addDate(result.fetchedAt);
-    age.applyTimerStyle();
-    age.font = Font.regularMonospacedSystemFont(size);
-    age.textColor = MUTED;
-    age.leftAlignText();
-    age.lineLimit = 1;
-    // The line reads as one phrase, so the figure in it is set at the size of the word in
-    // front of it. A hair of give for the phone that has not been asked to redraw this
-    // since the reading gained a digit, and no more than that.
-    age.minimumScaleFactor = 0.95;
+  const stated = line.addText(stamp);
+  stated.font = Font.systemFont(size);
+  stated.textColor = MUTED;
+  stated.lineLimit = 1;
+  if (!timed) {
+    return;
   }
+  // The spacer is what makes this a footer rather than a sentence: one phrase against
+  // each edge, the way the rows above it are held apart.
   line.addSpacer();
-}
-
-// How wide a counting timer is about to be, whichever way it runs. WidgetKit counts in
-// hours, minutes and seconds, so a reading is "59:59" inside the hour, "9:59:59" inside
-// the day and "23:59:59" over one - and nothing here counts past a day, because a flight
-// further off than that is not being counted to at all.
-//
-// A monospaced glyph is six tenths of its point size - a figure, not a guess, which is
-// what monospaced means - and the box is figured at sixty-four hundredths: enough over
-// for rounding and for a face that is not quite the one assumed here, and not so much
-// that the padding starts crowding whatever shares the line. `margin` is a glyph of
-// slack on top of that, and only the lock screen takes it: there the count shares its
-// line with one word and a spacer, and nothing is being pushed off the end of anything.
-// On a home screen row, where to be is on that line too, and every point the box is
-// measured over the widest reading it can hold is a point taken off the end of it -
-// which is where the seat is. Nothing may shrink into these boxes by more than a
-// twentieth, so a box that is
-// still wrong shows up as a box that is wrong rather than as a figure quietly drawn
-// small.
-function timerWidth(at, size, margin = 0) {
-  const away = Math.abs(Date.now() - new Date(at).getTime()) + 10 * 60 * 1000;
-  const hours = away / (60 * 60 * 1000);
-  return glyphWidth((hours < 1 ? 5 : hours < 10 ? 7 : 8) + margin, size);
-}
-
-// A monospaced glyph advances by 0.64 of its point size, whichever glyph it is, which is
-// what makes a figure that has not been drawn yet a figure that can still be measured.
-function glyphWidth(glyphs, size) {
-  return Math.ceil(glyphs * size * 0.64);
+  const note = line.addText(CLOCK_NOTE);
+  note.font = Font.systemFont(size);
+  note.textColor = MUTED;
+  note.lineLimit = 1;
+  note.minimumScaleFactor = 0.8;
 }
 
 function footerSize() {
@@ -813,7 +713,9 @@ function setupWidget() {
 
 function scheduleRefresh(widget, data) {
   // The server's cadence is the one to keep: the data does not move faster than that,
-  // and nothing drawn here moves on its own between reloads.
+  // and nothing drawn here moves on its own between reloads. It shortens the cadence of
+  // its own accord for the one thing that does go out of date on the phone - a rung
+  // whose time is about to go by, and whose words change when it does.
   const cadence = Math.max(data.refresh_seconds || 900, MIN_REFRESH_SECONDS) * 1000;
   widget.refreshAfterDate = new Date(Date.now() + cadence);
 }
@@ -825,8 +727,40 @@ function toneColor(name, alpha = 1) {
   return Color.dynamic(new Color(light, alpha), new Color(dark, alpha));
 }
 
-// The lock screen's version of the footer, squeezed into the one line a message has: no
-// room there for a word, a running count and "ago", so it states the clock face instead.
+// One friend's hue, read the two ways the page reads it, and handed to the phone to pick
+// between by its appearance.
+function friendColor(hue, [light, dark]) {
+  return Color.dynamic(
+    new Color(hsl(hue, light.s, light.l), light.a),
+    new Color(hsl(hue, dark.s, dark.l), dark.a)
+  );
+}
+
+// A hue, a saturation and a lightness as the six hex digits Scriptable takes. The page
+// hands the three of them straight to CSS; this is the same conversion, written out.
+function hsl(hue, saturation, lightness) {
+  const s = saturation / 100;
+  const l = lightness / 100;
+  const chroma = (1 - Math.abs(2 * l - 1)) * s;
+  const second = chroma * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const base = l - chroma / 2;
+  const wheel = [
+    [chroma, second, 0],
+    [second, chroma, 0],
+    [0, chroma, second],
+    [0, second, chroma],
+    [second, 0, chroma],
+    [chroma, 0, second],
+  ];
+  const channels = wheel[Math.floor(hue / 60) % 6].map((part) =>
+    Math.round((part + base) * 255)
+      .toString(16)
+      .padStart(2, "0")
+  );
+  return `#${channels.join("")}`;
+}
+
+// The lock screen's version of the footer, squeezed into the one line a message has.
 function staleNote(result) {
   if (!result.stale) {
     return null;
