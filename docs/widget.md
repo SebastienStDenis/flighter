@@ -49,7 +49,7 @@ does the same thing at once, and says so.
 | Family | What it shows |
 | --- | --- |
 | `accessoryRectangular` (Lock Screen) | Next flight only, three tight lines. **iOS 16 or later.** |
-| Small | Next flight: the number, the route under it, its pill, and its line |
+| Small | Two flights, three lines each |
 | Medium | Up to three flights, two lines each, each row tappable |
 | Large | Same rows, with room to breathe |
 
@@ -59,52 +59,57 @@ restriction and not a choice made here.
 
 ## What it shows
 
-A list. Each flight is a row of two columns: the flight down one side - the airline's
-mark with the flight number and route, then the board's status pill with one line beside
-it - and the board's footer down the other, where the words for what it is counting to
-stand directly over the count itself.
+A list. Each flight is a row of two lines, both of them running the full width of the
+widget. The first carries the flight - whose it is when it is not yours, the airline's
+mark, the number and the route - and ends with the board's status pill. The second
+carries where to be, and ends with what the flight is next due to do and the time it is
+due.
 
-The line under the pill is where to be, once being somewhere is the question:
+The line under the heading is where to be, once being somewhere is the question:
 
 | While it is | The line reads |
 | --- | --- |
 | Days off | `Fri 18 Sep 18:00 EDT` |
-| On the day | `T4  B22  14A` |
-| Pushed back, or in the air | `SEAT 14A` |
+| On the day | `TERM 4 · GATE B22 · SEAT 14A` |
+| Pushed back, or in the air | `SEAT 14A · GATE 12 · TERM B` |
 | Parked | nothing; the belt is at the other end of the row |
 | Cancelled, or lost by the feed | nothing; the pill has said it |
 
-The terminal, the gate and the seat join the line only on the day of the flight, which
-is the one stretch where a person is on their way to use them, and the first two are
-dashed rather than dropped while the airport has not said: a line that comes and goes as
-gates are published is a row that moves under the eye. They are in the order a boarding
-pass prints them, and only the terminal is named, because a bare number is not a place.
-The words the other two would carry are three quarters of the line, and this line shares
-a row with a pill and a count: what it spends on saying what a gate is, it loses off the
-far end, where the seat is.
+The terminal, the gate and the seat join the line on the day of the flight, in the order
+a boarding pass prints them, and the terminal and gate are dashed rather than dropped
+while the airport has not said: a line that comes and goes as gates are published is a
+row that moves under the eye. Off the ground the same three are read the other way
+about, because the seat is where the reader is and the gate and the terminal are where
+they are going.
 
 When it goes is the other end of the row, and never on this line: the board's own words
-for the rung ahead - `Departs in`, `Due to land` - with the count under or beside them.
-Once the aircraft is parked there is no rung left, and that end of the row reads
-`Baggage claim` with the belt beside it, dashed until the airport says which. Every word
-and tone comes from the server; the script picks nothing on its own.
+for the rung ahead, with the time it is due beside them.
+
+| While it is | The end of the row reads |
+| --- | --- |
+| Ahead of its time | `Departs 14:40`, `Lands 22:40`, `At the gate 22:15` |
+| Past it, with no word that it happened | `Due to depart 14:40`, `Due to land 22:40` |
+| Parked | `Baggage claim 7`, dashed until the airport says which |
+
+Every word, tone and figure comes from the server; the script picks nothing on its own
+and works nothing out.
 
 ### Whose clock
 
-The time is the one on the phone's own clock, because that is the watch the person
-reading it is going to check it against. `18:00 PDT` on a phone in Ottawa is arithmetic,
-not information.
+The time at the end of the row is the one on the phone's own clock, because that is the
+watch the person reading it is going to check it against. `18:00 PDT` on a phone in
+Ottawa is arithmetic, not information. So the widget sends the zone it is set to with
+every request, and the server renders that time in it. The zone is not named beside it,
+because the clock it is on is the clock in the same hand; the foot of the widget says so
+once, for all of them. The day goes in front whenever the time is not today's **on the
+phone's clock**: `02:00` on its own reads as today's, and a flight leaving tomorrow
+morning would otherwise look hours overdue all evening.
 
-So the widget sends the zone it is set to with every request, and the server renders the
-time in it - once, and with no second reading of the same instant beside it. A row is
-looked at for a second and a half, and a line that states two times states neither. The
-zone is not named either, because the clock it is on is the clock in the same hand. A
-phone that will not say where it is gets the airport's clock instead, and that one keeps
-its zone: it is the one case where the time is not on the reader's own.
-
-The day goes in front whenever the time is not today's **on the phone's clock**. `02:00`
-on its own reads as today's, and a flight leaving tomorrow morning would otherwise look
-hours overdue all evening.
+The day a flight leaves, days out, is the one exception, and it is on the airport's
+clock with the airport's zone after it. It sits under the heading while the end of the
+row states the same departure on the reader's own clock, so a row days out answers both
+"when does it go" and "when is that here" without either figure having to be worked out.
+A phone that will not say where it is gets the airport's clock at both ends.
 
 The pill is the board's, in the board's tones, word for word and with no exceptions. It
 used to carry two - "Departed" in place of "Taxiing", and "Scheduled" in place of the
@@ -131,43 +136,24 @@ The Lock Screen widget is drawn in the Lock Screen's own tint, as iOS requires.
 
 iOS decides when a widget actually reloads: `refreshAfterDate` is a hint it can and does
 ignore, and it budgets reloads across all widgets on the device. Expect roughly
-quarter-hourly in practice. That is why no number on the widget is worked out from the
-phone's clock at draw time. Two of them would be wrong within the minute and a quarter
-of an hour wrong by the next reload, so both are handed to WidgetKit as dates for it to
-tick on its own: the instant a flight is counting to, and the moment the data on screen
-arrived. Every other time is a clock face, which is right until the estimate itself
-moves, and whoever reads it measures it against their own clock.
+quarter-hourly in practice. That is why nothing on the widget is a countdown, and why
+nothing on it moves. A figure counted from the phone's clock at draw time would be wrong
+within the minute and a quarter of an hour wrong by the next reload - and wrong in the
+flattering direction, which is worse than saying nothing. A stated time is not: a flight
+due at 18:40 is due at 18:40 whether the row is read at noon or at seven, and it stays
+true for as long as iOS leaves the widget alone.
 
-A word is not a date, though, and that is the one thing the phone cannot repair for
-itself. `Departs in` is drawn once and stays drawn while the count beside it ticks up
-past zero, which reads as three minutes to go when the flight is three minutes overdue.
+One word does have to keep up. `Departs 14:40` is drawn once and stays drawn, so at 14:44
+it is still saying the flight departs, when what the reader needs to see is that it is
+due and has not. So the server does not ask for its usual cadence when a rung is closer
+than that: it asks for the reload at the instant the wording changes, and the row is
+behind only for as long as iOS makes it wait. Outside that, the cadence is the server's
+own polling cadence for the closest flight on the list.
 
-Two things are done about it. The server does not ask for its usual cadence when a rung
-is closer than that: it asks for the reload at the instant the wording changes, so the
-label and the figure roll over together. And because that is a hint iOS is free to sit
-on, the payload also carries the word to put **where the figure goes** if it does -
-`Due`. Any drawing of a count whose instant has already passed, while the label beside
-it still says the flight has not left, puts that word in the figure's place instead of a
-number:
-
-```
-Departs in  02:14   →   Departs in  Due   →   Due to depart  03:47
-   ahead of time         its time, no          reloaded: both rolled
-                         reload yet            over, counting up
-```
-
-The count only ever runs upwards under a label that has caught up with it, and how far
-past due a flight is is worth knowing once it has. Outside that, the cadence is the
-server's own polling cadence for the closest flight on the list.
-
-The one case nothing reaches is a widget iOS never redraws at all: no script runs, so
-there is nothing to swap the figure out. The word is drawn at the next redraw, whenever
-that is - which is also the first moment anything on the widget could have changed.
-
-The bottom of the widget always says how old what is drawn is - `Updated 04:12 ago`,
-counting up as you look at it. The last good response is cached to the Scriptable
-documents folder, so if the server is unreachable the widget draws the cached data and
-that line reads `Cached` instead of `Updated`, rather than going blank. A rejected token
-is the one failure that is never cached over: the widget says so, because no reload will
-fix it. If the server says its own data is degraded, because the AeroAPI budget breaker
-tripped or polling has stalled, that reason sits on a line above.
+The bottom of the widget says when what is drawn was fetched - `Last updated 04:12` - and
+beside it, that every time above it is on the phone's own clock. The last good response
+is cached to the Scriptable documents folder, so if the server is unreachable the widget
+draws the cached data and that line reads `Cached` instead, rather than going blank. A
+rejected token is the one failure that is never cached over: the widget says so, because
+no reload will fix it. If the server says its own data is degraded, because the AeroAPI
+budget breaker tripped or polling has stalled, that reason sits on a line above.

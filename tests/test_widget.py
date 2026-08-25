@@ -83,18 +83,13 @@ AIRPORTS = {
 
 
 def detail(flight: dict[str, Any]) -> Any:
-    """The one line under the pill: where to be, or the day it leaves while nothing counts."""
+    """The line under the heading: where to be, or the day it leaves while nobody is."""
     return flight["detail"]
 
 
-def counting(flight: dict[str, Any]) -> tuple[Any, Any]:
-    """The right-hand side of the row: what it counts to, and the instant it counts to."""
-    return flight["footer_label"], flight["footer_at"]
-
-
-def footer(flight: dict[str, Any]) -> tuple[Any, Any]:
-    """The same end of the row when what it holds is a figure rather than a count."""
-    return flight["footer_label"], flight["footer_value"]
+def target(flight: dict[str, Any]) -> tuple[Any, Any]:
+    """The end of the row: what the flight is next due to do, and when it is due."""
+    return flight["target_label"], flight["target_value"]
 
 
 # --- payload shaping ------------------------------------------------------------------
@@ -104,22 +99,41 @@ def test_upcoming_flight(settings: Settings) -> None:
     far = booking(scheduled_departure_utc=NOW + timedelta(days=6))
     flight = payload([(far, None)], settings)["flights"][0]
     # Days out the day and time it leaves is the whole story: there is no gate to find
-    # yet, and the pill says only that it is booked.
+    # yet, and the pill says only that it is booked. It is stated twice, once on each
+    # clock it could be read on - the airport's under the heading, with the zone on it,
+    # and the reader's own at the end of the row - and that is the whole of the row.
     assert flight == {
         "detail_url": "https://flights.example.com/f/42",
         "phase": "upcoming",
+        "friend_initial": None,
+        "friend_hue": None,
         "logo_url": "https://www.gstatic.com/flights/airline_logos/70px/DL.png",
         "number": "DL1234",
         "route": "JFK → LAX",
         "status_label": "Scheduled",
         "status_tone": "quiet",
         "detail": "Fri 18 Sep 18:00 UTC",
-        # Nobody counts the hours to a flight next week, and the board's card carries no
-        # footer for one either.
-        "footer_label": None,
-        "footer_at": None,
-        "footer_value": None,
+        "target_label": "Departs",
+        "target_value": "Fri 18:00",
     }
+
+
+def test_a_friends_flight_is_drawn_in_their_own_colour(settings: Settings) -> None:
+    """The board gives a friend a disc with their initial in it, tinted by a hue taken
+    from their name. The widget draws the same disc, so one person is one colour on the
+    phone and on the page both - which means the hue is worked out in one place."""
+    theirs = booking(friend_name="beatrice")
+    flight = payload([(theirs, None)], settings)["flights"][0]
+    assert flight["friend_initial"] == "B"
+    assert flight["friend_hue"] == views.friend_hue("beatrice")
+
+
+def test_the_script_draws_the_disc_the_way_the_page_mixes_it(settings: Settings) -> None:
+    """A hue is not a colour until something reads it at a saturation and a lightness,
+    and the page reads it at four of them. The script carries the same four."""
+    source = script_source()
+    assert "{ s: 55, l: 50, a: 0.12 }" in source
+    assert "{ s: 35, l: 38, a: 1 }" in source
 
 
 def test_the_day_it_leaves_is_read_at_the_origin(settings: Settings) -> None:
@@ -128,17 +142,17 @@ def test_the_day_it_leaves_is_read_at_the_origin(settings: Settings) -> None:
     assert detail(flight) == "Sat 19 Sep 03:00 JST"
 
 
-def test_a_departure_not_today_carries_its_day(settings: Settings) -> None:
+def test_a_departure_carries_its_date(settings: Settings) -> None:
     """NOW is 18:00 UTC on the 12th: 14:00 in New York, 03:00 the next day in Tokyo.
 
-    A time on its own reads as today's, so a flight leaving tomorrow evening would look
-    hours overdue all day without the day in front of it. The board names the day in the
-    pill when the feed has not picked the flight up; here the line does, and the pill
-    says only that it is booked.
+    A time on its own reads as today's, so a flight days out would look hours overdue
+    every day until it went. The date is always in front of it, because a flight far
+    enough out that nobody is watching it yet is far enough out that "Tomorrow" is not
+    what anyone needs to be told.
     """
     late = booking(scheduled_departure_utc=NOW + timedelta(hours=30))
     flight = payload([(late, None)], settings, airports=AIRPORTS)["flights"][0]
-    assert detail(flight) == "Tomorrow 20:00 EDT"
+    assert detail(flight) == "Sun 13 Sep 20:00 EDT"
     assert flight["status_label"] == "Scheduled"
     assert flight["status_tone"] == "quiet"
 
@@ -146,19 +160,21 @@ def test_a_departure_not_today_carries_its_day(settings: Settings) -> None:
     assert detail(payload([(late, None)], settings)["flights"][0]) == "Mon 14 Sep 00:00 UTC"
 
 
-def test_a_flight_inside_its_day_counts_rather_than_naming_a_time(settings: Settings) -> None:
-    """The board stops naming the time and starts counting to it, and so does this.
+def test_a_flight_inside_its_day_turns_its_line_over_to_the_building(
+    settings: Settings,
+) -> None:
+    """The day it leaves stops being the news the moment there is somewhere to walk to.
 
-    The count is the instant itself: the phone ticks it down between reloads, which is
-    the one thing a widget cannot do with a figure worked out here.
+    The time does not go anywhere: it is at the end of the row, where it was already,
+    and the line under the heading turns over to the terminal and the gate.
     """
     tomorrow = NOW + timedelta(hours=12)
     flight = payload([(booking(), snapshot(scheduled_out=tomorrow))], settings, airports=AIRPORTS)[
         "flights"
     ][0]
     assert flight["status_label"] == "On time"
-    assert counting(flight) == ("Departs in", "2026-09-13T06:00:00Z")
-    assert "06:00" not in str(detail(flight))
+    assert target(flight) == ("Departs", "Sun 02:00")
+    assert detail(flight) == "TERM - · GATE -"
 
 
 def test_day_of_shows_the_terminal_the_gate_and_the_seat(settings: Settings) -> None:
@@ -167,8 +183,8 @@ def test_day_of_shows_the_terminal_the_gate_and_the_seat(settings: Settings) -> 
     gated = snapshot(scheduled_out=DEPARTURE, gate_origin="B22", terminal_origin="4")
     flight = payload([(booking(seat="14A"), gated)], settings, airports=AIRPORTS)["flights"][0]
     assert flight["phase"] == "day_of"
-    assert detail(flight) == "T4  B22  14A"
-    assert counting(flight) == ("Departs in", "2026-09-12T18:40:00Z")
+    assert detail(flight) == "TERM 4 · GATE B22 · SEAT 14A"
+    assert target(flight) == ("Departs", "14:40")
     assert flight["status_label"] == "On time"
     assert flight["status_tone"] == "ok"
 
@@ -177,18 +193,18 @@ def test_day_of_with_nothing_assigned_yet_is_the_boxes_waiting(settings: Setting
     """Dashed rather than dropped: an empty box is the airport not having said yet, and
     a line that comes and goes as gates are published is a row that moves under the eye."""
     flight = payload([(booking(), snapshot())], settings)["flights"][0]
-    assert detail(flight) == "T-  -"
+    assert detail(flight) == "TERM - · GATE -"
 
 
-def test_a_delayed_departure_counts_to_the_time_it_now_leaves(settings: Settings) -> None:
+def test_a_delayed_departure_states_the_time_it_now_leaves(settings: Settings) -> None:
     held = snapshot(scheduled_out=DEPARTURE, estimated_out=DEPARTURE + timedelta(minutes=30))
     flight = payload([(booking(seat="14A"), held)], settings)["flights"][0]
     assert flight["status_label"] == "Departure delayed"
     assert flight["status_tone"] == "warn"
-    # Delayed to when is the whole question the pill leaves open, and the count answers
+    # Delayed to when is the whole question the pill leaves open, and the time answers
     # it from the estimate rather than from the schedule.
-    assert counting(flight) == ("Departs in", "2026-09-12T19:10:00Z")
-    assert detail(flight) == "T-  -  14A"
+    assert target(flight) == ("Departs", "19:10")
+    assert detail(flight) == "TERM - · GATE - · SEAT 14A"
 
 
 def test_the_run_up_to_departure_keeps_the_gate(settings: Settings) -> None:
@@ -197,13 +213,14 @@ def test_the_run_up_to_departure_keeps_the_gate(settings: Settings) -> None:
     imminent = snapshot(scheduled_out=NOW + timedelta(minutes=20), gate_origin="B22")
     flight = payload([(booking(), imminent)], settings)["flights"][0]
     assert flight["phase"] == "day_of"
-    assert detail(flight) == "T-  B22"
-    assert counting(flight) == ("Departs in", "2026-09-12T18:20:00Z")
+    assert detail(flight) == "TERM - · GATE B22"
+    assert target(flight) == ("Departs", "18:20")
 
 
-def test_pushback_clears_the_gate_off_the_line(settings: Settings) -> None:
-    """The gate it left is behind the person reading this, so the line empties; nothing
-    upstream estimates wheels up, so the count is to the landing."""
+def test_pushback_turns_the_line_round_to_the_far_end(settings: Settings) -> None:
+    """The gate it left is behind the person reading this, so the line stops naming it
+    and names the one at the other end instead; nothing upstream estimates wheels up, so
+    the time at the end of the row is the landing."""
     taxiing = snapshot(
         scheduled_out=NOW - timedelta(minutes=5),
         actual_out=NOW - timedelta(minutes=2),
@@ -216,11 +233,11 @@ def test_pushback_clears_the_gate_off_the_line(settings: Settings) -> None:
     assert flight["phase"] == "taxiing"
     assert flight["status_label"] == "Taxiing"
     assert flight["status_tone"] == "live"
-    assert detail(flight) is None
-    assert counting(flight) == ("Lands in", "2026-09-12T22:15:00Z")
+    assert detail(flight) == "GATE 12 · TERM B"
+    assert target(flight) == ("Lands", "18:15")
 
 
-def test_airborne_counts_to_the_landing_and_keeps_only_the_seat(settings: Settings) -> None:
+def test_airborne_states_the_landing_and_reads_the_line_backwards(settings: Settings) -> None:
     flying = snapshot(
         scheduled_out=DEPARTURE - timedelta(hours=2),
         actual_out=DEPARTURE - timedelta(hours=2),
@@ -233,15 +250,15 @@ def test_airborne_counts_to_the_landing_and_keeps_only_the_seat(settings: Settin
     )
     flight = payload([(booking(seat="32A"), flying)], settings)["flights"][0]
     assert flight["phase"] == "airborne"
-    # The gate at the other end is not worth the width from seat 32A; when it lands is,
-    # and the seat is the last thing on the ticket still worth carrying.
-    assert detail(flight) == "SEAT 32A"
-    assert counting(flight) == ("Lands in", "2026-09-12T22:40:00Z")
+    # Where they are, then where they are going: the seat first because that is where
+    # the line is being read from, and the gate and the terminal at the far end after it.
+    assert detail(flight) == "SEAT 32A · GATE 12 · TERM B"
+    assert target(flight) == ("Lands", "22:40")
     assert flight["status_label"] == "Arriving late"
     assert flight["status_tone"] == "warn"
 
 
-def test_landed_counts_to_the_gate(settings: Settings) -> None:
+def test_landed_states_when_it_is_at_the_gate(settings: Settings) -> None:
     landed = snapshot(
         actual_off=DEPARTURE,
         actual_on=ARRIVAL - timedelta(minutes=10),
@@ -256,11 +273,11 @@ def test_landed_counts_to_the_gate(settings: Settings) -> None:
     assert flight["phase"] == "landed"
     assert flight["status_label"] == "Landed"
     assert flight["status_tone"] == "ok"
-    assert detail(flight) is None
-    assert counting(flight) == ("At the gate in", "2026-09-12T22:15:00Z")
+    assert detail(flight) == "GATE 12 · TERM B"
+    assert target(flight) == ("At the gate", "22:15")
 
 
-def test_at_the_gate_the_belt_takes_the_footer(settings: Settings) -> None:
+def test_at_the_gate_the_belt_takes_the_end_of_the_row(settings: Settings) -> None:
     done = snapshot(
         actual_off=DEPARTURE,
         actual_on=ARRIVAL,
@@ -272,19 +289,19 @@ def test_at_the_gate_the_belt_takes_the_footer(settings: Settings) -> None:
     flight = payload([(booking(), done)], settings)["flights"][0]
     assert flight["status_label"] == "Arrived"
     # Where the card puts it: the last thing the flight points at, at the end of the row
-    # the counts were read off. Nothing is left ahead of it to count to.
-    assert footer(flight) == ("Baggage claim", "7")
-    assert counting(flight) == ("Baggage claim", None)
+    # every other time is read off. Nothing is left ahead of it to be due.
+    assert target(flight) == ("Baggage claim", "7")
+    # And nothing left to walk to but the belt, which is already on the row.
     assert detail(flight) is None
 
 
 def test_a_belt_nobody_has_named_yet_is_dashed(settings: Settings) -> None:
-    """The words are the news either way, and a footer that arrives with the belt is a
-    row that moves under the eye. The card draws the same dash in the same place."""
+    """The words are the news either way, and a line that arrives with the belt is a row
+    that moves under the eye. The card draws the same dash in the same place."""
     done = snapshot(actual_off=DEPARTURE, actual_on=ARRIVAL, actual_in=ARRIVAL)
     flight = payload([(booking(), done)], settings)["flights"][0]
     assert flight["status_label"] == "Arrived"
-    assert footer(flight) == ("Baggage claim", "-")
+    assert target(flight) == ("Baggage claim", "-")
     assert detail(flight) is None
 
 
@@ -305,13 +322,13 @@ def test_a_landed_flight_past_its_gate_time_is_sent_to_the_belt(settings: Settin
     )
     flight = late.model_dump(mode="json")["flights"][0]
     assert flight["status_label"] == "Landed"
-    assert footer(flight) == ("Baggage claim", "7")
+    assert target(flight) == ("Baggage claim", "7")
 
 
 def test_a_time_that_has_passed_says_it_is_due(settings: Settings) -> None:
     """Wheels down is published minutes after the fact, and the board says "due" until it
-    is. The same word here, over a count the phone lets run past zero: waiting is what
-    both of them are describing."""
+    is. The same word here, in front of the same time: a flight due to land at 22:05 was
+    due to land at 22:05, and the words are what say it has not."""
     overdue = snapshot(
         actual_off=DEPARTURE, estimated_on=ARRIVAL - timedelta(minutes=10), estimated_in=ARRIVAL
     )
@@ -322,7 +339,7 @@ def test_a_time_that_has_passed_says_it_is_due(settings: Settings) -> None:
         base_url="https://flights.example.com",
     )
     flight = later.model_dump(mode="json")["flights"][0]
-    assert counting(flight) == ("Due to land", "2026-09-12T22:05:00Z")
+    assert target(flight) == ("Due to land", "22:05")
 
 
 def test_cancelled_has_no_time_to_give(settings: Settings) -> None:
@@ -331,6 +348,7 @@ def test_cancelled_has_no_time_to_give(settings: Settings) -> None:
     assert flight["status_label"] == "Cancelled"
     assert flight["status_tone"] == "stop"
     assert detail(flight) is None
+    assert target(flight) == (None, None)
 
 
 def test_a_booking_the_poller_closed_in_the_air_has_no_time_to_give(
@@ -341,7 +359,10 @@ def test_a_booking_the_poller_closed_in_the_air_has_no_time_to_give(
     closed = booking(status=BookingStatus.COMPLETED)
     flight = payload([(closed, lost)], settings)["flights"][0]
     assert flight["status_label"] == "Flown"
+    # Nothing ahead of it and nothing left to walk to: a gate at the far end that the
+    # feed never named is a pair of dashes about a flight that is over.
     assert detail(flight) is None
+    assert target(flight) == (None, None)
 
 
 def test_a_diversion_renames_the_destination_and_reads_its_clock(settings: Settings) -> None:
@@ -352,8 +373,8 @@ def test_a_diversion_renames_the_destination_and_reads_its_clock(settings: Setti
     assert flight["phase"] == "diverted"
     assert flight["route"] == "JFK → YOW"
     assert flight["status_label"] == "Diverted"
-    # The route names where it is bound and the count says how long until it is there.
-    assert counting(flight) == ("Lands in", "2026-09-12T22:15:00Z")
+    # The route names where it is bound and the end of the row says when it is due there.
+    assert target(flight) == ("Lands", "18:15")
 
 
 def test_a_minute_late_is_still_on_time(settings: Settings) -> None:
@@ -380,7 +401,7 @@ def test_airborne_time_is_touchdown_not_the_gate(settings: Settings) -> None:
         progress_percent=70,
     )
     flight = payload([(booking(), flying)], settings)["flights"][0]
-    assert counting(flight) == ("Lands in", "2026-09-12T22:04:00Z")
+    assert target(flight) == ("Lands", "22:04")
 
 
 def test_a_late_pushback_is_history_once_the_flight_is_off_the_ground(
@@ -445,46 +466,57 @@ def test_the_pill_is_the_boards_pill_and_nothing_else(settings: Settings) -> Non
 HOME = "America/Toronto"
 
 
-def test_the_one_time_still_drawn_is_on_the_phones_clock(settings: Settings) -> None:
-    """A time four zones away is arithmetic, not information.
+def test_the_row_states_both_clocks_and_says_which_is_which(settings: Settings) -> None:
+    """A time four zones away is arithmetic, and a time with no zone is a guess.
 
     Watching from Ottawa, a flight leaving Tokyo at 03:00 on the 19th leaves at 14:00 on
-    the 18th on the watch of the person reading it, and that is the figure - the only
-    figure. The airport's own reading of the same instant is not set beside it: a line
-    with two times on it is a line that has to be worked out rather than read.
+    the 18th on the watch of the person reading it. Both readings are worth having and
+    they are not worth having on one line, so the row takes one each: the airport's under
+    the heading, carrying the zone that says it is the airport's, and the reader's own at
+    the end of the row, carrying none, because the widget's footer says once that every
+    time on it without a zone is theirs.
     """
     far = booking(origin_iata="HND", scheduled_departure_utc=NOW + timedelta(days=6))
     flight = payload([(far, None)], settings, airports=AIRPORTS, viewer_tz=HOME)["flights"][0]
-    assert detail(flight) == "Fri 18 Sep 14:00"
-    assert "JST" not in detail(flight) and "EDT" not in detail(flight)
+    assert detail(flight) == "Sat 19 Sep 03:00 JST"
+    assert target(flight) == ("Departs", "Fri 14:00")
 
 
-def test_the_day_in_front_is_the_phones_day(settings: Settings) -> None:
-    """The day belongs to the clock the line is read on, or it contradicts it.
+def test_the_day_in_front_of_the_time_is_the_phones_day(settings: Settings) -> None:
+    """The day belongs to the clock the figure is read on, or it contradicts it.
 
     NOW is the 12th in Toronto, and a flight leaving Tokyo at 10:00 on the 14th JST
-    leaves at 21:00 on the 13th where it is being read: tomorrow to the person holding
-    the phone, and the day after tomorrow at the airport.
+    leaves at 21:00 on the 13th where it is being read: Sunday to the person holding the
+    phone, and Monday at the airport. A day is named at all because a bare 21:00 read on
+    a Saturday afternoon is a time that looks like it is hours away.
     """
     tokyo = booking(origin_iata="HND", scheduled_departure_utc=NOW + timedelta(hours=31))
     flight = payload([(tokyo, None)], settings, airports=AIRPORTS, viewer_tz=HOME)["flights"][0]
-    assert detail(flight) == "Tomorrow 21:00"
+    assert detail(flight) == "Mon 14 Sep 10:00 JST"
+    assert target(flight) == ("Departs", "Sun 21:00")
 
 
-def test_a_phone_that_says_nothing_gets_the_airports_clock_and_its_zone(
-    settings: Settings,
-) -> None:
+def test_a_time_today_is_the_time_and_nothing_else(settings: Settings) -> None:
+    """Most flights on the widget go today, and a day in front of every one of them is a
+    word the reader has to step over to reach the figure."""
+    soon = payload([(booking(), snapshot(scheduled_out=DEPARTURE))], settings, viewer_tz=HOME)
+    assert target(soon["flights"][0]) == ("Departs", "14:40")
+
+
+def test_a_phone_that_says_nothing_gets_the_airports_clock(settings: Settings) -> None:
     """What every copy drew before the zone was sent, and still right, just harder work.
 
-    This is the one case a zone is named: the time is not on the clock in the reader's
-    hand, and a bare figure would be read as though it were.
+    The line under the heading is the airport's either way. The one at the end of the row
+    has nowhere else to go: it is the only reading on the widget that is not the
+    reader's own, and there is nothing better to draw than the airport's.
     """
     far = booking(origin_iata="HND", scheduled_departure_utc=NOW + timedelta(days=6))
     rows: list[FlightRow] = [(far, None)]
     silent = payload(rows, settings, airports=AIRPORTS)["flights"][0]
     assert detail(silent) == "Sat 19 Sep 03:00 JST"
+    assert target(silent) == ("Departs", "Sat 03:00")
     blank = payload(rows, settings, airports=AIRPORTS, viewer_tz="")["flights"][0]
-    assert detail(blank) == "Sat 19 Sep 03:00 JST"
+    assert target(blank) == ("Departs", "Sat 03:00")
 
 
 def test_a_zone_the_phone_made_up_does_not_break_the_widget(settings: Settings) -> None:
@@ -494,7 +526,8 @@ def test_a_zone_the_phone_made_up_does_not_break_the_widget(settings: Settings) 
     flight = payload([(far, None)], settings, airports=AIRPORTS, viewer_tz="Mars/Olympus_Mons")[
         "flights"
     ][0]
-    assert detail(flight) == "Fri 18 Sep 18:00"
+    assert detail(flight) == "Fri 18 Sep 14:00 EDT"
+    assert target(flight) == ("Departs", "Fri 18:00")
 
 
 def test_the_phones_zone_reaches_the_payload_from_the_query(
@@ -515,13 +548,23 @@ def test_the_phones_zone_reaches_the_payload_from_the_query(
     assert response.status_code == 200
     # The flight leaves JFK at 18:40 UTC, which is 03:40 the next morning in Tokyo, and
     # Tokyo is where the phone says it is.
-    assert response.json()["flights"][0]["detail"].endswith(" 03:40")
+    assert response.json()["flights"][0]["target_value"].endswith(" 03:40")
 
 
 def test_the_script_tells_the_server_where_the_phone_is() -> None:
     source = script_source()
     assert "tz=${encodeURIComponent(timeZone())}" in source
     assert "resolvedOptions().timeZone" in source
+
+
+def test_the_script_says_once_which_clock_the_times_are_on() -> None:
+    """No time on the widget carries a zone, so the footer carries it for all of them.
+
+    It cannot come from the payload: the server does not know whether the phone will be
+    drawing a widget with a footer or a lock screen without one.
+    """
+    source = script_source()
+    assert "Times on your phone's clock" in source
 
 
 # --- instants -------------------------------------------------------------------------
@@ -538,22 +581,19 @@ def _instants(value: Any) -> Iterator[str]:
         yield value
 
 
-def test_the_only_instants_are_the_ones_the_phone_counts_down(settings: Settings) -> None:
-    """The phone draws at reload and iOS reloads when it likes, so a figure worked out
-    here is a quarter of an hour wrong by the next one. Every string in the payload is
-    therefore a clock face - except the one the phone does not read at all: WidgetKit
-    counts a date down itself, ticking between reloads, so what it is counting to goes
-    over as the instant."""
+def test_nothing_in_the_payload_is_an_instant(settings: Settings) -> None:
+    """Every string the phone draws is a clock face, already read on the right clock.
+
+    An instant would mean the phone had something to work out from it, and the only
+    figure it could work out - how long is left - is the one figure that would be a
+    quarter of an hour wrong by the time anybody read it.
+    """
     rows: list[FlightRow] = [
         (booking(id=1), snapshot(scheduled_out=NOW + timedelta(minutes=20))),
         (booking(id=2), snapshot(actual_off=DEPARTURE, estimated_in=ARRIVAL)),
         (booking(id=3, scheduled_departure_utc=NOW + timedelta(days=4)), None),
     ]
-    built = payload(rows, settings)
-    assert list(_instants(built)) == [
-        flight["footer_at"] for flight in built["flights"] if flight["footer_at"]
-    ]
-    assert list(_instants(built)) == ["2026-09-12T18:20:00Z", "2026-09-12T22:15:00Z"]
+    assert list(_instants(payload(rows, settings))) == []
 
 
 def test_a_non_utc_input_is_read_at_the_origins_clock(settings: Settings) -> None:
@@ -599,19 +639,19 @@ def test_refresh_speeds_up_on_the_day(settings: Settings) -> None:
     assert payload([(booking(), None)], settings)["refresh_seconds"] == 600
 
 
-def test_the_reload_is_asked_for_when_the_count_reaches_zero(settings: Settings) -> None:
-    """A word does not tick and a date does, which is the whole of the problem.
+def test_the_reload_is_asked_for_when_the_rung_falls_due(settings: Settings) -> None:
+    """The time stays true on its own; the word in front of it does not.
 
-    "Departs in" is drawn once and stays drawn, so a count that runs past zero under it
-    reads as four minutes to go when the flight is four minutes overdue. Nothing on the
-    phone can fix that between reloads, so the reload is asked for at the instant the
-    wording changes rather than at the usual ten minutes.
+    "Departs 18:40" is drawn once and stays drawn, so at 18:44 it is still saying the
+    flight departs - when what the reader needs to see is that it is due and has not.
+    Nothing on the phone can fix that between reloads, so the reload is asked for at the
+    instant the wording changes rather than at the usual ten minutes.
     """
     close = snapshot(scheduled_out=NOW + timedelta(minutes=4))
     assert payload([(booking(), close)], settings)["refresh_seconds"] == 240
 
 
-def test_a_count_further_out_than_the_cadence_does_not_slow_it_down(
+def test_a_rung_further_out_than_the_cadence_does_not_slow_it_down(
     settings: Settings,
 ) -> None:
     """The poller's cadence is still the ceiling: a rung two hours off is not a reason
@@ -627,62 +667,62 @@ def test_a_rung_seconds_away_is_not_worth_a_reload_of_its_own(settings: Settings
     assert payload([(booking(), imminent)], settings)["refresh_seconds"] == 60
 
 
-def test_a_count_already_past_zero_is_not_asked_about_again(settings: Settings) -> None:
+def test_a_rung_already_past_is_not_asked_about_again(settings: Settings) -> None:
     """It is drawn as "Due to depart" already; there is no later instant to wake for."""
     overdue = snapshot(scheduled_out=NOW - timedelta(minutes=3))
     flight = payload([(booking(), overdue)], settings)
-    assert counting(flight["flights"][0])[0] == "Due to depart"
+    assert target(flight["flights"][0])[0] == "Due to depart"
     assert flight["refresh_seconds"] == 600
 
 
-# --- what the count does when the label cannot follow it --------------------------------
+# --- a row that stands still ------------------------------------------------------------
 
 
-def test_the_count_is_the_instant_and_nothing_but_the_instant(settings: Settings) -> None:
-    """The phone is handed a date and told to tick it, and that is the whole contract.
+def test_the_row_is_words_and_clock_faces_and_nothing_else(settings: Settings) -> None:
+    """The phone is handed strings and told to draw them, and that is the whole contract.
 
-    The label beside it is a word, and words do not tick: whatever "Departs in" said when
-    the payload was built is what it says until something reloads the widget, while the
-    figure goes on climbing past zero underneath it. Nothing on the phone can repair that
-    - swapping a drawn glyph for another needs a drawing, and WidgetKit hands out one per
-    reload - so the payload does not try, and the reload asked for at the instant is the
-    only thing standing between the row and a wrong reading.
+    Nothing in it is worked out on the phone, so nothing in it can drift out of step with
+    anything else in it: the word in front of a time and the time itself were decided in
+    the same breath, on the same clock, by the same function.
     """
     ahead = snapshot(scheduled_out=NOW + timedelta(minutes=4))
     flight = payload([(booking(), ahead)], settings)["flights"][0]
-    assert counting(flight) == ("Departs in", "2026-09-12T18:04:00Z")
+    assert target(flight) == ("Departs", "18:04")
     assert set(flight) == {
         "detail_url",
         "phase",
+        "friend_initial",
+        "friend_hue",
         "logo_url",
         "number",
         "route",
         "status_label",
         "status_tone",
         "detail",
-        "footer_label",
-        "footer_at",
-        "footer_value",
+        "target_label",
+        "target_value",
     }
 
 
-def test_a_count_whose_label_has_caught_up_runs_upwards(settings: Settings) -> None:
-    """Once the label itself says "Due to depart" there is nothing left to disagree with,
-    and how far past due a flight is is worth knowing."""
+def test_a_time_that_has_gone_by_is_still_the_time(settings: Settings) -> None:
+    """A flight due to leave at 17:57 was due to leave at 17:57 whatever happened next.
+
+    The figure never has to be taken back, which is the point of stating it: only the
+    words in front of it change, and they change here rather than on the phone.
+    """
     overdue = snapshot(scheduled_out=NOW - timedelta(minutes=3))
     flight = payload([(booking(), overdue)], settings)["flights"][0]
-    assert counting(flight)[0] == "Due to depart"
+    assert target(flight) == ("Due to depart", "17:57")
 
 
-def test_the_script_draws_the_count_and_never_stands_it_down() -> None:
-    """A timer is the one thing on the widget WidgetKit keeps ticking between reloads,
-    and the one thing Scriptable gives no way to stop: `applyTimerStyle` takes no end
-    date, no pause and no direction, so a count past its instant climbs and there is no
-    branch anywhere that could put a word in its place."""
+def test_the_script_draws_nothing_that_moves() -> None:
+    """A date drawn in the timer style is the one thing WidgetKit keeps ticking between
+    reloads, and the one thing Scriptable gives no way to stand down: `applyTimerStyle`
+    takes no end date, no pause and no direction. Every figure on the widget is a string
+    the server chose, so there is no call to it anywhere."""
     source = script_source()
-    timer = source[source.index("function countdown(") : source.index("function pill(")]
-    assert "addText" not in timer
-    assert "milestone_due" not in source
+    assert "applyTimerStyle" not in source
+    assert "addDate" not in source
 
 
 def test_no_flights(settings: Settings) -> None:
@@ -917,47 +957,123 @@ def test_the_bundle_leaves_the_header_to_scriptable() -> None:
 
 
 def test_the_script_draws_what_it_is_told() -> None:
-    """Every word and colour is the server's, and the phase is for the server's own
-    cadence rather than for anything drawn.
+    """Every word, every figure and every colour is the server's, and the phase is for
+    the server's own cadence rather than for anything drawn.
 
-    The one figure the script is not handed is the count: it is given the instant and
-    lets WidgetKit tick it, which is the only way a countdown is right on a widget iOS
-    reloads a few times an hour. Nothing else in the payload is a date to measure.
+    Nothing in the payload is a date, so there is nothing for the script to measure or
+    to count: the times were read on the right clock before they were sent, and what
+    reaches the phone are the glyphs.
     """
     source = script_source()
     assert ".phase" not in source
-    assert "applyTimerStyle()" in source
-    assert source.count("new Date(flight") == 1
-    assert "new Date(flight.footer_at)" in source
+    assert "new Date(flight" not in source
+    assert "applyTimerStyle" not in source
 
 
-def test_the_count_is_held_against_the_end_of_the_row() -> None:
-    """A timer is the one element WidgetKit cannot measure before drawing it, so it is
-    given the whole of what the spacer left and draws inside that. Unaligned it sits at
-    the right in Scriptable's preview, which measures a snapshot, and part-way along the
-    row on the home screen - the same widget disagreeing with itself."""
+def test_the_row_holds_the_pill_and_the_time_against_the_same_edge() -> None:
+    """The wide sizes draw a row as two full-width lines rather than as two columns.
+
+    The heading leads the first and the pill ends it; where to be leads the second and
+    the time the flight is due ends that. What holds the two right-hand halves against
+    the same edge is the spacer in the middle of each line - which is the one thing on a
+    widget that costs nothing to be exactly as wide as it has to be. A column would have
+    to be measured, and the two things standing in it, a pill and a run of words, are the
+    two things a script cannot measure before WidgetKit draws them.
+    """
     source = script_source()
-    timer = source[source.index("function countdown(") : source.index("function pill(")]
-    assert "rightAlignText()" in timer
+    wide = source[source.index("function renderList(") : source.index("function titleRow(")]
+    assert "row.layoutVertically();" in wide
+    assert "titleRow(head, flight, logos);" in wide
+    assert "pill(head, flight);" in wide
+    assert wide.count("line.addSpacer();") == 1
+    assert "detailText(line, flight);" in wide
+    assert "targetLabel(line, flight);" in wide
+    assert "targetValue(line, flight);" in wide
 
 
-def test_the_count_is_the_weight_the_row_is_read_for() -> None:
+def test_the_time_is_the_weight_the_row_is_read_for() -> None:
     """Semibold and bold are the same weight to look at when a Mac draws an iPhone's
-    widget, so a count set in semibold reads as heavier than its row on a mirrored
-    screen and no different from it on the phone. The phone is the screen this is for."""
+    widget, so a figure set in semibold reads as heavier than its row on a mirrored
+    screen and no different from it on the phone. The phone is the screen this is for.
+
+    Monospaced with it, so a column of times down the widget lines up digit under digit.
+    """
     source = script_source()
-    timer = source[source.index("function countdown(") : source.index("function pill(")]
-    assert "Font.boldMonospacedSystemFont(size)" in timer
+    drawn = source[source.index("function targetValue(") : source.index("function pill(")]
+    assert "Font.boldMonospacedSystemFont(TYPE.time)" in drawn
 
 
-def test_the_footer_ages_itself_rather_than_stating_a_figure() -> None:
-    """How old what is on screen is has the same problem as the countdown and the same
-    answer: a figure worked out at draw time is wrong within the minute and flatteringly
-    so, and WidgetKit will count a past date upwards for nothing."""
+def test_a_small_widget_holds_two_flights_of_three_lines() -> None:
+    """The number and the route, the pill with the rung beside it, and where to be with
+    the time beside that.
+
+    There is no width on a 155pt square for a heading and a pill on one line, so the two
+    halves of a wide row take a line each - and the words and the time they name still
+    end up one above the other against the right-hand edge, which is the whole of what
+    the wide row's own layout is for.
+    """
+    source = script_source()
+    assert "const SMALL_FLIGHTS = 2;" in source
+    assert "flights.slice(0, SMALL_FLIGHTS)" in source
+    drawn = source[source.index("function renderSmall(") : source.index("function renderList(")]
+    assert "titleRow(widget, flight, logos);" in drawn
+    assert "pill(state, flight);" in drawn
+    assert "targetLabel(state, flight);" in drawn
+    assert "detailText(line, flight);" in drawn
+    assert "targetValue(line, flight);" in drawn
+    # Every line of a flight is the same distance under the one above it, and the only
+    # wider gap is the one that separates two flights.
+    assert drawn.count("widget.addSpacer(SMALL_GAP)") == 2
+    assert "widget.addSpacer(SMALL_GAP * 2)" in drawn
+    # And nothing on those lines carries air of its own inside that distance: a pill with
+    # its own padding is a line held further from its neighbours than any other.
+    assert 'const pad = family === "small" ? 0 : 2;' in source
+
+
+def test_a_friends_disc_is_squared_to_the_number_beside_it() -> None:
+    """The board draws a friend's initial in a round disc, and so does this: a mark drawn
+    taller than the line of type beside it sets the height of the heading itself.
+
+    The letter is centred on both axes. `centerAlignContent` is the stack's answer for
+    the one axis it does not lay out along, so the other one takes a spacer either side
+    or the letter sits against the wall of its own disc.
+    """
+    source = script_source()
+    drawn = source[source.index("function friendMark(") : source.index("function detailText(")]
+    assert "const side = TYPE.heading;" in drawn
+    assert "disc.size = new Size(side, side);" in drawn
+    assert "disc.cornerRadius = side / 2;" in drawn
+    assert drawn.count("disc.addSpacer();") == 2
+    assert "disc.centerAlignContent();" in drawn
+
+
+def test_every_home_screen_size_says_when_it_was_last_updated() -> None:
+    """Including the small one. Only the lock screen goes without, where three lines is
+    the whole widget and the age is said in the message instead."""
+    source = script_source()
+    drawn = source[
+        source.index("async function buildWidget(") : source.index("function newWidget(")
+    ]
+    assert "footer(widget, data, result, true);" in drawn
+    assert 'family === "small" ? null' not in drawn
+    assert "isAccessory ? staleNote(result) : null" in drawn
+
+
+def test_the_footer_states_the_time_it_was_fetched_at() -> None:
+    """A widget is redrawn a few times an hour, so "4 min ago" written at draw time is
+    the one figure on screen guaranteed to be wrong by the time anybody reads it, and
+    wrong in the flattering direction. The time it was fetched at is simply a fact, and
+    stays one for as long as iOS leaves the widget alone.
+
+    "Cached" rather than "Last updated" when the server could not be reached, because
+    then the time is when a file on the phone was written rather than when a server
+    last spoke.
+    """
     source = script_source()
     line = source[source.index("function updatedLine(") : source.index("function footerSize(")]
-    assert "applyTimerStyle()" in line
     assert '"Last updated"' in line and '"Cached"' in line
+    assert "timeOfDay(result.fetchedAt)" in line
+    assert "applyTimerStyle" not in line
     # Drawn from when the data landed, which is the fetch when there was one and the
     # cache file's own date when the server could not be reached.
     assert "result.fetchedAt" in line
@@ -967,214 +1083,45 @@ def test_the_footer_ages_itself_rather_than_stating_a_figure() -> None:
     )
 
 
-def test_a_count_is_boxed_to_the_reading_it_is_about_to_show() -> None:
-    """A timer is the one element WidgetKit cannot measure before it draws it, so left to
-    itself it is handed every point the spacer left and keeps what it does not use. That
-    room comes off the line beside it: the gate and the seat are cut short to make space
-    a count never fills. Boxed to its own reading, the count takes what it needs and the
-    line keeps the rest - and it is the same line in Scriptable, which measures a
-    snapshot, as on the home screen, which cannot."""
+def test_the_footer_holds_the_stamp_and_the_note_apart() -> None:
+    """One phrase against each edge, the way the rows above it are held apart: when the
+    data landed at the near end, and at the far one the thing every time above it has in
+    common. On a 155pt square there is no width for two phrases held apart, so there they
+    are one phrase with both halves said as shortly as they can be."""
     source = script_source()
-    for name, ends in (("countdown(", "function pill("), ("updatedLine(", "function timerWidth(")):
-        drawn = source[source.index(f"function {name}") : source.index(ends)]
-        assert "box.size = new Size(timerWidth(" in drawn, name
-        assert "applyTimerStyle()" in drawn, name
-        # And never shrinks into that box: a figure drawn at four fifths of the size it
-        # was asked for is the bug the box is there to prevent, not the fallback.
-        assert "minimumScaleFactor = 0.95" in drawn, name
-
-
-def test_the_age_ends_its_line_with_nothing_drawn_after_it() -> None:
-    """The word leads and the figure ends the phrase. A timer is the one element in it
-    whose width is not known before it is drawn, so with nothing after it whatever its
-    box has over falls past the end of the phrase rather than inside it - which is what
-    reading "Updated 04:12" rather than "Updated 04:12 ago" is worth."""
-    source = script_source()
-    line = source[source.index("function updatedLine(") : source.index("function timerWidth(")]
-    assert "leftAlignText()" in line
-    assert "rightAlignText()" not in line
-    assert "addText" not in line[line.index("box.size") :]
-
-
-def test_the_age_sits_in_the_middle_of_the_widget() -> None:
-    """The one line on a widget that belongs to the whole of it rather than to a flight,
-    and the only one not starting where the flights start.
-
-    A spacer at each end rather than one at the right: the two share what the phrase
-    leaves and hold it between them. The word alone is centred the same way, which is why
-    the cache with no date on it cannot take an early return out of the middle of this.
-    And no glyph of slack in the timer's box here, the way there is on the lock screen's
-    count: a centred phrase is measured from both ends, so room the box has over pushes
-    the words off-centre rather than falling off where the line stops.
-    """
-    source = script_source()
-    line = source[source.index("function updatedLine(") : source.index("function timerWidth(")]
-    assert line.count("line.addSpacer();") == 2
-    assert "return;" not in line
-    assert "box.size = new Size(timerWidth(result.fetchedAt, size), 0);" in line
+    line = source[source.index("function updatedLine(") : source.index("function footerSize(")]
+    assert "line.addSpacer();" in line
+    assert "line.addText(CLOCK_NOTE)" in line
+    assert "CLOCK_NOTE_SHORT" in line
+    assert 'const CLOCK_NOTE_SHORT = "your clock";' in source
     # The reason above it is part of the same block and centred with it: a sentence
     # starting where the flights start reads as one more row of the list.
     footer = source[source.index("function footer(") : source.index("function updatedLine(")]
     assert "text.centerAlignText();" in footer
 
 
-def test_a_small_widget_holds_two_flights_of_four_lines() -> None:
-    """The number and the route, the pill, where to be, and what it is counting to. The
-    route used to take a line to itself, which is a line out of eight on a widget that
-    has room for eight; it shrinks against the number instead - `titleRow`'s own scale
-    factor is what lets it - and the height that frees is the second flight."""
-    source = script_source()
-    assert "const SMALL_FLIGHTS = 2;" in source
-    assert "flights.slice(0, SMALL_FLIGHTS)" in source
-    drawn = source[source.index("function renderSmall(") : source.index("function renderList(")]
-    assert "titleRow(widget, flight, logos, 11, true)" in drawn
-    assert "pill(state, flight)" in drawn
-    assert "footerWord(line, flight, 9)" in drawn
-    # Every line of a flight is the same distance under the one above it, and the only
-    # wider gap is the one that separates two flights.
-    assert drawn.count("widget.addSpacer(SMALL_GAP)") == 3
-    assert "widget.addSpacer(SMALL_GAP * 2)" in drawn
-    # And nothing on those lines carries air of its own inside that distance: a pill with
-    # its own padding is a line held further from its neighbours than any other.
-    assert 'const pad = family === "small" ? 0 : 2;' in source
-
-
-def test_every_home_screen_size_says_how_old_what_it_is_showing_is() -> None:
-    """Including the small one, holding two flights of four lines. Only the lock screen
-    goes without, where three lines is the whole widget and the age is said in the
-    message instead."""
+def test_a_widget_with_no_flights_on_it_claims_no_clock() -> None:
+    """The note is about the times on the widget. With no flights there are none of them,
+    and a line explaining which clock nothing is on is a line that has to be read."""
     source = script_source()
     drawn = source[
         source.index("async function buildWidget(") : source.index("function newWidget(")
     ]
-    assert "footer(widget, data, result);" in drawn
-    assert 'family === "small" ? null' not in drawn
-    assert "isAccessory ? staleNote(result) : null" in drawn
+    assert "footer(widget, data, result, false);" in drawn
 
 
-def test_the_count_is_drawn_bigger_than_the_row_it_is_read_off() -> None:
-    """It is the figure the widget is looked at for, and it is drawn at the size it is
-    given: the box around it is measured wide enough that WidgetKit never shrinks the
-    digits to fit, which is a count drawn smaller than the size it was asked for. The
-    height is there on every size but a medium widget holding three flights, where it
-    belongs to the rows."""
-    source = script_source()
-    sizes = {}
-    for name, ends in (
-        ("renderSmall(", "function renderList("),
-        ("renderList(", "function titleRow("),
-    ):
-        drawn = source[source.index(f"function {name}") : source.index(ends)]
-        found = re.search(r"figure\([a-z]+, flight, (\w+)[,)]", drawn)
-        assert found, name
-        sizes[name] = found.group(1)
-    # One size on every home screen size. Sized against the room each widget had going
-    # spare, the figure came out smallest on the widget with the most room on it, and the
-    # same number was drawn three different ways across one home screen.
-    assert sizes["renderSmall("] == "COUNT_SIZE"
-    assert sizes["renderList("] == "COUNT_SIZE"
-    assert "const COUNT_SIZE = 18;" in source
-    assert "flights.length < 3" not in source
-
-
-def test_the_count_stands_in_a_column_under_the_words_naming_it() -> None:
-    """The wide sizes draw the row as two columns rather than as two lines.
-
-    The words and the figure they name are one stack that way, standing as far apart as
-    that stack says. Laid out as lines they stood as far apart as the lines beside them
-    happened to fall - the count is set half again the size of every other word on the
-    widget, so the air its line carries over its glyphs read as most of a blank line
-    between "Departs in" and the figure it belongs to.
-
-    The narrow sizes are not touched: there the words and the figure share a line, so
-    there is no gap over the count to close.
-    """
-    source = script_source()
-    wide = source[source.index("function renderList(") : source.index("function titleRow(")]
-    assert "row.topAlignContent();" in wide
-    assert "footerColumn(row, flight);" in wide
-    column = source[source.index("function footerColumn(") : source.index("function figureWidth(")]
-    assert "column.layoutVertically();" in column
-    assert "footerWord(words, flight, 11)" in column
-    # The words start the column down the row by the difference between the two
-    # ascenders, which is what sets them on the flight number's own baseline rather than
-    # on the top of its line.
-    assert "column.setPadding(FOOTER_WORD_DROP, 0, 0, 0);" in column
-    assert "const FOOTER_WORD_DROP = 3;" in source
-
-
-def test_the_figure_gives_back_only_the_air_under_its_baseline() -> None:
-    """Standing in a column of its own, the count is set half again the size of the words
-    over it and so stands in a box half again as deep as theirs, which would carry the
-    column past the flight beside it. The foot of the box gives that back.
-
-    Only ever the foot, and only ever less than the air under the baseline: a box shorter
-    than the glyphs it holds is one WidgetKit draws them cut off in rather than lets them
-    out of, and the space under a count's baseline is the one part of its line that
-    nothing is ever drawn in.
-    """
-    source = script_source()
-    timer = source[source.index("function countdown(") : source.index("function pill(")]
-    assert "box.setPadding(0, 0, -trim, 0);" in timer
-    assert "-lift" not in source
-    # The narrow sizes take nothing back: there the count is the tallest thing on a line
-    # it shares, so its box is the height of the line it sets.
-    for name, ends in (
-        ("renderAccessory(", "function renderSmall("),
-        ("renderSmall(", "function renderList("),
-    ):
-        assert "COUNT_FOOT" not in source[source.index(f"function {name}") : source.index(ends)]
-    # The system fonts report an ascender of 0.967 of the point size against a cap height
-    # of 0.705, so a figure is drawn 0.262 of it below the top of its line and reaches no
-    # part of the 0.211 under the baseline. The trim has to stay inside that.
-    box = {}
-    for name in ("COUNT_SIZE", "COUNT_FOOT"):
-        found = re.search(rf"const {name} = (\d+);", source)
-        assert found, name
-        box[name] = int(found.group(1))
-    assert box["COUNT_FOOT"] < box["COUNT_SIZE"] * 0.211
-
-
-def test_the_row_spends_its_width_where_it_can_be_read() -> None:
-    """The line under the pill is cut short well before it reaches the count, and three
-    things were taking the room in between.
-
-    A stack's spacing falls either side of the spacer holding the count against the end
-    of the row, as well as between the things that are actually beside each other, so it
-    was paid twice over in the one place with none to spare. And the count's box carried
-    a glyph of slack it did not need: what a box has over is taken off the end of the
-    line beside it, which is where the seat is. Both are gone; the gap between the pill
-    and where to be is put back by hand, because that one is read.
-    """
-    source = script_source()
-    wide = source[source.index("function renderList(") : source.index("function titleRow(")]
-    assert "line.spacing = 0;" in wide
-    assert "line.addSpacer(6);" in wide
-    assert "figure(value, flight, COUNT_SIZE, 0, COUNT_FOOT)" in wide
-
-
-def test_a_figure_the_server_already_knows_is_drawn_where_the_count_is() -> None:
-    """The belt is a fact rather than a clock: it is said once and stays. So it needs
-    none of the timer's machinery, and gets the size and weight of the count it stands
-    in for, because it is the same half of the same footer."""
-    source = script_source()
-    drawn = source[source.index("function figure(") : source.index("function countdown(")]
-    assert "applyTimerStyle" not in drawn
-    assert "Font.boldMonospacedSystemFont(size)" in drawn
-    assert "countdown(container, flight, size, slack, trim)" in drawn
-
-
-def test_the_lock_screen_gives_the_belt_its_own_line() -> None:
-    """Three lines is the whole widget, and by the time there is a belt the line the gate
-    was on is free. Beside the status word instead, the figure would be a bare number
-    with the words saying what it is nowhere on screen."""
+def test_the_lock_screen_gives_the_rung_its_own_line() -> None:
+    """Three lines is the whole widget: the flight, then the word for it with where to be
+    across the row, then what it is next due to do and when. The rung keeps its own line
+    because "Lands" and a bare 22:15 across a row from it is a line to be guessed at."""
     source = script_source()
     drawn = source[
         source.index("function renderAccessory(") : source.index("function renderSmall(")
     ]
-    assert "if (flight.footer_value) {" in drawn
-    assert "belt.addText(flight.footer_label)" in drawn
-    assert "belt.addText(flight.footer_value)" in drawn
+    assert "if (flight.target_label) {" in drawn
+    assert "line.addText(flight.target_label)" in drawn
+    assert "line.addText(flight.target_value)" in drawn
+    assert "state.addText(flight.detail)" in drawn
 
 
 def test_a_widget_reload_takes_the_servers_newer_script_quietly() -> None:

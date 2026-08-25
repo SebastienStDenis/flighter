@@ -127,8 +127,7 @@ class FlightView:
 
     @property
     def friend_hue(self) -> int:
-        name = self.booking.friend_name or ""
-        return sum(index * ord(character) for index, character in enumerate(name, 1)) % 360
+        return friend_hue(self.booking.friend_name or "")
 
     @property
     def operated(self) -> str | None:
@@ -580,6 +579,39 @@ def milestone_label(next_up: Milestone, now: datetime) -> str:
     if next_up.target <= now:
         return DUE.get(next_up.label, next_up.label)
     return next_up.label
+
+
+# The same rungs named for a time that is stated rather than counted down: the "in" that
+# belongs to a countdown comes off, and a flight nobody counts the hours to yet still
+# departs at a time, so it is named for its rung rather than for the plan.
+STATED: Final = {
+    "Scheduled": "Departs",
+    "Departs in": "Departs",
+    "Lands in": "Lands",
+    "At the gate in": "At the gate",
+}
+
+
+def milestone_time_label(next_up: Milestone, now: datetime) -> str:
+    """The words in front of a stated time: "Departs 18:40", "Due to land 22:05".
+
+    Past its time the wording is the board's own, because a rung whose time has gone by
+    with nothing said about it is a wait rather than a plan, and that is the one thing
+    the page and the widget have to agree on.
+    """
+    if next_up.target <= now:
+        return DUE.get(next_up.label, next_up.label)
+    return STATED.get(next_up.label, next_up.label)
+
+
+def friend_hue(name: str) -> int:
+    """The colour a friend's disc is tinted, taken from their name so it never moves.
+
+    The page mixes it into a background and a text colour in CSS; the widget is handed
+    the same number and mixes it the same way, so one person is one colour wherever
+    their flight is drawn.
+    """
+    return sum(index * ord(character) for index, character in enumerate(name, 1)) % 360
 
 
 def logo_url(carrier: str) -> str:
