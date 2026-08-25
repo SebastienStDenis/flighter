@@ -68,20 +68,25 @@ The line under the pill is where to be, once being somewhere is the question:
 | While it is | The line reads |
 | --- | --- |
 | Days off | `Fri 18 Sep 18:00 EDT` |
-| On the day | `TERM 4 · GATE B22 · SEAT 14A` |
+| On the day | `T4  B22  14A` |
 | Pushed back, or in the air | `SEAT 14A` |
-| Parked | `Baggage claim 7` |
+| Parked | nothing; the belt is at the other end of the row |
 | Cancelled, or lost by the feed | nothing; the pill has said it |
 
 The terminal, the gate and the seat join the line only on the day of the flight, which
 is the one stretch where a person is on their way to use them, and the first two are
 dashed rather than dropped while the airport has not said: a line that comes and goes as
-gates are published is a row that moves under the eye. Where to be leads, so a row too
-narrow for the whole line loses the seat rather than the gate.
+gates are published is a row that moves under the eye. They are in the order a boarding
+pass prints them, and only the terminal is named, because a bare number is not a place.
+The words the other two would carry are three quarters of the line, and this line shares
+a row with a pill and a count: what it spends on saying what a gate is, it loses off the
+far end, where the seat is.
 
 When it goes is the other end of the row, and never on this line: the board's own words
 for the rung ahead - `Departs in`, `Due to land` - with the count under or beside them.
-Every word and tone comes from the server; the script picks nothing on its own.
+Once the aircraft is parked there is no rung left, and that end of the row reads
+`Baggage claim` with the belt beside it, dashed until the airport says which. Every word
+and tone comes from the server; the script picks nothing on its own.
 
 ### Whose clock
 

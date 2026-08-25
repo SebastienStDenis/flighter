@@ -366,7 +366,7 @@ function renderAccessory(widget, flight, result) {
   const word = state.addText(flight.status_label);
   word.font = Font.semiboldSystemFont(15);
   word.lineLimit = 1;
-  if (flight.milestone_at) {
+  if (flight.footer_at) {
     state.addSpacer();
     countdown(state, flight, 13);
   }
@@ -377,6 +377,23 @@ function renderAccessory(widget, flight, result) {
     text.textOpacity = 0.7;
     text.lineLimit = 1;
     text.minimumScaleFactor = 0.8;
+  }
+
+  // A figure the server already knows takes the third line with its own words rather
+  // than the second with the status word's: "Landed" and a bare 7 beside it is a row
+  // that has to be guessed at, and the line the gate was on is free by then anyway.
+  if (flight.footer_value) {
+    const belt = widget.addStack();
+    belt.centerAlignContent();
+    const label = belt.addText(flight.footer_label);
+    label.font = Font.systemFont(11);
+    label.textOpacity = 0.7;
+    label.lineLimit = 1;
+    label.minimumScaleFactor = 0.8;
+    belt.addSpacer();
+    const value = belt.addText(flight.footer_value);
+    value.font = Font.boldMonospacedSystemFont(13);
+    value.lineLimit = 1;
   }
 }
 
@@ -414,7 +431,7 @@ function renderSmall(widget, flights, logos) {
       detail.lineLimit = 1;
     }
 
-    if (flight.milestone_at) {
+    if (flight.footer_at || flight.footer_value) {
       widget.addSpacer(SMALL_GAP);
       const line = widget.addStack();
       line.centerAlignContent();
@@ -422,11 +439,11 @@ function renderSmall(widget, flights, logos) {
       // with a figure set twice its size: at the wider margins the two of them together
       // are the whole of the line, and the words are the half of it that can afford to
       // be quieter.
-      milestoneWord(line, flight, 9);
+      footerWord(line, flight, 9);
       line.addSpacer();
       // No slack on this one: the words naming the count share its line, and at this
       // width the widest reading a count can take is already most of what there is.
-      countdown(line, flight, COUNT_SIZE, 0).textColor = TEXT;
+      figure(line, flight, COUNT_SIZE, 0).textColor = TEXT;
     }
   });
 }
@@ -446,15 +463,21 @@ function renderList(widget, flights, logos) {
     // what the flight is counting to on the right of its number, and the count itself
     // on the right of what there is to find.
     titleRow(row, flight, logos, 14, true, (heading) => {
-      milestoneWord(heading, flight, 11);
+      footerWord(heading, flight, 11);
     });
     row.addSpacer(4);
 
+    // Spaced by hand rather than by the stack. A stack's spacing falls either side of
+    // the spacer that holds the count against the end of the row as well as between the
+    // things that are actually beside each other, so it is paid twice over in the one
+    // place the row has none to spare - between where to be and the count, which is
+    // where the line is being cut short.
     const line = row.addStack();
     line.centerAlignContent();
-    line.spacing = 6;
+    line.spacing = 0;
     pill(line, flight);
     if (flight.detail) {
+      line.addSpacer(6);
       // No scale factor: a text that can shrink is sized before the pill and handed
       // half the line, and is cut short with room beside it. One that only truncates
       // is sized after the pill and gets everything the pill left. Where to be leads the
@@ -465,10 +488,12 @@ function renderList(widget, flights, logos) {
       detail.lineLimit = 1;
     }
     line.addSpacer();
-    if (flight.milestone_at) {
+    if (flight.footer_at || flight.footer_value) {
       // The one size that draws the words naming the count on the row over it, so the
-      // one size the count is pulled up on.
-      countdown(line, flight, COUNT_SIZE, 1, COUNT_LIFT).textColor = TEXT;
+      // one size the count is pulled up on. No slack either: a count boxed wider than
+      // its widest reading is boxed at the expense of the line beside it, and the row
+      // above already holds the words that say what it is counting to.
+      figure(line, flight, COUNT_SIZE, 0, COUNT_LIFT).textColor = TEXT;
     }
   });
 }
@@ -505,13 +530,14 @@ function titleRow(container, flight, logos, size, withRoute, trailing) {
   return row;
 }
 
-// The board's own words for the rung ahead - "Departs in", "Due to land" - which is the
-// half of its footer that does not move.
-function milestoneWord(container, flight, size) {
-  if (!flight.milestone_label) {
+// The board's own words for the rung ahead - "Departs in", "Due to land" - or for the
+// one thing a parked flight has left to say, which is where its bag is. Either way the
+// half of the footer that does not move.
+function footerWord(container, flight, size) {
+  if (!flight.footer_label) {
     return null;
   }
-  const word = container.addText(flight.milestone_label);
+  const word = container.addText(flight.footer_label);
   word.font = Font.systemFont(size);
   word.textColor = MUTED;
   word.lineLimit = 1;
@@ -522,7 +548,25 @@ function milestoneWord(container, flight, size) {
   return word;
 }
 
-// The other half, which iOS draws for itself: the instant the server named, counted down
+// The other half: a count where the flight still has a rung ahead of it, and where it
+// has not, the figure the server already knows. A belt is a fact rather than a clock -
+// it is drawn once and stays - so it needs none of the machinery below and is set at the
+// same size and weight, because it is the same half of the same footer.
+function figure(container, flight, size, slack, lift = 0) {
+  if (flight.footer_at) {
+    return countdown(container, flight, size, slack, lift);
+  }
+  const box = container.addStack();
+  if (lift) {
+    box.setPadding(-lift, 0, 0, 0);
+  }
+  const value = box.addText(flight.footer_value);
+  value.font = Font.boldMonospacedSystemFont(size);
+  value.lineLimit = 1;
+  return value;
+}
+
+// The count, which iOS draws for itself: the instant the server named, counted down
 // where it stands and ticking between reloads. Monospaced, so nothing beside it shuffles
 // as the digits change, and it goes on counting up once the time has gone by - which is
 // the state the word beside it is already saying is a wait.
@@ -534,7 +578,7 @@ function milestoneWord(container, flight, size) {
 // app and part-way along it on the home screen, which is the same widget disagreeing with
 // itself. Right is the end the spacer was put there to hold it against.
 function countdown(container, flight, size, slack = 1, lift = 0) {
-  const at = new Date(flight.milestone_at);
+  const at = new Date(flight.footer_at);
   // The box is what the count is moved by, as well as what it is measured into.
   // `lift` is for the sizes that draw the words naming the count on the row above it:
   // the air a line of this size carries over its glyphs lands between the two of them
@@ -644,9 +688,9 @@ function updatedLine(widget, result) {
     // Boxed like the count, and for the same reason: a timer is the one element WidgetKit
     // cannot measure before it draws it, so left to itself it takes the rest of the line
     // and holds the digits at whichever end it is told to. No glyph of slack on this one,
-    // the way there is on a count held against the end of a row: a centred phrase is
-    // measured from both ends, so room the box has over is room the words are pushed left
-    // by rather than room that falls off where the line stops.
+    // the way there is on the lock screen's count: a centred phrase is measured from both
+    // ends, so room the box has over is room the words are pushed left by rather than
+    // room that falls off where the line stops.
     const box = line.addStack();
     box.size = new Size(timerWidth(result.fetchedAt, size), 0);
     const age = box.addDate(result.fetchedAt);
@@ -672,9 +716,12 @@ function updatedLine(widget, result) {
 // what monospaced means - and the box is figured at sixty-four hundredths: enough over
 // for rounding and for a face that is not quite the one assumed here, and not so much
 // that the padding starts crowding whatever shares the line. `margin` is a glyph of
-// slack on top of that, for a count drawn against the end of a wide row where nothing
-// reads the gap; a narrow row, where the words naming the count are beside it, gets
-// none. Nothing may shrink into these boxes by more than a twentieth, so a box that is
+// slack on top of that, and only the lock screen takes it: there the count shares its
+// line with one word and a spacer, and nothing is being pushed off the end of anything.
+// On a home screen row, where to be is on that line too, and every point the box is
+// measured over the widest reading it can hold is a point taken off the end of it -
+// which is where the seat is. Nothing may shrink into these boxes by more than a
+// twentieth, so a box that is
 // still wrong shows up as a box that is wrong rather than as a figure quietly drawn
 // small.
 function timerWidth(at, size, margin = 0) {
