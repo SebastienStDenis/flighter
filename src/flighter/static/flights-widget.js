@@ -79,12 +79,16 @@ const SMALL_GAP = 2;
 // different ways across a home screen. It is the figure every one of them is looked at
 // for, so it is the same figure on all of them.
 const COUNT_SIZE = 18;
-// How far the count is pulled up on the sizes that draw the words naming it on the row
-// above. A line of type carries air over its glyphs, and at half again the size of every
-// other word on the widget the count carries half again as much: left where it falls, it
-// puts most of a blank line between "Departs in" and the figure it belongs to. Rather
-// less than that air, so the digits tuck under their label rather than up against it.
-const COUNT_LIFT = 6;
+// What the foot of a figure's box gives back where it stands in a column under its own
+// words. A line of type carries air over its glyphs and under them, and at half again the
+// size of every other word on the widget the count carries half again as much of both:
+// left whole, the box is taller than the two lines it stands beside. The air under the
+// baseline is the half to take, because a count has no descenders to draw in it.
+const COUNT_FOOT = 2;
+// And how far that column starts down the row, which is the difference between the two
+// ascenders: it sets the words naming the figure on the same baseline as the flight
+// number across the row from them, rather than on the top of its line.
+const FOOTER_WORD_DROP = 3;
 
 const family = config.widgetFamily || "medium";
 const isAccessory = family.startsWith("accessory");
@@ -457,22 +461,27 @@ function renderList(widget, flights, logos) {
     if (supportsRowLinks) {
       row.url = flight.detail_url;
     }
-    row.layoutVertically();
+    // The flight down one side of the row and the board's footer down the other, as two
+    // columns rather than as the two ends of two lines. The words and the figure they
+    // name are one stack that way, standing as far apart as the column says - where laid
+    // out as lines they stood as far apart as the lines beside them happened to fall,
+    // which was most of a blank line, and closing it meant hauling the figure back up out
+    // of its own box until its digits were drawn with their tops cut off.
+    row.topAlignContent();
+    const flightColumn = row.addStack();
+    flightColumn.layoutVertically();
 
-    // The board's footer, at the two ends of a row rather than the two ends of a card:
-    // what the flight is counting to on the right of its number, and the count itself
-    // on the right of what there is to find.
-    titleRow(row, flight, logos, 14, true, (heading) => {
-      footerWord(heading, flight, 11);
-    });
-    row.addSpacer(4);
+    titleRow(flightColumn, flight, logos, 14, true);
+    // Well under the gap between two flights, because these two lines are one flight:
+    // what the widget is sorted into by eye is rows rather than lines.
+    flightColumn.addSpacer(3);
 
     // Spaced by hand rather than by the stack. A stack's spacing falls either side of
-    // the spacer that holds the count against the end of the row as well as between the
-    // things that are actually beside each other, so it is paid twice over in the one
-    // place the row has none to spare - between where to be and the count, which is
+    // the spacer that holds the line against the end of the column as well as between
+    // the things that are actually beside each other, so it is paid twice over in the
+    // one place the row has none to spare - between where to be and the count, which is
     // where the line is being cut short.
-    const line = row.addStack();
+    const line = flightColumn.addStack();
     line.centerAlignContent();
     line.spacing = 0;
     pill(line, flight);
@@ -487,28 +496,65 @@ function renderList(widget, flights, logos) {
       detail.textColor = TEXT;
       detail.lineLimit = 1;
     }
+    // Both lines end in one of these, which is what keeps the column they are in filling
+    // the width the footer's column leaves and what holds their words against the near
+    // end of it.
     line.addSpacer();
+
     if (flight.footer_at || flight.footer_value) {
-      // The one size that draws the words naming the count on the row over it, so the
-      // one size the count is pulled up on. No slack either: a count boxed wider than
-      // its widest reading is boxed at the expense of the line beside it, and the row
-      // above already holds the words that say what it is counting to.
-      figure(line, flight, COUNT_SIZE, 0, COUNT_LIFT).textColor = TEXT;
+      footerColumn(row, flight);
     }
   });
 }
 
+// The board's footer as a column at the end of a row: the words it is named for over the
+// figure itself, one directly under the other and nothing between them but the air the
+// two lines carry.
+//
+// Boxed to the figure's own width, which is the one measurement that has to be made here
+// rather than left to WidgetKit. It is what the words are held against the far end by,
+// and it is what leaves the rest of the row to the flight: a column that sized itself
+// would take its width from whichever of the two happened to be wider.
+function footerColumn(container, flight) {
+  const column = container.addStack();
+  column.layoutVertically();
+  column.size = new Size(figureWidth(flight, COUNT_SIZE), 0);
+  column.setPadding(FOOTER_WORD_DROP, 0, 0, 0);
+
+  const words = column.addStack();
+  words.addSpacer();
+  footerWord(words, flight, 11);
+
+  const value = column.addStack();
+  value.addSpacer();
+  // No slack: a figure boxed wider than its widest reading is boxed at the expense of the
+  // line beside it, and the words above it already say what it is counting to.
+  figure(value, flight, COUNT_SIZE, 0, COUNT_FOOT).textColor = TEXT;
+  return column;
+}
+
+// What the figure is about to take: the reading a count is going to turn into, or the
+// glyphs a figure the server already knows is drawn with.
+function figureWidth(flight, size) {
+  return flight.footer_at
+    ? timerWidth(flight.footer_at, size, 0)
+    : glyphWidth(flight.footer_value.length, size);
+}
+
 // The heading: the airline's mark, when it came, then the number, and the route beside
-// it where the row is wide enough to hold both. Whatever `trailing` draws is held at the
-// far end of the line by the spacer between them.
-function titleRow(container, flight, logos, size, withRoute, trailing) {
+// it where the row is wide enough to hold both.
+function titleRow(container, flight, logos, size, withRoute) {
   const row = container.addStack();
   row.centerAlignContent();
   row.spacing = 5;
   const logo = logos[flight.logo_url];
   if (logo) {
+    // Squared to the number's own point size rather than over it. A mark drawn taller
+    // than the line of type beside it sets the height of the heading itself, and what is
+    // held at the other end of that line then reads as adrift in a gap that is the
+    // mark's rather than its own.
     const mark = row.addImage(logo);
-    mark.imageSize = new Size(size + 3, size + 3);
+    mark.imageSize = new Size(size, size);
     mark.cornerRadius = 3;
   }
   const number = row.addText(flight.number);
@@ -524,9 +570,6 @@ function titleRow(container, flight, logos, size, withRoute, trailing) {
     route.minimumScaleFactor = 0.7;
   }
   row.addSpacer();
-  if (trailing) {
-    trailing(row);
-  }
   return row;
 }
 
@@ -552,13 +595,13 @@ function footerWord(container, flight, size) {
 // has not, the figure the server already knows. A belt is a fact rather than a clock -
 // it is drawn once and stays - so it needs none of the machinery below and is set at the
 // same size and weight, because it is the same half of the same footer.
-function figure(container, flight, size, slack, lift = 0) {
+function figure(container, flight, size, slack, trim = 0) {
   if (flight.footer_at) {
-    return countdown(container, flight, size, slack, lift);
+    return countdown(container, flight, size, slack, trim);
   }
   const box = container.addStack();
-  if (lift) {
-    box.setPadding(-lift, 0, 0, 0);
+  if (trim) {
+    box.setPadding(0, 0, -trim, 0);
   }
   const value = box.addText(flight.footer_value);
   value.font = Font.boldMonospacedSystemFont(size);
@@ -577,18 +620,19 @@ function figure(container, flight, size, slack, lift = 0) {
 // digits. Left to itself the count therefore sits at the right-hand end of the row in the
 // app and part-way along it on the home screen, which is the same widget disagreeing with
 // itself. Right is the end the spacer was put there to hold it against.
-function countdown(container, flight, size, slack = 1, lift = 0) {
+function countdown(container, flight, size, slack = 1, trim = 0) {
   const at = new Date(flight.footer_at);
-  // The box is what the count is moved by, as well as what it is measured into.
-  // `lift` is for the sizes that draw the words naming the count on the row above it:
-  // the air a line of this size carries over its glyphs lands between the two of them
-  // there, and reads as the figure having come adrift of its own label. Pulling the box
-  // up by that air is the only way to take it back - WidgetKit gives a line of text no
-  // say in its own height - and it costs the row nothing, because the air is over the
-  // digits rather than between them and anything else.
+  // The box is what the count is measured into, and `trim` is what the foot of it gives
+  // back where it stands in a column of its own: WidgetKit gives a line of text no say in
+  // its own height, so a count set half again the size of the words above it stands in a
+  // box half again as deep as they do and carries the column past the flight beside it.
+  // Only ever the foot, and only ever less than the air under the baseline. A box shorter
+  // than the glyphs it holds is one WidgetKit draws them cut off in rather than lets them
+  // out of, and the space under a count's baseline is the one part of its line that
+  // nothing is ever drawn in.
   const box = container.addStack();
-  if (lift) {
-    box.setPadding(-lift, 0, 0, 0);
+  if (trim) {
+    box.setPadding(0, 0, -trim, 0);
   }
   // Boxed to the width of the reading it is about to show. A timer is the one element
   // WidgetKit cannot measure before it draws it, so left to itself it is handed all the
@@ -727,7 +771,12 @@ function updatedLine(widget, result) {
 function timerWidth(at, size, margin = 0) {
   const away = Math.abs(Date.now() - new Date(at).getTime()) + 10 * 60 * 1000;
   const hours = away / (60 * 60 * 1000);
-  const glyphs = (hours < 1 ? 5 : hours < 10 ? 7 : 8) + margin;
+  return glyphWidth((hours < 1 ? 5 : hours < 10 ? 7 : 8) + margin, size);
+}
+
+// A monospaced glyph advances by 0.64 of its point size, whichever glyph it is, which is
+// what makes a figure that has not been drawn yet a figure that can still be measured.
+function glyphWidth(glyphs, size) {
   return Math.ceil(glyphs * size * 0.64);
 }
 

@@ -1077,31 +1077,62 @@ def test_the_count_is_drawn_bigger_than_the_row_it_is_read_off() -> None:
     assert "flights.length < 3" not in source
 
 
-def test_the_count_is_pulled_up_under_the_words_naming_it() -> None:
-    """Only on the sizes that draw those words on the row above the figure.
+def test_the_count_stands_in_a_column_under_the_words_naming_it() -> None:
+    """The wide sizes draw the row as two columns rather than as two lines.
 
-    A line of type carries air over its glyphs, and the count is set half again the size
-    of every other word on the widget, so it carries half again as much. Left where it
-    falls, that air lands between "Departs in" and the figure it belongs to and reads as
-    most of a blank line. WidgetKit gives a line of text no say in its own height, so the
-    only way to take it back is to pull the box the count is drawn in up by it.
+    The words and the figure they name are one stack that way, standing as far apart as
+    that stack says. Laid out as lines they stood as far apart as the lines beside them
+    happened to fall - the count is set half again the size of every other word on the
+    widget, so the air its line carries over its glyphs read as most of a blank line
+    between "Departs in" and the figure it belongs to.
 
     The narrow sizes are not touched: there the words and the figure share a line, so
     there is no gap over the count to close.
     """
     source = script_source()
-    assert "const COUNT_LIFT = 6;" in source
     wide = source[source.index("function renderList(") : source.index("function titleRow(")]
-    assert "figure(line, flight, COUNT_SIZE, 0, COUNT_LIFT)" in wide
+    assert "row.topAlignContent();" in wide
+    assert "footerColumn(row, flight);" in wide
+    column = source[source.index("function footerColumn(") : source.index("function figureWidth(")]
+    assert "column.layoutVertically();" in column
+    assert "footerWord(words, flight, 11)" in column
+    # The words start the column down the row by the difference between the two
+    # ascenders, which is what sets them on the flight number's own baseline rather than
+    # on the top of its line.
+    assert "column.setPadding(FOOTER_WORD_DROP, 0, 0, 0);" in column
+    assert "const FOOTER_WORD_DROP = 3;" in source
+
+
+def test_the_figure_gives_back_only_the_air_under_its_baseline() -> None:
+    """Standing in a column of its own, the count is set half again the size of the words
+    over it and so stands in a box half again as deep as theirs, which would carry the
+    column past the flight beside it. The foot of the box gives that back.
+
+    Only ever the foot, and only ever less than the air under the baseline: a box shorter
+    than the glyphs it holds is one WidgetKit draws them cut off in rather than lets them
+    out of, and the space under a count's baseline is the one part of its line that
+    nothing is ever drawn in.
+    """
+    source = script_source()
+    timer = source[source.index("function countdown(") : source.index("function pill(")]
+    assert "box.setPadding(0, 0, -trim, 0);" in timer
+    assert "-lift" not in source
+    # The narrow sizes take nothing back: there the count is the tallest thing on a line
+    # it shares, so its box is the height of the line it sets.
     for name, ends in (
         ("renderAccessory(", "function renderSmall("),
         ("renderSmall(", "function renderList("),
     ):
-        assert "COUNT_LIFT" not in source[source.index(f"function {name}") : source.index(ends)]
-    # Applied to the box the count is measured into rather than to the figure itself: a
-    # line of text has no say in its own height, and the box is the only handle there is.
-    timer = source[source.index("function countdown(") : source.index("function pill(")]
-    assert "box.setPadding(-lift, 0, 0, 0);" in timer
+        assert "COUNT_FOOT" not in source[source.index(f"function {name}") : source.index(ends)]
+    # The system fonts report an ascender of 0.967 of the point size against a cap height
+    # of 0.705, so a figure is drawn 0.262 of it below the top of its line and reaches no
+    # part of the 0.211 under the baseline. The trim has to stay inside that.
+    box = {}
+    for name in ("COUNT_SIZE", "COUNT_FOOT"):
+        found = re.search(rf"const {name} = (\d+);", source)
+        assert found, name
+        box[name] = int(found.group(1))
+    assert box["COUNT_FOOT"] < box["COUNT_SIZE"] * 0.211
 
 
 def test_the_row_spends_its_width_where_it_can_be_read() -> None:
@@ -1119,7 +1150,7 @@ def test_the_row_spends_its_width_where_it_can_be_read() -> None:
     wide = source[source.index("function renderList(") : source.index("function titleRow(")]
     assert "line.spacing = 0;" in wide
     assert "line.addSpacer(6);" in wide
-    assert "figure(line, flight, COUNT_SIZE, 0, COUNT_LIFT)" in wide
+    assert "figure(value, flight, COUNT_SIZE, 0, COUNT_FOOT)" in wide
 
 
 def test_a_figure_the_server_already_knows_is_drawn_where_the_count_is() -> None:
@@ -1130,7 +1161,7 @@ def test_a_figure_the_server_already_knows_is_drawn_where_the_count_is() -> None
     drawn = source[source.index("function figure(") : source.index("function countdown(")]
     assert "applyTimerStyle" not in drawn
     assert "Font.boldMonospacedSystemFont(size)" in drawn
-    assert "countdown(container, flight, size, slack, lift)" in drawn
+    assert "countdown(container, flight, size, slack, trim)" in drawn
 
 
 def test_the_lock_screen_gives_the_belt_its_own_line() -> None:

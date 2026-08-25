@@ -59,9 +59,10 @@ restriction and not a choice made here.
 
 ## What it shows
 
-A list. Each flight is two lines: the airline's mark with the flight number and route,
-and what the flight is counting to at the far end of that line; then the board's status
-pill, one line beside it, and the count itself at the far end of that one.
+A list. Each flight is a row of two columns: the flight down one side - the airline's
+mark with the flight number and route, then the board's status pill with one line beside
+it - and the board's footer down the other, where the words for what it is counting to
+stand directly over the count itself.
 
 The line under the pill is where to be, once being somewhere is the question:
 
