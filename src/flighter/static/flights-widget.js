@@ -298,9 +298,10 @@ function newWidget() {
     widget.setPadding(2, 2, 2, 2);
   } else {
     widget.backgroundColor = BACKGROUND;
-    // The small size is six lines tall once the route has its own line, so it gives up
-    // a little margin to keep the last of them on screen.
-    const inset = family === "small" ? 12 : 14;
+    // Six lines on the small size once the route has its own line, and three flights on
+    // the medium one: both are taller than the shortest phone's box, so both give up a
+    // little margin to keep their last line on screen. Only the large size has it spare.
+    const inset = family === "large" ? 14 : 12;
     widget.setPadding(inset, inset, inset, inset);
   }
   return widget;
@@ -380,8 +381,11 @@ function renderSmall(widget, flight, logos) {
 
 function renderList(widget, flights, logos) {
   flights.forEach((flight, index) => {
+    // Three rows and a footer note are more than the shortest medium widget holds at the
+    // gap a large one can afford, and a column past its box is cut at the line it can no
+    // longer fit - which is the countdown at the foot of the last flight.
     if (index > 0) {
-      widget.addSpacer(family === "large" ? 12 : 8);
+      widget.addSpacer(family === "large" ? 12 : 6);
     }
     const row = widget.addStack();
     if (supportsRowLinks) {
@@ -395,7 +399,7 @@ function renderList(widget, flights, logos) {
     titleRow(row, flight, logos, 14, true, (heading) => {
       milestoneWord(heading, flight, 11);
     });
-    row.addSpacer(4);
+    row.addSpacer(3);
 
     const line = row.addStack();
     line.centerAlignContent();
@@ -427,8 +431,10 @@ function titleRow(container, flight, logos, size, withRoute, trailing) {
   row.spacing = 5;
   const logo = logos[flight.logo_url];
   if (logo) {
+    // Squared to the number's own point size: a mark drawn taller than the line it sits
+    // on is what makes a heading look like it has been given room it has not got.
     const mark = row.addImage(logo);
-    mark.imageSize = new Size(size + 3, size + 3);
+    mark.imageSize = new Size(size, size);
     mark.cornerRadius = 3;
   }
   const number = row.addText(flight.number);
