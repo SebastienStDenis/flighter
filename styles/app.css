@@ -246,7 +246,7 @@
     --lead: 0.25em;
     margin-left: var(--lead);
 
-    --mark: #0c60a3;
+    --mark: #0d7dd4;
   }
 
   @media (prefers-color-scheme: dark) {
