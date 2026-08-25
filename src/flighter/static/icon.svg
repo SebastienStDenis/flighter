@@ -1,15 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"
      role="img" aria-label="Flighter">
   <style>
-    :root { --tile: #f5f7f9; --mark: #0c60a3; }
+    :root { --tile: #f5f7f9; --mark: #0c60a3; --trail: #dce0e5; }
     @media (prefers-color-scheme: dark) {
-      :root { --tile: #0a0c11; --mark: #7cc6ff; }
+      :root { --tile: #0a0c11; --mark: #7cc6ff; --trail: #2c3039; }
     }
   </style>
-  <rect width="512" height="512" fill="var(--tile, #0a0c11)"/>
-  <line x1="72" y1="256" x2="238" y2="256"
+  <rect width="512" height="512" rx="96" fill="var(--tile, #0a0c11)"/>
+  <line x1="372" y1="256" x2="468" y2="256"
+        stroke="var(--trail, #2c3039)" stroke-width="12" stroke-dasharray="16 24"/>
+  <line x1="44" y1="256" x2="205" y2="256"
         stroke="var(--mark, #7cc6ff)" stroke-width="12" stroke-linecap="round"/>
-  <g fill="var(--mark, #7cc6ff)" transform="translate(296 256) rotate(90) scale(9) translate(-12 -12.9)">
+  <g fill="var(--mark, #7cc6ff)" transform="translate(268 256) rotate(90) scale(9) translate(-12 -12.9)">
     <path d="M21 15.5 13.5 11V4.2a1.5 1.5 0 0 0-3 0V11L3 15.5v2l7.5-2.2v4.4L8 21.3V23l4-1.2 4 1.2v-1.7l-2.5-1.6v-4.4l7.5 2.2z"/>
   </g>
 </svg>
