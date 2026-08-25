@@ -65,22 +65,30 @@ mark, the number and the route - and ends with the board's status pill. The seco
 carries where to be, and ends with what the flight is next due to do and the time it is
 due.
 
-The line under the heading is where to be, once being somewhere is the question:
+The row is the board's card, narrowed. The pill is the card's pill, the places are the
+card's places and the end of the row is the card's footer, each drawn on exactly the
+rows the card draws it on, because a widget that answers a question the card has already
+answered is a second answer to it and the reader has no way to tell which is stale. Only
+two things about it are the widget's own: the card has the width to show both ends of a
+flight at once and a row has one line, so it shows the end being walked to; and the card
+counts down to a rung where the row states the time it is due.
+
+The line under the heading is where to be, for as long as there is anything on the
+flight to watch:
 
 | While it is | The line reads |
 | --- | --- |
-| Days off | `Fri 18 Sep 18:00 EDT` |
-| On the day | `TERM 4 · GATE B22 · SEAT 14A` |
-| Pushed back, or in the air | `SEAT 14A · GATE 12 · TERM B` |
-| Parked | nothing; the belt is at the other end of the row |
-| Cancelled, or lost by the feed | nothing; the pill has said it |
+| Days off, with nothing to watch yet | `Fri 18 Sep 18:00 EDT` |
+| Still at the gate it leaves from | `TERM 4 · GATE B22 · SEAT 14A` |
+| Pushed back, in the air, or parked | `SEAT 14A · GATE 12 · TERM B` |
+| Called off, or given up on | nothing; the pill has said it |
 
-The terminal, the gate and the seat join the line on the day of the flight, in the order
-a boarding pass prints them, and the terminal and gate are dashed rather than dropped
-while the airport has not said: a line that comes and goes as gates are published is a
-row that moves under the eye. Off the ground the same three are read the other way
-about, because the seat is where the reader is and the gate and the terminal are where
-they are going.
+The terminal, the gate and the seat are in the order a boarding pass prints them, and the
+terminal and gate are dashed rather than dropped while the airport has not said: a line
+that comes and goes as gates are published is a row that moves under the eye. Once the
+aircraft has left the gate the same three are read the other way about, because the seat
+is where the reader is and the gate and the terminal are where they are going - and they
+stay on the row after it parks, where the terminal is the one the belt is in.
 
 When it goes is the other end of the row, and never on this line: the board's own words
 for the rung ahead, with the time it is due beside them.
@@ -90,6 +98,11 @@ for the rung ahead, with the time it is due beside them.
 | Ahead of its time | `Departs 14:40`, `Lands 22:40`, `At the gate 22:15` |
 | Past it, with no word that it happened | `Due to depart 14:40`, `Due to land 22:40` |
 | Parked | `Baggage claim 7`, dashed until the airport says which |
+| Days off, or called off | nothing, the way the card draws no footer for one |
+
+A flight days out is on a rung - the ladder starts at its departure - but nobody is
+waiting on it yet, so neither the card nor the row names it. The pill has already said it
+is booked, and the day it leaves is under the heading.
 
 Every word, tone and figure comes from the server; the script picks nothing on its own
 and works nothing out.
@@ -106,10 +119,11 @@ phone's clock**: `02:00` on its own reads as today's, and a flight leaving tomor
 morning would otherwise look hours overdue all evening.
 
 The day a flight leaves, days out, is the one exception, and it is on the airport's
-clock with the airport's zone after it. It sits under the heading while the end of the
-row states the same departure on the reader's own clock, so a row days out answers both
-"when does it go" and "when is that here" without either figure having to be worked out.
-A phone that will not say where it is gets the airport's clock at both ends.
+clock with the airport's zone after it. It is the only time on that row - there is no rung
+being waited on yet - and the day a flight leaves is the day where it leaves from, so a
+bare reading would be taken for the reader's own. A phone that will not say where it is
+gets the airport's clock everywhere, which is the one case where a time at the end of a
+row is not the reader's and does not say so; there is nothing better to draw.
 
 The pill is the board's, in the board's tones, word for word and with no exceptions. It
 used to carry two - "Departed" in place of "Taxiing", and "Scheduled" in place of the
