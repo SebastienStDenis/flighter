@@ -107,6 +107,14 @@ flight to watch:
 | Pushed back, in the air, or parked | *seat* `14A`, *plane landing* `TB • 12` |
 | Called off, or given up on | nothing; the pill has said it |
 
+Every row stands the same height whether or not it has all of that to show. The line
+under the heading is drawn on every one of them and holds the height of the tallest thing
+it can carry - the time at the far end of it - so a flight with only a date under its
+heading, and a flight with nothing at all, take the same room as a flight with a time.
+The gap between two rows is a fixed one, and a row that closed up its own spare space
+would sit nearer its neighbour than the rest of the column for no reason a reader could
+see.
+
 The marks are `plane-takeoff`, `plane-landing` and `armchair` from Lucide, which is the
 icon set the web UI is drawn with, and they stand where TERM, GATE and SEAT used to. The
 line

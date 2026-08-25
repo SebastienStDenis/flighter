@@ -1115,6 +1115,30 @@ def test_the_row_holds_the_pill_and_the_time_against_the_same_edge() -> None:
     assert "targetValue(line, flight);" in wide
 
 
+def test_every_row_keeps_the_same_line_under_its_heading() -> None:
+    """A line is as tall as whatever happens to land on it, unless it is told otherwise.
+
+    The time is the largest type on a row and where to be is among the smallest, so a
+    flight with a time to show stood taller than a flight with only a date under its
+    heading - and a flight with neither, days out or called off, drew no second line at
+    all. The gap between two rows is a fixed one, so what moved was the rows themselves:
+    the column came out unevenly spaced, and the spacing said nothing about the flights
+    beyond which of them happened to have a time.
+
+    So the line is drawn on every row and given the height of the tallest thing it can
+    ever carry, whether or not this flight has anything that tall to put on it.
+    """
+    source = script_source()
+    assert "const UNDER_HEADING = Math.ceil(TYPE.time * LINE_HEIGHT);" in source
+    wide = source[source.index("function renderList(") : source.index("function titleRow(")]
+    assert "line.size = new Size(0, UNDER_HEADING);" in wide
+    # Nothing decides whether the line is there, only what goes on it.
+    assert "hasDetail" not in wide
+    small = source[source.index("function renderSmall(") : source.index("function renderList(")]
+    assert "line.size = new Size(0, UNDER_HEADING);" in small
+    assert "hasDetail" not in small
+
+
 def test_the_time_is_the_weight_the_row_is_read_for() -> None:
     """Semibold and bold are the same weight to look at when a Mac draws an iPhone's
     widget, so a figure set in semibold reads as heavier than its row on a mirrored

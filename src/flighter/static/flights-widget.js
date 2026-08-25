@@ -124,6 +124,23 @@ const TYPE =
     ? { heading: 12, route: 11, detail: 10, pill: 10, label: 10, time: 13 }
     : { heading: 14, route: 12, detail: 11, pill: 10, label: 11, time: 13 };
 
+// How tall the line under the heading stands, on every row, whatever lands on it.
+//
+// Left to its contents that line is as tall as the tallest thing on it, and the things
+// it carries are not the same height: the time is the largest type on the row and where
+// to be is among the smallest, so a flight with a time to show took a taller line than a
+// flight with only a date under its heading - and a flight with neither, days out with
+// nothing to walk to or called off, took no second line at all. The gap between two
+// rows is a fixed one, so what moved was the rows themselves: a column of them came out
+// unevenly spaced, and the spacing said nothing about the flights, only about which of
+// them happened to have a time.
+//
+// So the line is given the height of the tallest thing it can ever hold and keeps it
+// whether or not anything that tall is on it. A row is then the same height as the row
+// above it, the fixed gaps between them read as one distance, and the eye goes down the
+// column on the words rather than on the spacing.
+const UNDER_HEADING = Math.ceil(TYPE.time * LINE_HEIGHT);
+
 const server = connect();
 const result = server ? await load(server) : null;
 const widget = result ? await buildWidget(result) : setupWidget();
@@ -450,14 +467,16 @@ function renderSmall(widget, flights, logos) {
     state.addSpacer();
     targetLabel(state, flight);
 
-    if (hasDetail(flight) || flight.target_value) {
-      widget.addSpacer(SMALL_GAP);
-      const line = widget.addStack();
-      line.centerAlignContent();
-      detailText(line, flight);
-      line.addSpacer();
-      targetValue(line, flight);
-    }
+    // Kept on both flights whether or not either has anything for it, and kept at one
+    // height: two flights on a 155pt square are read as two blocks of three lines, and a
+    // flight that drops its last line is a block that has moved.
+    widget.addSpacer(SMALL_GAP);
+    const line = widget.addStack();
+    line.centerAlignContent();
+    line.size = new Size(0, UNDER_HEADING);
+    detailText(line, flight);
+    line.addSpacer();
+    targetValue(line, flight);
   });
 }
 
@@ -484,19 +503,24 @@ function renderList(widget, flights, logos) {
     // it stand against the same edge without either of them being measured: what holds
     // them there is the spacer in the middle of each line, which is the one thing on a
     // widget that costs nothing to be exactly as wide as it has to be.
-    if (hasDetail(flight) || flight.target_value) {
-      // Well under the gap between two flights, because these two lines are one flight:
-      // what the widget is sorted into by eye is rows rather than lines.
-      row.addSpacer(3);
-      const line = row.addStack();
-      line.centerAlignContent();
-      detailText(line, flight);
-      line.addSpacer();
-      targetLabel(line, flight);
-      if (flight.target_value) {
-        line.addSpacer(5);
-        targetValue(line, flight);
-      }
+    //
+    // The line is drawn on every row, at the same height on every row, even where the
+    // flight has nothing to put on it: its height is the tallest thing it can ever carry
+    // rather than the tallest thing this flight gave it, so a date under one heading and
+    // a time under the next stand the same distance below both, and a row with neither
+    // is not a row drawn short. The gap under the heading is well under the gap between
+    // two flights, because these two lines are one flight: what the widget is sorted
+    // into by eye is rows rather than lines.
+    row.addSpacer(3);
+    const line = row.addStack();
+    line.centerAlignContent();
+    line.size = new Size(0, UNDER_HEADING);
+    detailText(line, flight);
+    line.addSpacer();
+    targetLabel(line, flight);
+    if (flight.target_value) {
+      line.addSpacer(5);
+      targetValue(line, flight);
     }
   });
 }
