@@ -283,8 +283,11 @@
     @apply h-[0.5px] w-[0.18em] rounded-full;
     margin-left: -0.26em;
     /* Half a pixel high and centred on the rule, it straddles a device pixel and is
-       painted into the row above the rule's. This drops it into the row below. */
-    translate: 0 0.25px;
+       painted into the row above the rule's. The quarter drops it into the row below,
+       and the pixel off it lifts the whole dash clear: at the rule's own height it reads
+       as a step under the nose it carries on from rather than as the same line further
+       along, which is the one thing a leg still to come has to look like. */
+    translate: 0 -0.75px;
     background-color: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
   }
 
