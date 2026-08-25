@@ -445,12 +445,12 @@ def _target(
 ) -> Target | None:
     """The end of the row: what the flight is next due to do, and when it is due.
 
-    The card's footer, condition for condition: the belt once the aircraft is parked,
-    otherwise the rung ahead if there is one and the flight is being watched at all, and
-    otherwise nothing. A flight days out is on a rung - the ladder starts at its
-    departure - but nobody is waiting on it yet, so the card draws no footer for one and
-    neither does this. The pill has already said it is booked, and the day it leaves is
-    under the heading.
+    The card's footer, condition for condition: the belt once the aircraft is parked and
+    the airport has named one, otherwise the rung ahead if there is one and the flight is
+    being watched at all, and otherwise nothing. A flight days out is on a rung - the
+    ladder starts at its departure - but nobody is waiting on it yet, so the card draws no
+    footer for one and neither does this. The pill has already said it is booked, and the
+    day it leaves is under the heading.
 
     The board's own words for the rung, too - "Departs" while it is ahead, "Due to
     depart" once its time has gone by with no word that it happened. The one thing that
@@ -458,13 +458,15 @@ def _target(
     it, because the hours would be a quarter of an hour stale by the time anybody read
     them, and a time that has passed is still the time it was due.
 
-    Parked, the belt takes the line, dashed until the airport says it, the way the card
-    draws it: the words are the news either way, and a line that arrives late is a row
-    that moves under the eye.
+    Parked, the belt takes the line once the airport has said which - and until it does,
+    the row ends where it ended before, with nothing. A row has one line for the figure
+    and a dash in it is a box with nothing to read; the words alone would be the news
+    that nobody has named a belt yet, which is not news anybody is waiting on. The line
+    arrives with the belt, which is a row that moves under the eye either way.
     """
     if views.at_the_gate(phase, booking, snapshot, now):
         belt = snapshot.baggage_claim if snapshot else None
-        return Target("Baggage claim", views.dash(belt))
+        return Target("Baggage claim", belt) if belt else None
     if not views.watched(phase):
         return None
     next_up = views.milestone(phase, booking, snapshot, now=now)

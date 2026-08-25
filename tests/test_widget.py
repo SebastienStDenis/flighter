@@ -319,13 +319,14 @@ def test_at_the_gate_the_belt_takes_the_end_of_the_row(settings: Settings) -> No
     assert detail(flight) == [("landing", "TB • 12")]
 
 
-def test_a_belt_nobody_has_named_yet_is_dashed(settings: Settings) -> None:
-    """The words are the news either way, and a line that arrives with the belt is a row
-    that moves under the eye. The card draws the same dash in the same place."""
+def test_a_belt_nobody_has_named_yet_leaves_the_row_empty(settings: Settings) -> None:
+    """A row has one line for the figure, so words with nothing beside them are the news
+    that there is no news. The line arrives with the belt; the card draws a dash there
+    instead, having the width to hold both."""
     done = snapshot(actual_off=DEPARTURE, actual_on=ARRIVAL, actual_in=ARRIVAL)
     flight = payload([(booking(), done)], settings)["flights"][0]
     assert flight["status_label"] == "Arrived"
-    assert target(flight) == ("Baggage claim", "-")
+    assert target(flight) == (None, None)
 
 
 def test_a_landed_flight_past_its_gate_time_is_sent_to_the_belt(settings: Settings) -> None:
