@@ -33,7 +33,7 @@
   <nav class="mx-auto flex h-14 max-w-lg items-center gap-1 px-3" aria-label="Sections">
     {# Which app this is, on every page. A page one level down draws its own way back up
        in its own content, rather than taking this away to make room for it. #}
-    <a class="btn text-base" data-size="lg" href="/"
+    <a class="btn text-xl" data-size="lg" href="/"
        data-variant="{{ 'secondary' if board else 'ghost' }}"
        {% if board %}aria-current="page"{% endif %}>
       <span class="brand">

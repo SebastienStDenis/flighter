@@ -576,8 +576,11 @@
                    'Open the download in Scriptable to import it as <code>Flighter</code>.',
                    '/widget/Flighter.scriptable', 'Download') %}
       {# The step's own padding is what holds it off the rule below, so the summary's is
-         taken back: a step that opens onto something ends where a plain one does. #}
-      <div class="accordion accordion-inline -mb-1 mt-2">
+         taken back: a step that opens onto something ends where a plain one does. Above
+         it there is nothing to take back but nothing to add either: the summary's own
+         padding is the whole of the gap, which is as much as one line needs to be told
+         apart from the sentence it hangs off. #}
+      <div class="accordion accordion-inline -mb-1">
         <details>
           <summary class="text-xs">Or copy it manually {{ chevron() }}</summary>
           <p class="text-xs text-muted-foreground">In Scriptable tap <code>+</code>,
