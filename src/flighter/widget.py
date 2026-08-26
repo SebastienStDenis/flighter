@@ -25,7 +25,7 @@ import json
 import logging
 import secrets
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Final, NamedTuple
 from urllib.parse import urlencode
@@ -37,7 +37,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import bookings as booking_repo
 from . import prefs, views
-from .aeroapi import budget_status
 from .airports import get_airport
 from .config import Settings, get_settings
 from .db import get_session
@@ -84,10 +83,6 @@ REFRESH_ACTIVE_SECONDS: Final = 600
 # iOS budgets reloads across every widget on the phone and ignores an eager request
 # anyway, so this is the floor the script clamps to as well.
 REFRESH_FLOOR_SECONDS: Final = 60
-
-# The poller runs a close flight every 10 minutes and a same-day one every 30, so a
-# snapshot this old means polling has stopped rather than that nothing has changed.
-POLL_STALE_AFTER: Final = timedelta(minutes=45)
 
 PHASES_IMMINENT: Final = frozenset({DAY_OF, TAXIING, AIRBORNE, DIVERTED})
 
@@ -203,8 +198,6 @@ class WidgetPayload(BaseModel):
     # answer that is right wherever the tap landed: both flights are on it.
     board_url: str
     refresh_seconds: int
-    degraded: bool
-    degraded_reason: str | None
 
 
 FlightRow = tuple[Booking, FlightSnapshot | None]
@@ -238,7 +231,6 @@ async def read_widget(
         # The phone reached this address to ask, so the links it is handed back work
         # from wherever it is, saved address or not.
         base_url=prefs.public_base_url(str(request.base_url).rstrip("/")),
-        degraded_reason=await read_degraded(session),
     )
 
 
@@ -367,18 +359,6 @@ async def load_airports(
     return airports
 
 
-async def read_degraded(session: AsyncSession) -> str | None:
-    """Why the numbers might be wrong, in words the widget can print verbatim.
-
-    The breaker latch lives in KV and `budget_status` owns reading it, including the
-    month scoping that unlatches it on the 1st. An absent latch is the healthy case.
-    """
-    budget = await budget_status(session)
-    if budget.tripped:
-        return f"AeroAPI budget reached (${budget.spend_usd} of ${budget.cap_usd})"
-    return None
-
-
 def build_payload(
     rows: Sequence[FlightRow],
     *,
@@ -388,11 +368,9 @@ def build_payload(
     airports: Mapping[str, Airport | None] | None = None,
     viewer_tz: str | None = None,
     family: str | None = None,
-    degraded_reason: str | None = None,
 ) -> WidgetPayload:
     known = airports or {}
     ordered: list[tuple[datetime, Built]] = []
-    observed: list[datetime] = []
     for booking, snapshot in rows:
         built = _flight(
             booking,
@@ -404,20 +382,15 @@ def build_payload(
             viewer_tz=viewer_tz,
         )
         ordered.append((departure_estimate(booking, snapshot), built))
-        if built.flight.phase in PHASES_IMMINENT and snapshot is not None and snapshot.observed_at:
-            observed.append(snapshot.observed_at)
     # The board's order: by the time each is now leaving, landed or not, cut to what the
     # size that asked has room for.
     ordered.sort(key=lambda row: row[0])
     drawn = [built for _, built in ordered[: FLIGHTS_BY_FAMILY.get(family or "", DEFAULT_FLIGHTS)]]
 
-    reason = degraded_reason or _stale_reason(min(observed, default=None), now)
     return WidgetPayload(
         flights=[built.flight for built in drawn],
         board_url=base_url,
         refresh_seconds=_refresh_seconds(drawn, now),
-        degraded=reason is not None,
-        degraded_reason=reason,
     )
 
 
@@ -594,10 +567,10 @@ def _terminal(value: str | None) -> str | None:
 def _stated(instant: datetime, now: datetime, origin_tz: str, viewer_tz: str | None) -> str:
     """A time on the clock in the reader's hand, and on no other.
 
-    The zone is not named with it. The clock it is read on is the one in the same hand,
-    and the widget's own footer says so once for every time on it. The day is named when
-    it is not today's, because a bare 04:50 read at ten in the evening is a time that
-    looks like it has gone.
+    The zone is not named with it. The clock it is read on is the one in the same hand -
+    the only clock the reader has to read it on - and a zone after a time that is already
+    theirs is a thing to read and then discount. The day is named when it is not today's,
+    because a bare 04:50 read at ten in the evening is a time that looks like it has gone.
 
     A phone that did not say where it is gets the airport's clock instead. It is the one
     reading here that is not the reader's own, and there is nothing better to draw.
@@ -632,19 +605,3 @@ def _refresh_seconds(drawn: Sequence[Built], now: datetime) -> int:
         return cadence
     due_in = int((min(ahead) - now).total_seconds())
     return max(REFRESH_FLOOR_SECONDS, min(cadence, due_in))
-
-
-def _stale_reason(observed: datetime | None, now: datetime) -> str | None:
-    """Only ever judged against a flight that is close enough to be polled often.
-
-    A flight that has never been polled is not evidence of anything: it may have been
-    added a minute ago.
-    """
-    if observed is None:
-        return None
-    if observed.tzinfo is None:
-        observed = observed.replace(tzinfo=UTC)
-    age = now - observed
-    if age <= POLL_STALE_AFTER:
-        return None
-    return f"No status update in {int(age.total_seconds() // 60)} min"

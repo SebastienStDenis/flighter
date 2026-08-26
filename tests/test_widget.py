@@ -15,7 +15,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from flighter import prefs, views, widget
-from flighter.aeroapi import BREAKER_KEY, month_key
 from flighter.config import Settings, get_settings
 from flighter.db import get_session
 from flighter.models import KV, Airport, Booking, BookingStatus, FlightSnapshot
@@ -26,7 +25,6 @@ from flighter.widget import (
     build_payload,
     connect_url,
     last_seen,
-    read_degraded,
     script_body,
     script_source,
 )
@@ -649,8 +647,8 @@ def test_the_time_a_flight_is_due_is_on_the_phones_clock(settings: Settings) -> 
     Watching from Ottawa, a flight leaving Tokyo at 03:40 is due at 14:40 on the watch of
     the person reading it, and that is the figure. The airport's own reading of the same
     instant is not set beside it - a line with two times on it is a line that has to be
-    worked out rather than read - and the zone is not named either, because the widget's
-    footer says once that every time on it is on the clock in the same hand.
+    worked out rather than read - and the zone is not named either, because the clock it
+    is on is the clock in the same hand and no other clock is on offer.
     """
     flight = payload([tokyo_row()], settings, airports=AIRPORTS, viewer_tz=HOME)["flights"][0]
     assert target(flight) == ("Departs", "14:40")
@@ -748,14 +746,19 @@ def test_the_script_tells_the_server_which_size_is_asking() -> None:
     assert 'const family = config.widgetFamily || "medium";' in source
 
 
-def test_the_script_says_once_which_clock_the_times_are_on() -> None:
-    """No time on the widget carries a zone, so the footer carries it for all of them.
-
-    It cannot come from the payload: the server does not know whether the phone will be
-    drawing a widget with a footer or a lock screen without one.
-    """
-    source = script_source()
-    assert "Times on your phone's clock" in source
+def test_no_size_names_the_clock_its_times_are_on() -> None:
+    """The footer used to end with a note saying every time above it was on the phone's
+    own clock. A time on a widget is read on the watch in the hand holding it, which is
+    the only clock there is to read it on, so the note answered a question nobody had -
+    and it cost the square a phrase on the one line under its flights. The times are
+    unchanged; what is gone is the sentence about them."""
+    # What the widget draws rather than what the file says about itself: the comments
+    # explaining why the note went are allowed to name it.
+    code = "\n".join(
+        line for line in script_source().splitlines() if not line.lstrip().startswith("//")
+    )
+    for note in ("phone's clock", "your clock", "local to you", "CLOCK_NOTE"):
+        assert note not in code, note
 
 
 # --- instants -------------------------------------------------------------------------
@@ -973,77 +976,19 @@ def test_no_flights(settings: Settings) -> None:
     body = payload([], settings)
     assert body["flights"] == []
     assert body["refresh_seconds"] == 900
-    assert body["degraded"] is False
 
 
-# --- degraded -------------------------------------------------------------------------
+def test_the_payload_says_nothing_about_its_own_health() -> None:
+    """`degraded` and `degraded_reason` are gone from it.
 
-
-class FakeBudgetSession:
-    """Just enough of AsyncSession for aeroapi.budget_status; no database anywhere."""
-
-    def __init__(self, *, spend: str = "0", latch: KV | None = None) -> None:
-        self._spend = spend
-        self._latch = latch
-
-    async def scalar(self, statement: Any) -> str:
-        return self._spend
-
-    async def get(self, model: Any, key: Any) -> KV | None:
-        return self._latch
-
-
-def latch(month: datetime) -> KV:
-    return KV(
-        key=BREAKER_KEY,
-        value={"month": month_key(month), "spend_usd": "4.01", "cap_usd": "4.00"},
-    )
-
-
-async def test_degraded_when_the_breaker_latch_is_present() -> None:
-    session = FakeBudgetSession(latch=latch(datetime.now(UTC)))
-    reason = await read_degraded(session)  # type: ignore[arg-type]
-    assert reason is not None and "AeroAPI budget" in reason
-
-
-async def test_a_latch_from_last_month_is_not_degraded() -> None:
-    """The latch is month-scoped, so it unlatches on its own on the 1st."""
-    session = FakeBudgetSession(latch=latch(datetime.now(UTC) - timedelta(days=40)))
-    assert await read_degraded(session) is None  # type: ignore[arg-type]
-
-
-async def test_no_latch_is_not_degraded() -> None:
-    assert await read_degraded(FakeBudgetSession()) is None  # type: ignore[arg-type]
-
-
-def test_a_stale_snapshot_on_a_close_flight_degrades(settings: Settings) -> None:
-    stale = snapshot(scheduled_out=DEPARTURE, observed_at=NOW - timedelta(minutes=95))
-    body = payload([(booking(), stale)], settings)
-    assert body["degraded"] is True
-    assert body["degraded_reason"] == "No status update in 95 min"
-
-
-def test_a_recent_snapshot_does_not_degrade(settings: Settings) -> None:
-    fresh = snapshot(scheduled_out=DEPARTURE, observed_at=NOW - timedelta(minutes=9))
-    assert payload([(booking(), fresh)], settings)["degraded"] is False
-
-
-def test_a_stale_snapshot_on_a_distant_flight_does_not_degrade(settings: Settings) -> None:
-    """A flight days out is polled every few hours by design."""
-    far = booking(scheduled_departure_utc=NOW + timedelta(days=6))
-    old = snapshot(scheduled_out=NOW + timedelta(days=6), observed_at=NOW - timedelta(hours=5))
-    assert payload([(far, old)], settings)["degraded"] is False
-
-
-def test_a_never_polled_flight_does_not_degrade(settings: Settings) -> None:
-    assert payload([(booking(), None)], settings)["degraded"] is False
-
-
-def test_the_breaker_outranks_staleness(settings: Settings) -> None:
-    stale = snapshot(scheduled_out=DEPARTURE, observed_at=NOW - timedelta(minutes=95))
-    body = payload([(booking(), stale)], settings, degraded_reason="Cap hit")
-    assert body["degraded"] is True
-    assert body["degraded_reason"] == "Cap hit"
+    They were read by one line at the foot of the widget, and that line is gone. The
+    board still carries the banner - it reads the breaker straight from `budget_status`,
+    which is where the latch lives - so nothing is lost by the phone not being told
+    twice, and the staleness sentence the widget worked out for itself goes with them:
+    it was never anything but a second opinion on what the board already says.
+    """
+    fields = set(widget.WidgetPayload.model_fields)
+    assert fields == {"flights", "board_url", "refresh_seconds"}
 
 
 # --- auth -----------------------------------------------------------------------------
@@ -1068,11 +1013,7 @@ def client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     async def fake_rows(session: Any, now: datetime) -> list[FlightRow]:
         return [(booking(), snapshot(gate_origin="B22", terminal_origin="4"))]
 
-    async def fake_degraded(session: Any) -> str | None:
-        return None
-
     monkeypatch.setattr(widget, "load_flight_rows", fake_rows)
-    monkeypatch.setattr(widget, "read_degraded", fake_degraded)
 
     session = FakeSession()
 
@@ -1259,19 +1200,30 @@ def test_every_row_keeps_the_same_line_under_its_heading() -> None:
     assert "hasDetail" not in small
 
 
-def test_the_large_widget_spends_its_air_on_a_seventh_row() -> None:
-    """The one distance the two wide sizes do not share, and the tightest figure here.
+def test_the_gap_between_two_flights_is_what_the_size_has_left() -> None:
+    """Not a distance on any size now, the way it has never been one on the square.
 
     A row is a shade under 36 points - the heading, the line under it, and the three
-    between them - so seven of them, the gap between each pair, the footer and the
-    widget's own inset come to within a point or two of what a 6.1in phone's large
-    widget holds. Which is why the gap is a name rather than a bare number in the line
-    that draws it: it is the first figure to put back if a row is ever drawn clipped.
+    between them - and seven of them with a fixed nine between each pair, the footer and
+    the widget's own inset came to within a point or two of what a 6.1in phone's large
+    widget holds. Taking the footer out gives its twelve points back, which is a third of
+    a row and so buys no row anywhere; left as a fixed gap it would have pooled under the
+    last flight instead, and a column pinned to the top of a widget with room below it
+    reads as a widget that ran out of flights.
+
+    Shared between the gaps it comes to about twelve points on the large and eleven on
+    the medium - both wider than the fixed figures they replace, and neither of them
+    anywhere near a row, which is what keeps a break between two flights reading as a
+    break between two flights. It is also the figure that comes out right on a phone
+    that is not the 6.1in one the fixed gaps were measured on.
     """
     source = script_source()
-    assert "const LARGE_GAP = 9;" in source
+    assert "LARGE_GAP" not in source
     wide = source[source.index("function renderList(") : source.index("function titleRow(")]
-    assert 'widget.addSpacer(family === "large" ? LARGE_GAP : 8);' in wide
+    assert "widget.addSpacer();" in wide
+    assert "addSpacer(8)" not in wide and "addSpacer(9)" not in wide
+    # The one fixed distance left inside a row: the heading and the line under it.
+    assert "row.addSpacer(3);" in wide
 
 
 def test_the_time_is_the_weight_the_row_is_read_for() -> None:
@@ -1306,7 +1258,7 @@ def test_a_small_widget_holds_two_flights_of_three_lines() -> None:
     assert "targetValue(line, flight);" in drawn
     # Every line of a flight is the same distance under the one above it, and the only
     # wider gap is the one that separates two flights - which is no longer a distance at
-    # all, but whatever the square has left after the six lines and the footer.
+    # all, but everything the square has left once its six lines are drawn.
     assert drawn.count("widget.addSpacer(SMALL_GAP)") == 2
     assert "widget.addSpacer();" in drawn
     # And nothing on those lines carries air of its own inside that distance: a pill with
@@ -1321,7 +1273,9 @@ def test_the_small_widget_fills_its_square() -> None:
     footer, and the inset was cut to eleven points on the reading that a 155pt square
     holding six lines has nothing to spare. It has: the lines are the size they are, and
     what the square has left over is enough to stand the two blocks apart and still keep
-    the words the distance from the rounded corner that every other size gives them.
+    the words the distance from the rounded corner that every other size gives them. The
+    footer's own line is part of that room now, so they stand further apart than they did
+    - eleven points further, which is the line and the air it kept above itself.
     """
     source = script_source()
     assert "const INSET = 14;" in source
@@ -1437,7 +1391,7 @@ def test_the_wide_sizes_draw_every_row_at_one_size() -> None:
     source = script_source()
     for drawn in (
         source[source.index("function targetLabel(") : source.index("// The other half")],
-        source[source.index("function pill(") : source.index("// The bottom of the widget")],
+        source[source.index("function pill(") : source.index("// Nothing is drawn under")],
     ):
         assert "minimumScaleFactor" in drawn
         assert 'if (family === "small") {' in drawn
@@ -1506,67 +1460,48 @@ def test_the_route_is_set_rather_than_left_to_fit() -> None:
     assert "Font.regularMonospacedSystemFont(TYPE.route)" in source
 
 
-def test_every_home_screen_size_says_when_it_was_last_updated() -> None:
-    """Including the small one. Only the lock screen goes without, where three lines is
-    the whole widget and the age is said in the message instead."""
-    source = script_source()
-    drawn = source[
-        source.index("async function buildWidget(") : source.index("function newWidget(")
-    ]
-    assert "footer(widget, data, result, true);" in drawn
-    assert 'family === "small" ? null' not in drawn
-    assert "isAccessory ? staleNote(result) : null" in drawn
+def test_nothing_is_drawn_under_the_flights() -> None:
+    """Three lines have stood under the list and all three are gone.
 
+    The clock its times were on, the moment the data was fetched, and the reason the
+    server gave for its own data being behind. Each was true; none of them was what a
+    widget is picked up for. The last to go was the strongest - the degraded reason says
+    the numbers may be behind, which the numbers cannot show for themselves - and it
+    still went, because it stood on every draw of a widget whose numbers are almost
+    always fine, and the height it stood in belongs to a size that fits its rows within
+    a point or two.
 
-def test_the_footer_states_the_time_it_was_fetched_at() -> None:
-    """A widget is redrawn a few times an hour, so "4 min ago" written at draw time is
-    the one figure on screen guaranteed to be wrong by the time anybody reads it, and
-    wrong in the flattering direction. The time it was fetched at is simply a fact, and
-    stays one for as long as iOS leaves the widget alone.
-
-    "Cached" rather than "Last updated" when the server could not be reached, because
-    then the time is when a file on the phone was written rather than when a server
-    last spoke.
+    What is left under the last flight is the widget's own inset. The board is a tap
+    away and has room to say the rest properly.
     """
-    source = script_source()
-    line = source[source.index("function updatedLine(") : source.index("function footerSize(")]
-    assert '"Last updated"' in line and '"Cached"' in line
-    assert "timeOfDay(result.fetchedAt)" in line
-    assert "applyTimerStyle" not in line
-    # Drawn from when the data landed, which is the fetch when there was one and the
-    # cache file's own date when the server could not be reached.
-    assert "result.fetchedAt" in line
-    assert (
-        "new Date()"
-        in source[source.index("async function load(") : source.index("async function request(")]
+    code = "\n".join(
+        line for line in script_source().splitlines() if not line.lstrip().startswith("//")
     )
+    for gone in (
+        "Last updated",
+        "Cached",
+        "degraded",
+        "footer",
+        "updatedLine",
+        "staleNote",
+        "timeOfDay",
+        "fetchedAt",
+    ):
+        assert gone not in code, gone
 
 
-def test_the_footer_holds_the_stamp_and_the_note_apart() -> None:
-    """One phrase against each edge, the way the rows above it are held apart: when the
-    data landed at the near end, and at the far one the thing every time above it has in
-    common. On a 155pt square there is no width for two phrases held apart, so there they
-    are one phrase with both halves said as shortly as they can be."""
+def test_the_cache_keeps_no_date_now_that_nothing_reads_one() -> None:
+    """`stale` is all that is left of where the flights came from: the lock screen's dot,
+    and the guard that keeps a reload which never reached the server from replacing the
+    script with a copy it did not fetch. Nothing draws the age, so nothing reads the
+    cache file's modification time."""
     source = script_source()
-    line = source[source.index("function updatedLine(") : source.index("function footerSize(")]
-    assert "line.addSpacer();" in line
-    assert "line.addText(CLOCK_NOTE)" in line
-    assert "CLOCK_NOTE_SHORT" in line
-    assert 'const CLOCK_NOTE_SHORT = "your clock";' in source
-    # The reason above it is part of the same block and centred with it: a sentence
-    # starting where the flights start reads as one more row of the list.
-    footer = source[source.index("function footer(") : source.index("function updatedLine(")]
-    assert "text.centerAlignText();" in footer
-
-
-def test_a_widget_with_no_flights_on_it_claims_no_clock() -> None:
-    """The note is about the times on the widget. With no flights there are none of them,
-    and a line explaining which clock nothing is on is a line that has to be read."""
-    source = script_source()
-    drawn = source[
-        source.index("async function buildWidget(") : source.index("function newWidget(")
-    ]
-    assert "footer(widget, data, result, false);" in drawn
+    read = source[source.index("function readCache(") : source.index("// Each carrier's mark")]
+    assert "return JSON.parse(fm.readString(path));" in read
+    assert "modificationDate" not in source
+    load = source[source.index("async function load(") : source.index("async function request(")]
+    assert load.count("stale: true") == 1
+    assert "new Date()" not in load
 
 
 def test_the_lock_screen_gives_the_rung_its_own_line() -> None:
