@@ -226,6 +226,19 @@
     }
   }
 
+  /* A shade over the button's own 1rem: the buttons are wide enough for a thumb, and a
+     glyph drawn to the full width of one reads as a slab rather than as a sign.
+
+     The size is set here rather than by a utility on each <svg>, because a size- class
+     on the mark also switches off the button's own rule for it. That leaves the utility
+     as the only thing holding the glyph up, and a stylesheet the cache has held back
+     doesn't carry it: the mark is left with a viewBox and no size, which Chrome stretches
+     to fill the button and Safari does not draw at all. With no class on the mark the
+     button's rule is still standing, so the worst a stale sheet does is a shade small. */
+  .topbar .btn svg:not([class*='size-']) {
+    @apply size-4.5;
+  }
+
   /* The mark: the name with the flight drawn straight through it. The line behind the
      aircraft has been flown, the one dash ahead of it has not - the figure the app icon
      carries, with the word standing where its runway was.
