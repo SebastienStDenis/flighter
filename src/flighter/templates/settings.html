@@ -155,34 +155,16 @@
         <div class="fieldset gap-2 pe-7">
           {% for field in fields %}{{ stored(field) }}{% endfor %}
         </div>
-        {# Where the check and the cross stand once it is open, so the row of buttons is
-           in the same place whichever of the two the row is showing. Both rows end at
-           the card's right edge, and Edit is the one on the edge: it is what the row is
-           usually pressed for, and the save that replaces it lands under the same thumb.
+        {# Where Save and Cancel stand once it is open, so the row of buttons is in the
+           same place whichever of the two the row is showing. Both rows end at the
+           card's right edge, and Edit is the one on the edge: it is what the row is
+           usually pressed for, and the Save that replaces it lands under the same thumb.
            Remove sits to its left rather than under it, and is drawn here so the two
            line up; the form that actually posts it is below, outside this summary. #}
         <div class="mt-4 flex items-center justify-end gap-2">
-          {# The two of them are drawn as marks rather than words: what they do to an
-             account already connected is a pencil and a link cut, and a row that reads
-             as a sentence invites reading rather than pressing. The word is still there
-             for anything that speaks the page rather than showing it. #}
-          <button class="btn text-stop" data-variant="ghost" data-size="icon-sm" type="button"
-                  title="Remove" aria-label="Remove"
-                  onclick="removeAccount(event, '{{ key }}')">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M9 17H7A5 5 0 0 1 7 7"/><path d="M15 7h2a5 5 0 0 1 4 8"/>
-              <line x1="8" x2="12" y1="12" y2="12"/><line x1="2" x2="22" y1="2" y2="22"/>
-            </svg>
-          </button>
-          <span class="btn" data-variant="outline" data-size="icon-sm" title="Edit">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>
-              <path d="m15 5 4 4"/>
-            </svg>
-            <span class="sr-only">Edit</span>
-          </span>
+          <button class="btn text-stop" data-variant="ghost" data-size="sm" type="button"
+                  onclick="removeAccount(event, '{{ key }}')">Remove</button>
+          <span class="btn" data-variant="outline" data-size="sm">Edit</span>
         </div>
       </summary>
       <form method="post" action="/settings/credentials" data-save-scope>
@@ -190,26 +172,13 @@
         <fieldset class="fieldset gap-4">
           {% for field in fields %}{{ box(field, ready) }}{% endfor %}
         </fieldset>
-        {# The same two places the closed row ends on, holding the answers to it: the
-           cross where Remove was, the check under the pencil that opened this. Marks
-           rather than words for the same reason the row above uses them, and the words
-           are still on them for anything that speaks the page. #}
+        {# The same two places the closed row ends on, holding the answers to it:
+           Cancel where Remove was, Save under the Edit that opened this. #}
         <div class="mt-4 flex items-center gap-2">
           <p class="save-error min-w-0 flex-1 text-xs text-stop" role="alert"></p>
-          <button class="btn" data-variant="ghost" data-size="icon-sm" type="button"
-                  title="Cancel" aria-label="Cancel" onclick="cancelEdit(this)">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
-            </svg>
-          </button>
-          <button class="btn" data-save data-size="icon-sm" type="submit"
-                  title="Save" aria-label="Save">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M20 6 9 17l-5-5"/>
-            </svg>
-          </button>
+          <button class="btn" data-variant="ghost" data-size="sm" type="button"
+                  onclick="cancelEdit(this)">Cancel</button>
+          <button class="btn" data-save data-size="sm" type="submit">Save</button>
         </div>
       </form>
     </details>
@@ -461,29 +430,17 @@
                 <span class="min-w-0 truncate font-mono text-sm text-muted-foreground">
                   {{- detected_base_url -}}</span>
                 {# Setting an address and changing one you set are the same act on the
-                   same box, so they are the same pencil; what differs is only what it
-                   is called for anything that speaks the page. Reset is an undo: it
-                   hands the address back to whatever the app was last opened on, and
-                   it stands to the left of the pencil the way Remove does on a
-                   connection - the mark on the edge is the one the row is for. #}
+                   same box, so they are the same button; what differs is only the word
+                   on it. Reset is an undo: it hands the address back to whatever the app
+                   was last opened on, and it stands to the left of Edit the way Remove
+                   does on a connection - the one on the edge is the one the row is
+                   usually pressed for. #}
                 <span class="flex shrink-0 gap-2">
-                  <button class="btn" data-variant="ghost" data-size="icon-sm" type="button"
-                          id="address-reset" onclick="resetAddress(event)"
-                          title="Reset" aria-label="Reset"{{ ' hidden' if not manual }}>
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                      <path d="M9 14 4 9l5-5"/>
-                      <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11"/>
-                    </svg>
-                  </button>
-                  <span class="btn" data-variant="outline" data-size="icon-sm"
-                        id="address-edit" title="{{ 'Edit' if manual else 'Override' }}">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                      <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>
-                      <path d="m15 5 4 4"/>
-                    </svg>
-                    <span class="sr-only" id="address-edit-label">
+                  <button class="btn" data-variant="ghost" data-size="sm" type="button"
+                          id="address-reset"
+                          onclick="resetAddress(event)"{{ ' hidden' if not manual }}>Reset</button>
+                  <span class="btn" data-variant="outline" data-size="sm" id="address-edit">
+                    <span id="address-edit-label">
                       {{- 'Edit' if manual else 'Override' -}}</span>
                   </span>
                 </span>
@@ -498,23 +455,13 @@
                    autocapitalize="off" autocorrect="off" spellcheck="false"
                    placeholder="{{ auto_base_url }}"
                    value="{{ posted['public_base_url'] }}">
-            {# Under the reset and the pencil that opened it, in their order: the check
-               is what the pencil becomes, so it ends where the pencil ended. #}
+            {# Under the Reset and the Edit that opened it, in their order: Save is what
+               Edit becomes, so it ends where Edit ended. #}
             <div class="mt-3 flex items-center justify-end gap-2">
-              <button class="btn" data-variant="ghost" data-size="icon-sm" type="button"
-                      title="Cancel" aria-label="Cancel" onclick="cancelField(this)">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
-                </svg>
-              </button>
-              <button class="btn" data-save data-size="icon-sm" type="button"
-                      title="Save" aria-label="Save" onclick="saveField(this)">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M20 6 9 17l-5-5"/>
-                </svg>
-              </button>
+              <button class="btn" data-variant="ghost" data-size="sm" type="button"
+                      onclick="cancelField(this)">Cancel</button>
+              <button class="btn" data-save data-size="sm" type="button"
+                      onclick="saveField(this)">Save</button>
             </div>
           </details>
           {# What it is for holds either way; where it came from is only worth saying
@@ -810,10 +757,8 @@
     box.closest("details").querySelector("summary .font-mono").textContent = manual
       ? box.value
       : box.placeholder;
-    // The mark is a pencil either way; the word behind it is what changes.
-    var label = manual ? "Edit" : "Override";
-    document.getElementById("address-edit-label").textContent = label;
-    document.getElementById("address-edit").title = label;
+    // The button is the same button either way; the word on it is what changes.
+    document.getElementById("address-edit-label").textContent = manual ? "Edit" : "Override";
     document.getElementById("address-reset").hidden = !manual;
     document.querySelector('#url-help [data-when="auto"]').hidden = manual;
   }
