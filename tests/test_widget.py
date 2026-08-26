@@ -15,7 +15,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from flighter import prefs, views, widget
-from flighter.aeroapi import BREAKER_KEY, month_key
 from flighter.config import Settings, get_settings
 from flighter.db import get_session
 from flighter.models import KV, Airport, Booking, BookingStatus, FlightSnapshot
@@ -26,7 +25,6 @@ from flighter.widget import (
     build_payload,
     connect_url,
     last_seen,
-    read_degraded,
     script_body,
     script_source,
 )
@@ -978,77 +976,19 @@ def test_no_flights(settings: Settings) -> None:
     body = payload([], settings)
     assert body["flights"] == []
     assert body["refresh_seconds"] == 900
-    assert body["degraded"] is False
 
 
-# --- degraded -------------------------------------------------------------------------
+def test_the_payload_says_nothing_about_its_own_health() -> None:
+    """`degraded` and `degraded_reason` are gone from it.
 
-
-class FakeBudgetSession:
-    """Just enough of AsyncSession for aeroapi.budget_status; no database anywhere."""
-
-    def __init__(self, *, spend: str = "0", latch: KV | None = None) -> None:
-        self._spend = spend
-        self._latch = latch
-
-    async def scalar(self, statement: Any) -> str:
-        return self._spend
-
-    async def get(self, model: Any, key: Any) -> KV | None:
-        return self._latch
-
-
-def latch(month: datetime) -> KV:
-    return KV(
-        key=BREAKER_KEY,
-        value={"month": month_key(month), "spend_usd": "4.01", "cap_usd": "4.00"},
-    )
-
-
-async def test_degraded_when_the_breaker_latch_is_present() -> None:
-    session = FakeBudgetSession(latch=latch(datetime.now(UTC)))
-    reason = await read_degraded(session)  # type: ignore[arg-type]
-    assert reason is not None and "AeroAPI budget" in reason
-
-
-async def test_a_latch_from_last_month_is_not_degraded() -> None:
-    """The latch is month-scoped, so it unlatches on its own on the 1st."""
-    session = FakeBudgetSession(latch=latch(datetime.now(UTC) - timedelta(days=40)))
-    assert await read_degraded(session) is None  # type: ignore[arg-type]
-
-
-async def test_no_latch_is_not_degraded() -> None:
-    assert await read_degraded(FakeBudgetSession()) is None  # type: ignore[arg-type]
-
-
-def test_a_stale_snapshot_on_a_close_flight_degrades(settings: Settings) -> None:
-    stale = snapshot(scheduled_out=DEPARTURE, observed_at=NOW - timedelta(minutes=95))
-    body = payload([(booking(), stale)], settings)
-    assert body["degraded"] is True
-    assert body["degraded_reason"] == "No status update in 95 min"
-
-
-def test_a_recent_snapshot_does_not_degrade(settings: Settings) -> None:
-    fresh = snapshot(scheduled_out=DEPARTURE, observed_at=NOW - timedelta(minutes=9))
-    assert payload([(booking(), fresh)], settings)["degraded"] is False
-
-
-def test_a_stale_snapshot_on_a_distant_flight_does_not_degrade(settings: Settings) -> None:
-    """A flight days out is polled every few hours by design."""
-    far = booking(scheduled_departure_utc=NOW + timedelta(days=6))
-    old = snapshot(scheduled_out=NOW + timedelta(days=6), observed_at=NOW - timedelta(hours=5))
-    assert payload([(far, old)], settings)["degraded"] is False
-
-
-def test_a_never_polled_flight_does_not_degrade(settings: Settings) -> None:
-    assert payload([(booking(), None)], settings)["degraded"] is False
-
-
-def test_the_breaker_outranks_staleness(settings: Settings) -> None:
-    stale = snapshot(scheduled_out=DEPARTURE, observed_at=NOW - timedelta(minutes=95))
-    body = payload([(booking(), stale)], settings, degraded_reason="Cap hit")
-    assert body["degraded"] is True
-    assert body["degraded_reason"] == "Cap hit"
+    They were read by one line at the foot of the widget, and that line is gone. The
+    board still carries the banner - it reads the breaker straight from `budget_status`,
+    which is where the latch lives - so nothing is lost by the phone not being told
+    twice, and the staleness sentence the widget worked out for itself goes with them:
+    it was never anything but a second opinion on what the board already says.
+    """
+    fields = set(widget.WidgetPayload.model_fields)
+    assert fields == {"flights", "board_url", "refresh_seconds"}
 
 
 # --- auth -----------------------------------------------------------------------------
@@ -1073,11 +1013,7 @@ def client(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     async def fake_rows(session: Any, now: datetime) -> list[FlightRow]:
         return [(booking(), snapshot(gate_origin="B22", terminal_origin="4"))]
 
-    async def fake_degraded(session: Any) -> str | None:
-        return None
-
     monkeypatch.setattr(widget, "load_flight_rows", fake_rows)
-    monkeypatch.setattr(widget, "read_degraded", fake_degraded)
 
     session = FakeSession()
 

@@ -279,7 +279,9 @@ gave for its own data being behind - the AeroAPI budget breaker tripped, or poll
 stalled - which was the strongest of the three, because it says something the numbers
 cannot show for themselves, and which still went: it stood on every draw of a widget
 whose numbers are almost always fine, and it stood in height that belongs to a size
-fitting its rows within a point or two.
+fitting its rows within a point or two. The board carries that banner, and reads the
+breaker straight from the latch, so nothing is lost by the phone not being told twice;
+the payload no longer carries `degraded` or `degraded_reason` at all.
 
 A cache is no longer dated either. The Lock Screen still marks a cached reading with a
 `·` after the heading, which costs no line and no height, and that is the whole of what
