@@ -1455,7 +1455,7 @@ def test_the_wide_sizes_draw_every_row_at_one_size() -> None:
     source = script_source()
     for drawn in (
         source[source.index("function targetLabel(") : source.index("// The other half")],
-        source[source.index("function pill(") : source.index("// The bottom of the widget")],
+        source[source.index("function pill(") : source.index("// Nothing is drawn under")],
     ):
         assert "minimumScaleFactor" in drawn
         assert 'if (family === "small") {' in drawn
@@ -1524,40 +1524,48 @@ def test_the_route_is_set_rather_than_left_to_fit() -> None:
     assert "Font.regularMonospacedSystemFont(TYPE.route)" in source
 
 
-def test_no_size_dates_what_it_is_showing() -> None:
-    """The footer is gone, stamp and all.
+def test_nothing_is_drawn_under_the_flights() -> None:
+    """Three lines have stood under the list and all three are gone.
 
-    "Last updated 04:12" is a fact about the phone rather than about the flights, and the
-    widget is looked at for the flights. It went the way the clock note before it went:
-    the room a line costs is worth more to the list above it than the line was to anyone
-    reading it. What is left under the flights is the reason they might be wrong, on the
-    rare draw when there is one.
+    The clock its times were on, the moment the data was fetched, and the reason the
+    server gave for its own data being behind. Each was true; none of them was what a
+    widget is picked up for. The last to go was the strongest - the degraded reason says
+    the numbers may be behind, which the numbers cannot show for themselves - and it
+    still went, because it stood on every draw of a widget whose numbers are almost
+    always fine, and the height it stood in belongs to a size that fits its rows within
+    a point or two.
+
+    What is left under the last flight is the widget's own inset. The board is a tap
+    away and has room to say the rest properly.
     """
     code = "\n".join(
         line for line in script_source().splitlines() if not line.lstrip().startswith("//")
     )
-    for gone in ("Last updated", "Updated ", "updatedLine", "footer("):
+    for gone in (
+        "Last updated",
+        "Cached",
+        "degraded",
+        "footer",
+        "updatedLine",
+        "staleNote",
+        "timeOfDay",
+        "fetchedAt",
+    ):
         assert gone not in code, gone
-    # The lock screen is the one size that still says so, in the one line it has for it.
-    assert 'return result.fetchedAt ? `Cached ${timeOfDay(result.fetchedAt)}` : "Cached";' in code
 
 
-def test_the_reason_the_numbers_might_be_wrong_outlives_the_footer() -> None:
-    """A budget breaker or a stalled poller is the one thing under the list worth a line:
-    it is about the flights rather than about the fetch, and it is drawn on the rare draw
-    when there is one rather than on every draw. Centred, and held off the last row by a
-    fixed distance, so the note keeps the same air under a list of two flights and a list
-    of seven."""
+def test_the_cache_keeps_no_date_now_that_nothing_reads_one() -> None:
+    """`stale` is all that is left of where the flights came from: the lock screen's dot,
+    and the guard that keeps a reload which never reached the server from replacing the
+    script with a copy it did not fetch. Nothing draws the age, so nothing reads the
+    cache file's modification time."""
     source = script_source()
-    note = source[source.index("function degradedLine(") : source.index("function footerSize(")]
-    assert "if (!data.degraded) {" in note
-    assert "widget.addSpacer(BETWEEN_RUNS);" in note
-    assert "text.centerAlignText();" in note
-    drawn = source[
-        source.index("async function buildWidget(") : source.index("function newWidget(")
-    ]
-    assert drawn.count("degradedLine(widget, data);") == 2
-    assert "isAccessory ? staleNote(result) : null" in drawn
+    read = source[source.index("function readCache(") : source.index("// Each carrier's mark")]
+    assert "return JSON.parse(fm.readString(path));" in read
+    assert "modificationDate" not in source
+    load = source[source.index("async function load(") : source.index("async function request(")]
+    assert load.count("stale: true") == 1
+    assert "new Date()" not in load
 
 
 def test_the_lock_screen_gives_the_rung_its_own_line() -> None:

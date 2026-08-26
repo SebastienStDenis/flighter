@@ -213,8 +213,8 @@ which is the only clock the reader has to read it on, and a zone after a time th
 already theirs is a thing to read and then discount.
 
 The foot of the widget used to say so - `Times on your phone's clock`, and on the square
-a shortening of it sharing the line with the timestamp. It is gone, and so is the
-timestamp under it: see [The bottom of the widget](#the-bottom-of-the-widget).
+a shortening of it sharing the line with the timestamp. Nothing is drawn under the
+flights now: see [The bottom of the widget](#the-bottom-of-the-widget).
 
 The day goes in front whenever the time is not today's **on the phone's clock**: `02:00`
 on its own reads as today's, and a flight leaving tomorrow morning would otherwise look
@@ -268,25 +268,29 @@ own polling cadence for the closest flight on the list.
 
 ### The bottom of the widget
 
-There is one line under the flights, and it is drawn on the rare widget that needs it:
-the reason the numbers might be wrong, when the server says its own data is degraded
-because the AeroAPI budget breaker tripped or polling has stalled. It is centred, and
-held off the last row by a fixed eight points, so it keeps the same air under a list of
-two flights and a list of seven.
+Nothing. The bottom of the widget is the last flight on it, and under that the same inset
+every other edge keeps.
 
-Everything else that used to live down there is gone. First the note naming the clock the
-times were on; then `Last updated 04:12` itself. A stamp saying the phone last heard from
-the server four minutes ago is a fact about the phone, and the widget is looked at for
-what the flights are doing. The reader who would want it is the one whose phone cannot
-reach the server at all - and for them the line said `Cached 04:12`, quietly, in the
-smallest type on the widget, which is not a way to make that case louder than the seven
-flights above it. The Lock Screen still says it, because the one line it has for a
-message is not spent on anything else: a cached reading there marks its heading with a
-`·`, and a cached empty list says `Cached 04:12` outright. A rejected token is the one
-failure that is never cached over, on any size: the widget says so in place of the
-flights, because no reload will fix it.
+Three lines have stood there and all three are gone. The note naming the clock the times
+were on: a time on a widget is read on the watch in the hand holding it, which is the
+only clock there is to read it on. `Last updated 04:12`: a fact about the phone, on a
+widget that is picked up to see what the flights are doing. And the reason the server
+gave for its own data being behind - the AeroAPI budget breaker tripped, or polling
+stalled - which was the strongest of the three, because it says something the numbers
+cannot show for themselves, and which still went: it stood on every draw of a widget
+whose numbers are almost always fine, and it stood in height that belongs to a size
+fitting its rows within a point or two.
+
+A cache is no longer dated either. The Lock Screen still marks a cached reading with a
+`·` after the heading, which costs no line and no height, and that is the whole of what
+the widget says about where its numbers came from. A rejected token is the exception on
+every size: the widget says so in place of the flights, because no reload will fix it and
+a widget quietly drawing last week's flights is worse than a widget saying it is stuck.
+
+What the widget does not have room to say properly, the board says: it is one tap away
+from every size, and the tap targets are the flights themselves.
 
 None of this bought another flight, on any size. The note never had a line of its own -
-it shared one with the stamp - and the stamp's line, the whole of it, is twelve points.
-A row is a shade under 36 before the gap above it. What the twelve points bought is the
-gap between two flights, which is where they went.
+it shared one with the stamp - and a line down there, the whole of it, is twelve points
+against a row's shade under 36 before the gap above it. What the room bought is the gap
+between two flights, which is where it went.

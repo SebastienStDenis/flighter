@@ -177,34 +177,28 @@ function connect() {
   return null;
 }
 
-// `fetchedAt` is the moment the flights being drawn came from: now when the server
-// answered, and the age of the cache when it did not. The lock screen dates its cache
-// with it; the home screen sizes mark theirs no way at all.
+// `stale` is all that is kept about where the flights came from. Nothing dates the cache
+// any more - no size draws the date - so the file's own modification time is not read,
+// and what the flag is still good for is the lock screen's dot and holding the script
+// back from replacing itself on a reload that never reached the server.
 async function load(server) {
   try {
     const data = await request(server);
     writeCache(data);
-    return { data, stale: false, fetchedAt: new Date(), rejected: false, error: null };
+    return { data, stale: false, rejected: false, error: null };
   } catch (error) {
-    // Not the cache: yesterday's flights with a small "Cached" mark would hide that the
+    // Not the cache: yesterday's flights with a small mark on them would hide that the
     // token is wrong, and that is the one failure a reload never fixes.
     if (error instanceof TokenRejected) {
-      return { data: null, stale: false, fetchedAt: null, rejected: true, error: null };
+      return { data: null, stale: false, rejected: true, error: null };
     }
-    // A stale widget beats a blank one. The flight has almost certainly not changed,
-    // and the lock screen marks its heading with a dot to say the reading is the
-    // cache's.
+    // A stale widget beats a blank one. The flight has almost certainly not changed, and
+    // the lock screen marks its heading with a dot to say the reading is the cache's.
     const cached = readCache();
     if (cached) {
-      return { data: cached.data, stale: true, fetchedAt: cached.cachedAt, rejected: false, error: null };
+      return { data: cached, stale: true, rejected: false, error: null };
     }
-    return {
-      data: null,
-      stale: false,
-      fetchedAt: null,
-      rejected: false,
-      error: String(error.message || error),
-    };
+    return { data: null, stale: false, rejected: false, error: String(error.message || error) };
   }
 }
 
@@ -297,7 +291,7 @@ function readCache() {
     return null;
   }
   try {
-    return { data: JSON.parse(fm.readString(path)), cachedAt: fm.modificationDate(path) };
+    return JSON.parse(fm.readString(path));
   } catch (error) {
     console.warn(`could not read cache: ${error}`);
     return null;
@@ -355,12 +349,7 @@ async function buildWidget(result) {
   scheduleRefresh(widget, data);
 
   if (flights.length === 0) {
-    // The lock screen has no room for a line under the message, so there the age goes in
-    // the message itself.
-    message(widget, "No upcoming flights", isAccessory ? staleNote(result) : null);
-    if (!isAccessory) {
-      degradedLine(widget, data);
-    }
+    message(widget, "No upcoming flights");
     return widget;
   }
 
@@ -376,7 +365,6 @@ async function buildWidget(result) {
   } else {
     renderList(widget, flights, logos);
   }
-  degradedLine(widget, data);
   return widget;
 }
 
@@ -764,38 +752,17 @@ function pill(container, flight) {
   return badge;
 }
 
-// The bottom of the widget, and the only thing left down there: why the numbers might be
-// wrong, on the rare draw when there is a reason. It is drawn last so it reads as a note
-// under the list rather than as one more row of it.
+// Nothing is drawn under the flights. Three lines have stood there and all three are
+// gone: the clock the times were on, the moment the data was fetched, and the reason the
+// server gave for its own data being behind. Each was true and none of them was what the
+// widget is picked up for, which is what the flights are doing - and each was paid for
+// out of the same purse, the height of a size that fits its rows within a point or two.
+// The last of them, the degraded reason, was the strongest of the three and still went:
+// it says the numbers may be behind, which the numbers themselves cannot show, but it
+// said it on every draw of a widget whose numbers are almost always fine.
 //
-// The line under it used to say when the data was fetched - "Last updated 04:12" - and
-// before that the clock its times were on. Both were answers to questions the reader was
-// not asking. A widget is looked at for what the flights are doing, and a stamp saying
-// the phone last spoke to the server four minutes ago is a fact about the phone; the one
-// case where the reader would want it is the one where the server could not be reached
-// at all, and the widget has no way to make that case louder than the flights anyway.
-// What was spent on saying it is now spent on the flights themselves.
-function degradedLine(widget, data) {
-  if (!data.degraded) {
-    return;
-  }
-  // Held off the last row by a fixed distance rather than by whatever is going spare:
-  // the gaps above it are the ones that give, so the note keeps the same air under the
-  // list however many flights the list has.
-  widget.addSpacer(BETWEEN_RUNS);
-  const text = widget.addText(data.degraded_reason || "Status may be out of date");
-  text.font = Font.systemFont(footerSize());
-  text.textColor = MUTED;
-  // Centred, so it reads as a note about the widget rather than as a sentence starting
-  // where the flights start.
-  text.centerAlignText();
-  text.lineLimit = 1;
-  text.minimumScaleFactor = 0.7;
-}
-
-function footerSize() {
-  return family === "small" ? 9 : 10;
-}
+// So the bottom of the widget is the last flight on it. What is left of the cache and
+// the breaker is on the board, a tap away, where there is room to say it properly.
 
 function message(widget, headline, detail) {
   widget.addSpacer();
@@ -873,15 +840,6 @@ function hsl(hue, saturation, lightness) {
   return `#${channels.join("")}`;
 }
 
-// The lock screen's way of saying the reading is the cache's, squeezed into the one line
-// a message has.
-function staleNote(result) {
-  if (!result.stale) {
-    return null;
-  }
-  return result.fetchedAt ? `Cached ${timeOfDay(result.fetchedAt)}` : "Cached";
-}
-
 // The IANA name of the zone the phone is set to, or nothing if it will not say, which
 // the server reads as "use the airport's clock".
 function timeZone() {
@@ -891,13 +849,6 @@ function timeZone() {
     console.warn(`could not read the time zone: ${error}`);
     return "";
   }
-}
-
-function timeOfDay(date) {
-  const formatter = new DateFormatter();
-  formatter.useNoDateStyle();
-  formatter.useShortTimeStyle();
-  return formatter.string(date);
 }
 
 async function present(widget) {
