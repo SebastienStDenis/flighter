@@ -12,6 +12,7 @@ default in the same breath.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any, Final
@@ -25,6 +26,10 @@ from .models import KV, Preferences
 SINGLETON_ID = 1
 
 LAST_SEEN_ORIGIN_KEY: Final = "last_seen_origin"
+
+# What counts as already having a scheme in front of it, spelled as the URL standard
+# spells it rather than as "starts with http".
+_SCHEME: Final = re.compile(r"[a-z][a-z0-9+.-]*://", re.IGNORECASE)
 
 
 class Prefs(BaseModel):
@@ -80,10 +85,21 @@ class Prefs(BaseModel):
     notify_for_friend_flights: bool = False
     show_friend_flights_in_widget: bool = False
 
+    # The scheme is the part of an address nobody types, and refusing one for the want
+    # of it was the page's only piece of arithmetic about what an address is - a check
+    # that turned "192.168.1.20:8000" away while letting "flighter.local:8000" through
+    # to be stored as a link nothing can follow, because a browser reads the host in
+    # front of that colon as a scheme. So it is put on rather than asked for: plain http
+    # for a bare host, which is what a box on the LAN or the tailnet is served over and
+    # what this field's own default already says. Anything that arrives with a scheme
+    # keeps the one it arrived with.
     @field_validator("public_base_url")
     @classmethod
-    def _strip_trailing_slash(cls, value: str) -> str:
-        return value.rstrip("/")
+    def _absolute(cls, value: str) -> str:
+        value = value.strip().rstrip("/")
+        if value and not _SCHEME.match(value):
+            value = f"http://{value}"
+        return value
 
     @field_validator("imap_flag_colour")
     @classmethod

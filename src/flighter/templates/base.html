@@ -27,10 +27,13 @@
 {% set board = here == '/' or flight_page %}
 <header class="sticky top-0 z-20 border-b bg-background/85 backdrop-blur"
         style="padding-top: env(safe-area-inset-top)">
+  {# The bar is h-14 whatever is in it, and what is in it is as big as that leaves room
+     for: the marks were reading small inside a wide band of nothing, so the band went
+     into them rather than the bar growing to fit. #}
   <nav class="mx-auto flex h-14 max-w-lg items-center gap-1 px-3" aria-label="Sections">
     {# Which app this is, on every page. A page one level down draws its own way back up
        in its own content, rather than taking this away to make room for it. #}
-    <a class="btn" data-size="sm" href="/"
+    <a class="btn text-xl" data-size="lg" href="/"
        data-variant="{{ 'secondary' if board else 'ghost' }}"
        {% if board %}aria-current="page"{% endif %}>
       <span class="brand">
@@ -48,11 +51,11 @@
     {# The box it opens is drawn at the end of every page, so the + opens it where it is
        pressed rather than going anywhere. The address is what a browser with no script
        follows, and what it draws is the board with that box standing open on it. #}
-    <a class="btn ml-auto" data-size="icon-sm" href="/f/new" aria-label="Add a flight"
+    <a class="btn ml-auto" data-size="icon-lg" href="/f/new" aria-label="Add a flight"
        data-variant="{{ 'secondary' if here == '/f/new' else 'ghost' }}"
        {% if here == '/f/new' %}aria-current="page"{% endif %}
        onclick="openAdd(event)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M5 12h14M12 5v14"/>
       </svg>
@@ -61,11 +64,11 @@
        says whether anything behind it is waiting on a person. The envelope carries that
        mark itself rather than standing next to a second glyph: two icons in one button
        is a button with two meanings, and the one that matters is still Email. #}
-    <a class="btn" data-size="icon-sm" href="/mail" aria-label="Email"
+    <a class="btn" data-size="icon-lg" href="/mail" aria-label="Email"
        data-variant="{{ 'secondary' if mail else 'ghost' }}"
        {% if mail %}aria-current="page"{% endif %}>
       {% if problems %}
-      <svg class="text-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      <svg class="size-5 text-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M22 10.5V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h12.5"/>
         <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
@@ -73,17 +76,17 @@
       </svg>
       <span class="sr-only">{{ problems }} waiting</span>
       {% else %}
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <rect width="20" height="16" x="2" y="4" rx="2"/>
         <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
       </svg>
       {% endif %}
     </a>
-    <a class="btn" data-size="icon-sm" href="/settings" aria-label="Settings"
+    <a class="btn" data-size="icon-lg" href="/settings" aria-label="Settings"
        data-variant="{{ 'secondary' if here.startswith('/settings') else 'ghost' }}"
        {% if here.startswith('/settings') %}aria-current="page"{% endif %}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/>
         <circle cx="12" cy="12" r="3"/>

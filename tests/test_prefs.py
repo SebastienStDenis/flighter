@@ -86,6 +86,23 @@ async def test_a_trailing_slash_never_reaches_a_generated_link() -> None:
     assert saved.public_base_url == "https://flighter.tailnet.ts.net"
 
 
+async def test_an_address_typed_without_a_scheme_is_given_one() -> None:
+    """A machine on the LAN is named rather than spelled out, and what is generated from
+    the name has to be a link: bare host, host and port, and the colon that reads as a
+    scheme to a URL parser all come out as http."""
+    session = FakeSession()
+    for typed in ("flighter.local", "192.168.1.20:8000", "flighter.local:8000"):
+        saved = await prefs.save(session, {"public_base_url": typed})  # type: ignore[arg-type]
+        assert saved.public_base_url == f"http://{typed}"
+
+
+async def test_an_address_that_names_its_scheme_keeps_it() -> None:
+    session = FakeSession()
+    for typed in ("https://flights.example.com", "http://192.168.1.20:8000"):
+        saved = await prefs.save(session, {"public_base_url": typed})  # type: ignore[arg-type]
+        assert saved.public_base_url == typed
+
+
 def test_an_unsaved_address_gives_way_to_the_one_the_request_came_in_on(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
