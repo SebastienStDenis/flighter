@@ -594,10 +594,10 @@ def _terminal(value: str | None) -> str | None:
 def _stated(instant: datetime, now: datetime, origin_tz: str, viewer_tz: str | None) -> str:
     """A time on the clock in the reader's hand, and on no other.
 
-    The zone is not named with it. The clock it is read on is the one in the same hand,
-    and the widget's own footer says so once for every time on it. The day is named when
-    it is not today's, because a bare 04:50 read at ten in the evening is a time that
-    looks like it has gone.
+    The zone is not named with it. The clock it is read on is the one in the same hand -
+    the only clock the reader has to read it on - and a zone after a time that is already
+    theirs is a thing to read and then discount. The day is named when it is not today's,
+    because a bare 04:50 read at ten in the evening is a time that looks like it has gone.
 
     A phone that did not say where it is gets the airport's clock instead. It is the one
     reading here that is not the reader's own, and there is nothing better to draw.

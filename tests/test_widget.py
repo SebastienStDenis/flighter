@@ -649,8 +649,8 @@ def test_the_time_a_flight_is_due_is_on_the_phones_clock(settings: Settings) -> 
     Watching from Ottawa, a flight leaving Tokyo at 03:40 is due at 14:40 on the watch of
     the person reading it, and that is the figure. The airport's own reading of the same
     instant is not set beside it - a line with two times on it is a line that has to be
-    worked out rather than read - and the zone is not named either, because the widget's
-    footer says once that every time on it is on the clock in the same hand.
+    worked out rather than read - and the zone is not named either, because the clock it
+    is on is the clock in the same hand and no other clock is on offer.
     """
     flight = payload([tokyo_row()], settings, airports=AIRPORTS, viewer_tz=HOME)["flights"][0]
     assert target(flight) == ("Departs", "14:40")
@@ -748,14 +748,19 @@ def test_the_script_tells_the_server_which_size_is_asking() -> None:
     assert 'const family = config.widgetFamily || "medium";' in source
 
 
-def test_the_script_says_once_which_clock_the_times_are_on() -> None:
-    """No time on the widget carries a zone, so the footer carries it for all of them.
-
-    It cannot come from the payload: the server does not know whether the phone will be
-    drawing a widget with a footer or a lock screen without one.
-    """
-    source = script_source()
-    assert "Times on your phone's clock" in source
+def test_no_size_names_the_clock_its_times_are_on() -> None:
+    """The footer used to end with a note saying every time above it was on the phone's
+    own clock. A time on a widget is read on the watch in the hand holding it, which is
+    the only clock there is to read it on, so the note answered a question nobody had -
+    and it cost the square a phrase on the one line under its flights. The times are
+    unchanged; what is gone is the sentence about them."""
+    # What the widget draws rather than what the file says about itself: the comments
+    # explaining why the note went are allowed to name it.
+    code = "\n".join(
+        line for line in script_source().splitlines() if not line.lstrip().startswith("//")
+    )
+    for note in ("phone's clock", "your clock", "local to you", "CLOCK_NOTE"):
+        assert note not in code, note
 
 
 # --- instants -------------------------------------------------------------------------
@@ -1259,19 +1264,30 @@ def test_every_row_keeps_the_same_line_under_its_heading() -> None:
     assert "hasDetail" not in small
 
 
-def test_the_large_widget_spends_its_air_on_a_seventh_row() -> None:
-    """The one distance the two wide sizes do not share, and the tightest figure here.
+def test_the_gap_between_two_flights_is_what_the_size_has_left() -> None:
+    """Not a distance on any size now, the way it has never been one on the square.
 
     A row is a shade under 36 points - the heading, the line under it, and the three
-    between them - so seven of them, the gap between each pair, the footer and the
-    widget's own inset come to within a point or two of what a 6.1in phone's large
-    widget holds. Which is why the gap is a name rather than a bare number in the line
-    that draws it: it is the first figure to put back if a row is ever drawn clipped.
+    between them - and seven of them with a fixed nine between each pair, the footer and
+    the widget's own inset came to within a point or two of what a 6.1in phone's large
+    widget holds. Taking the footer out gives its twelve points back, which is a third of
+    a row and so buys no row anywhere; left as a fixed gap it would have pooled under the
+    last flight instead, and a column pinned to the top of a widget with room below it
+    reads as a widget that ran out of flights.
+
+    Shared between the gaps it comes to about twelve points on the large and eleven on
+    the medium - both wider than the fixed figures they replace, and neither of them
+    anywhere near a row, which is what keeps a break between two flights reading as a
+    break between two flights. It is also the figure that comes out right on a phone
+    that is not the 6.1in one the fixed gaps were measured on.
     """
     source = script_source()
-    assert "const LARGE_GAP = 9;" in source
+    assert "LARGE_GAP" not in source
     wide = source[source.index("function renderList(") : source.index("function titleRow(")]
-    assert 'widget.addSpacer(family === "large" ? LARGE_GAP : 8);' in wide
+    assert "widget.addSpacer();" in wide
+    assert "addSpacer(8)" not in wide and "addSpacer(9)" not in wide
+    # The one fixed distance left inside a row: the heading and the line under it.
+    assert "row.addSpacer(3);" in wide
 
 
 def test_the_time_is_the_weight_the_row_is_read_for() -> None:
@@ -1306,7 +1322,7 @@ def test_a_small_widget_holds_two_flights_of_three_lines() -> None:
     assert "targetValue(line, flight);" in drawn
     # Every line of a flight is the same distance under the one above it, and the only
     # wider gap is the one that separates two flights - which is no longer a distance at
-    # all, but whatever the square has left after the six lines and the footer.
+    # all, but everything the square has left once its six lines are drawn.
     assert drawn.count("widget.addSpacer(SMALL_GAP)") == 2
     assert "widget.addSpacer();" in drawn
     # And nothing on those lines carries air of its own inside that distance: a pill with
@@ -1321,7 +1337,9 @@ def test_the_small_widget_fills_its_square() -> None:
     footer, and the inset was cut to eleven points on the reading that a 155pt square
     holding six lines has nothing to spare. It has: the lines are the size they are, and
     what the square has left over is enough to stand the two blocks apart and still keep
-    the words the distance from the rounded corner that every other size gives them.
+    the words the distance from the rounded corner that every other size gives them. The
+    footer's own line is part of that room now, so they stand further apart than they did
+    - eleven points further, which is the line and the air it kept above itself.
     """
     source = script_source()
     assert "const INSET = 14;" in source
@@ -1506,67 +1524,40 @@ def test_the_route_is_set_rather_than_left_to_fit() -> None:
     assert "Font.regularMonospacedSystemFont(TYPE.route)" in source
 
 
-def test_every_home_screen_size_says_when_it_was_last_updated() -> None:
-    """Including the small one. Only the lock screen goes without, where three lines is
-    the whole widget and the age is said in the message instead."""
-    source = script_source()
-    drawn = source[
-        source.index("async function buildWidget(") : source.index("function newWidget(")
-    ]
-    assert "footer(widget, data, result, true);" in drawn
-    assert 'family === "small" ? null' not in drawn
-    assert "isAccessory ? staleNote(result) : null" in drawn
+def test_no_size_dates_what_it_is_showing() -> None:
+    """The footer is gone, stamp and all.
 
-
-def test_the_footer_states_the_time_it_was_fetched_at() -> None:
-    """A widget is redrawn a few times an hour, so "4 min ago" written at draw time is
-    the one figure on screen guaranteed to be wrong by the time anybody reads it, and
-    wrong in the flattering direction. The time it was fetched at is simply a fact, and
-    stays one for as long as iOS leaves the widget alone.
-
-    "Cached" rather than "Last updated" when the server could not be reached, because
-    then the time is when a file on the phone was written rather than when a server
-    last spoke.
+    "Last updated 04:12" is a fact about the phone rather than about the flights, and the
+    widget is looked at for the flights. It went the way the clock note before it went:
+    the room a line costs is worth more to the list above it than the line was to anyone
+    reading it. What is left under the flights is the reason they might be wrong, on the
+    rare draw when there is one.
     """
-    source = script_source()
-    line = source[source.index("function updatedLine(") : source.index("function footerSize(")]
-    assert '"Last updated"' in line and '"Cached"' in line
-    assert "timeOfDay(result.fetchedAt)" in line
-    assert "applyTimerStyle" not in line
-    # Drawn from when the data landed, which is the fetch when there was one and the
-    # cache file's own date when the server could not be reached.
-    assert "result.fetchedAt" in line
-    assert (
-        "new Date()"
-        in source[source.index("async function load(") : source.index("async function request(")]
+    code = "\n".join(
+        line for line in script_source().splitlines() if not line.lstrip().startswith("//")
     )
+    for gone in ("Last updated", "Updated ", "updatedLine", "footer("):
+        assert gone not in code, gone
+    # The lock screen is the one size that still says so, in the one line it has for it.
+    assert 'return result.fetchedAt ? `Cached ${timeOfDay(result.fetchedAt)}` : "Cached";' in code
 
 
-def test_the_footer_holds_the_stamp_and_the_note_apart() -> None:
-    """One phrase against each edge, the way the rows above it are held apart: when the
-    data landed at the near end, and at the far one the thing every time above it has in
-    common. On a 155pt square there is no width for two phrases held apart, so there they
-    are one phrase with both halves said as shortly as they can be."""
+def test_the_reason_the_numbers_might_be_wrong_outlives_the_footer() -> None:
+    """A budget breaker or a stalled poller is the one thing under the list worth a line:
+    it is about the flights rather than about the fetch, and it is drawn on the rare draw
+    when there is one rather than on every draw. Centred, and held off the last row by a
+    fixed distance, so the note keeps the same air under a list of two flights and a list
+    of seven."""
     source = script_source()
-    line = source[source.index("function updatedLine(") : source.index("function footerSize(")]
-    assert "line.addSpacer();" in line
-    assert "line.addText(CLOCK_NOTE)" in line
-    assert "CLOCK_NOTE_SHORT" in line
-    assert 'const CLOCK_NOTE_SHORT = "your clock";' in source
-    # The reason above it is part of the same block and centred with it: a sentence
-    # starting where the flights start reads as one more row of the list.
-    footer = source[source.index("function footer(") : source.index("function updatedLine(")]
-    assert "text.centerAlignText();" in footer
-
-
-def test_a_widget_with_no_flights_on_it_claims_no_clock() -> None:
-    """The note is about the times on the widget. With no flights there are none of them,
-    and a line explaining which clock nothing is on is a line that has to be read."""
-    source = script_source()
+    note = source[source.index("function degradedLine(") : source.index("function footerSize(")]
+    assert "if (!data.degraded) {" in note
+    assert "widget.addSpacer(BETWEEN_RUNS);" in note
+    assert "text.centerAlignText();" in note
     drawn = source[
         source.index("async function buildWidget(") : source.index("function newWidget(")
     ]
-    assert "footer(widget, data, result, false);" in drawn
+    assert drawn.count("degradedLine(widget, data);") == 2
+    assert "isAccessory ? staleNote(result) : null" in drawn
 
 
 def test_the_lock_screen_gives_the_rung_its_own_line() -> None:
