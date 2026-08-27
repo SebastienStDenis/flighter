@@ -96,11 +96,10 @@ What still gives on the small size is the pill and the rung beside it: the longe
 and the longest rung do not fit on one line of a 155pt square, and a word cut in half is
 worse read than a word read small.
 
-The small size draws its two flights as blocks of three lines, and what the square has
-left over once those six lines are drawn goes between the two blocks rather than under
-them: they stand apart and fill the widget instead of sitting pinned to the top of it.
-Its words keep the same distance from the rounded corner as every other size's, which
-they did not while the room was thought to be spare.
+The small size draws its two flights as blocks of three lines, starting at the top of the
+square, with what the square has left over once those six lines are drawn held under
+them. Its words keep the same distance from the rounded corner as every other size's,
+which they did not while the room was thought to be spare.
 
 The row is the board's card, narrowed. The pill is the card's pill, the places are the
 card's places and the end of the row is the card's footer, each drawn on exactly the
@@ -131,20 +130,28 @@ The gap between two rows is a fixed one, and a row that closed up its own spare 
 would sit nearer its neighbour than the rest of the column for no reason a reader could
 see.
 
-The gap between two rows is not a distance on any size. It is whatever the widget has
-left once its rows are drawn, shared equally between them, the way the square has always
-stood its two blocks apart.
+The gap between two rows is ten points, on every size and however many rows there are.
+The flights start at the top and what the widget has left over is held under the last of
+them.
 
-It used to be eight points on the medium and nine on the large, and the nine was the
-tightest figure in the layout: seven rows, six gaps, the footer and the widget's own
-inset came to within a point or two of what a 6.1in phone's large widget holds. With the
-footer gone there is room in that sum again - not a row's worth, but more than either
-gap was. Left fixed, the room would have pooled under the last flight, and a column
-pinned to the top of a widget with space below it reads as a widget that ran out of
-flights. Shared out, it comes to about twelve points on the large and eleven on the
-medium: wider than the fixed figures they replace, nowhere near a row, and right on a
-phone that is not the 6.1in one those figures were measured on - where a fixed gap left
-the bigger heap.
+It was the leftover room itself for a while, shared equally between the gaps, so the
+flights filled the widget edge to edge whatever their number. What that missed is that a
+widget is hardly ever holding as many flights as its size takes: the large draws seven
+and most weeks has two, and two flights sharing a large widget's leftovers stand one
+against the top edge and one against the bottom with half a widget of nothing between
+them - a gap saying how empty the widget is rather than where one flight ends and the
+next begins. It also moved. Book a third flight, or let the first one land and drop off
+the list, and every row was redrawn at a different pitch, so the same flights sat
+somewhere else from one reload to the next. A fixed gap keeps a break between two flights
+reading as one break, of one width, wherever the widget is in its week.
+
+Ten is what the tightest size holds. A row is a shade under 36 points - the heading, the
+line under it, and the three between them - so the large's seven rows and six gaps fit
+inside what a 6.1in phone's large widget holds, and the medium's three rows and two gaps
+come out as close to full as that size gets. It is the figure to cut first if a row ever
+comes out clipped. It is also one figure rather than the eight points the medium used to
+keep and the nine the large did: the same break, drawn the same width, on whichever size
+the reader is holding.
 
 The marks are `plane-takeoff`, `plane-landing` and `armchair` from Lucide, which is the
 icon set the web UI is drawn with, and they stand where TERM, GATE and SEAT used to. The
@@ -294,5 +301,5 @@ from every size, and the tap targets are the flights themselves.
 
 None of this bought another flight, on any size. The note never had a line of its own -
 it shared one with the stamp - and a line down there, the whole of it, is twelve points
-against a row's shade under 36 before the gap above it. What the room bought is the gap
-between two flights, which is where it went.
+against a row's shade under 36 before the gap above it. What the room bought is the air
+under the last flight, which is where a widget's spare height sits.
