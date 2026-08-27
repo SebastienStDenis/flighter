@@ -96,6 +96,32 @@ const BETWEEN_RUNS = 8;
 const SMALL_FLIGHTS = 2;
 const SMALL_GAP = 3;
 
+// What separates one flight from the next, on every size that draws more than one.
+//
+// It was not a distance at all for a while: whatever the widget had left once its rows
+// were drawn, shared equally between the gaps, so the flights filled the square and the
+// column edge to edge. What that missed is that a widget is hardly ever holding as many
+// flights as its size takes. The large size draws seven and most weeks has two, and two
+// flights sharing a large widget's leftovers stand one against the top edge and one
+// against the bottom with half a widget of nothing between them - a gap saying how empty
+// the widget was rather than where one flight ended and the next began. It also moved: a
+// third flight booked, or a first one landed and dropped off the list, redrew every row
+// at a different pitch, so the same flights sat in different places from one reload to
+// the next.
+//
+// So it is a fixed distance again, and what the widget has left over is held under the
+// last flight instead. The column starts at the top whatever the size and however many
+// flights are on it, the break between two flights is the same break on a widget holding
+// two as on one holding seven, and room that is not spoken for reads as what it is: a
+// widget with three flights on it has three flights on it.
+//
+// Ten points is what the tightest size holds. A row is a shade under 36 - the heading,
+// the line under it and the three between them - so the large's seven rows and six of
+// these gaps fit inside what a 6.1in phone's large widget holds, and the medium's three
+// rows and two of them come out as close to full as that size gets. It is the figure to
+// cut first if a row ever comes out clipped.
+const FLIGHT_GAP = 10;
+
 // What every size but the Lock Screen keeps between its words and its own edge. A widget
 // whose words start against its rounded corner reads as one that ran out of room,
 // whatever it is holding.
@@ -439,16 +465,12 @@ function renderSmall(widget, flights, logos, board) {
 
   flights.forEach((flight, index) => {
     if (index > 0) {
-      // The one distance here that is not SMALL_GAP, and the one that is not a distance
-      // at all: every line of a flight is the same three points under the line above it,
-      // so the only gap that reads as a break is the one between two flights, and that
-      // is the gap the square's spare height is handed to. It was six points with the
-      // rest of the room left in a heap under the second flight, which drew two blocks
-      // pinned to the top of a widget with space to give them. Given the room, the
-      // two blocks stand apart and the widget is filled by what is on it - and the
-      // footer's line is part of that room now, which is why they stand further apart
-      // than they did.
-      widget.addSpacer();
+      // The one distance here that is not SMALL_GAP: every line of a flight is the same
+      // three points under the line above it, so the only gap that reads as a break is
+      // the one between two flights, and this is it. It is the same figure the wide
+      // sizes keep between two rows, because a break between two flights is the same
+      // break whichever size is drawing it.
+      widget.addSpacer(FLIGHT_GAP);
     }
     // The number and the route on one line. The two do not fit at the size the rest of
     // this widget is read at, so the route is the half that gives: it shrinks against
@@ -478,26 +500,22 @@ function renderSmall(widget, flights, logos, board) {
     line.addSpacer();
     targetValue(line, flight);
   });
+
+  // And whatever is left over goes here, under the flights, rather than between them. A
+  // ListWidget centres what it holds when there is room to spare, so without this the
+  // square would sink its blocks towards the middle as soon as it had only one flight to
+  // draw.
+  widget.addSpacer();
 }
 
 function renderList(widget, flights, logos) {
   flights.forEach((flight, index) => {
     if (index > 0) {
-      // What separates one flight from the next: not a distance but whatever the size
-      // has left when its rows are drawn, shared equally between them - which is how the
-      // square has always stood its two blocks apart.
-      //
-      // It was eight points on the medium and nine on the large, and the nine was the
-      // tightest figure in the layout: seven rows, six gaps, the footer and the inset
-      // came to within a point or two of what a 6.1in phone's large widget holds. The
-      // footer is gone and the sum has room in it again - not a row's worth, a row being
-      // three times what that line was, but more than either gap. Left fixed, the room
-      // would have gone into a heap under the last flight, which is a column pinned to
-      // the top of a widget with space below it to give. Shared out, the large widget's
-      // gap comes to about twelve points and the medium's to about eleven: both wider
-      // than the figures they replace, both still narrower than a row, and both right on
-      // a bigger phone as well, where a fixed gap left the bigger heap.
-      widget.addSpacer();
+      // The same break the square keeps between its two blocks, and the same figure: a
+      // gap between two flights is a gap between two flights, and the medium and the
+      // large no longer set it eight points and nine apart for no reason a reader
+      // holding both could see.
+      widget.addSpacer(FLIGHT_GAP);
     }
     const row = widget.addStack();
     row.layoutVertically();
@@ -537,6 +555,11 @@ function renderList(widget, flights, logos) {
       targetValue(line, flight);
     }
   });
+
+  // The room the size has left when it is holding fewer flights than it takes - which is
+  // most of the time on the large. Held under the last row, so the first row is in the
+  // same place on a widget with two flights as on one with seven.
+  widget.addSpacer();
 }
 
 // The heading: whose flight it is where it is not the reader's own, the airline's mark

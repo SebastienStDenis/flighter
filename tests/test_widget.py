@@ -1200,30 +1200,37 @@ def test_every_row_keeps_the_same_line_under_its_heading() -> None:
     assert "hasDetail" not in small
 
 
-def test_the_gap_between_two_flights_is_what_the_size_has_left() -> None:
-    """Not a distance on any size now, the way it has never been one on the square.
+def test_the_gap_between_two_flights_is_one_fixed_distance_on_every_size() -> None:
+    """A widget is hardly ever holding as many flights as its size takes.
 
-    A row is a shade under 36 points - the heading, the line under it, and the three
-    between them - and seven of them with a fixed nine between each pair, the footer and
-    the widget's own inset came to within a point or two of what a 6.1in phone's large
-    widget holds. Taking the footer out gives its twelve points back, which is a third of
-    a row and so buys no row anywhere; left as a fixed gap it would have pooled under the
-    last flight instead, and a column pinned to the top of a widget with room below it
-    reads as a widget that ran out of flights.
+    The gap was the widget's own leftover room for a while, shared equally between the
+    rows, which filled every size edge to edge whatever it was drawing. The large size
+    takes seven flights and most weeks has two, and two flights sharing a large widget's
+    leftovers stand one against the top edge and one against the bottom with half a
+    widget of nothing between them - a gap that says how empty the widget is rather than
+    where one flight ends and the next begins. It moved as well: a third flight booked,
+    or a first one landed and dropped, redrew every row at a different pitch.
 
-    Shared between the gaps it comes to about twelve points on the large and eleven on
-    the medium - both wider than the fixed figures they replace, and neither of them
-    anywhere near a row, which is what keeps a break between two flights reading as a
-    break between two flights. It is also the figure that comes out right on a phone
-    that is not the 6.1in one the fixed gaps were measured on.
+    So the distance is fixed and the leftovers go under the last flight, where spare room
+    on a widget belongs. A row is a shade under 36 points - the heading, the line under
+    it, and the three between them - so the large's seven rows and six of these gaps fit
+    inside what a 6.1in phone's large widget holds, and the medium's three rows and two
+    gaps come out as close to full as that size gets. One figure rather than the medium's
+    eight points and the large's nine, because a break between two flights is the same
+    break whichever size draws it.
     """
     source = script_source()
     assert "LARGE_GAP" not in source
+    assert "const FLIGHT_GAP = 10;" in source
     wide = source[source.index("function renderList(") : source.index("function titleRow(")]
-    assert "widget.addSpacer();" in wide
+    assert "widget.addSpacer(FLIGHT_GAP);" in wide
     assert "addSpacer(8)" not in wide and "addSpacer(9)" not in wide
     # The one fixed distance left inside a row: the heading and the line under it.
     assert "row.addSpacer(3);" in wide
+    # And the flexible spacer is under the flights rather than between them, so a column
+    # of two starts where a column of seven starts.
+    assert wide.index("widget.addSpacer(FLIGHT_GAP);") < wide.index("widget.addSpacer();")
+    assert wide.count("widget.addSpacer();") == 1
 
 
 def test_the_time_is_the_weight_the_row_is_read_for() -> None:
@@ -1257,25 +1264,25 @@ def test_a_small_widget_holds_two_flights_of_three_lines() -> None:
     assert "detailText(line, flight);" in drawn
     assert "targetValue(line, flight);" in drawn
     # Every line of a flight is the same distance under the one above it, and the only
-    # wider gap is the one that separates two flights - which is no longer a distance at
-    # all, but everything the square has left once its six lines are drawn.
+    # wider gap is the one that separates two flights.
     assert drawn.count("widget.addSpacer(SMALL_GAP)") == 2
-    assert "widget.addSpacer();" in drawn
+    assert "widget.addSpacer(FLIGHT_GAP);" in drawn
     # And nothing on those lines carries air of its own inside that distance: a pill with
     # its own padding is a line held further from its neighbours than any other.
     assert 'const pad = family === "small" ? 0 : 2;' in source
 
 
-def test_the_small_widget_fills_its_square() -> None:
-    """Two blocks of three lines, and the room left over handed to the gap between them.
+def test_the_small_widget_starts_at_the_top_of_its_square() -> None:
+    """Two blocks of three lines from the top down, and the room left over under them.
 
-    The room used to be left where it fell, in a heap between the second flight and the
-    footer, and the inset was cut to eleven points on the reading that a 155pt square
-    holding six lines has nothing to spare. It has: the lines are the size they are, and
-    what the square has left over is enough to stand the two blocks apart and still keep
-    the words the distance from the rounded corner that every other size gives them. The
-    footer's own line is part of that room now, so they stand further apart than they did
-    - eleven points further, which is the line and the air it kept above itself.
+    The inset was cut to eleven points once, on the reading that a 155pt square holding
+    six lines has nothing to spare. It has: the lines are the size they are, and what the
+    square has left over is enough to keep the words the distance from the rounded corner
+    that every other size gives them and still have room under the second flight.
+
+    That room is held there rather than shared out. A ListWidget centres what it holds
+    when there is space to spare, so the trailing spacer is what pins the first flight to
+    the top of the square - on a square drawing one flight as much as on one drawing two.
     """
     source = script_source()
     assert "const INSET = 14;" in source
@@ -1283,8 +1290,11 @@ def test_the_small_widget_fills_its_square() -> None:
     # No size drawn tighter than the rest.
     assert 'family === "small" ? 11' not in source
     drawn = source[source.index("function renderSmall(") : source.index("function renderList(")]
-    assert "widget.addSpacer();" in drawn
     assert "SMALL_GAP * 2" not in drawn
+    # The one flexible spacer is the last thing on the square, under both blocks.
+    assert drawn.count("widget.addSpacer();") == 1
+    assert drawn.index("widget.addSpacer(FLIGHT_GAP);") < drawn.index("widget.addSpacer();")
+    assert drawn.rindex("widget.addSpacer();") > drawn.rindex("targetValue(line, flight);")
 
 
 def test_the_small_widget_draws_every_route_at_one_size() -> None:
