@@ -1119,6 +1119,9 @@
   // story: the note stays for what goes wrong, not for narrating what is going right.
   async function runUpdate(button) {
     setBusy(button, true);
+    // The refresh button rests while the update runs: the process that would answer
+    // its question is the one being replaced.
+    document.getElementById("update-check").disabled = true;
     updateNote("");
     try {
       var response = await fetch("/settings/update", {
@@ -1132,6 +1135,7 @@
       if (!answer.restarting) {
         updateNote(answer.detail || "Watchtower did not answer as expected.");
         setBusy(button, false);
+        document.getElementById("update-check").disabled = false;
         return;
       }
     } catch (error) {
@@ -1150,6 +1154,7 @@
       if (Date.now() > deadline) {
         updateNote("Still not back on a new build — check the Watchtower logs.");
         setBusy(button, false);
+        document.getElementById("update-check").disabled = false;
         return;
       }
       fetch("/settings/update/check?poll=1", {
