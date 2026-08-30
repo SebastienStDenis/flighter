@@ -35,8 +35,12 @@ Flighter never touches the Docker socket. Three small parts add up to the button
 
 ## Setting it up
 
+The app has to be running a published image for any of this to apply: a stack that builds
+its own, as the root `docker-compose.yml` does, has nothing to compare against and says so
+instead. `examples/tailscale/` runs the published image with Watchtower already wired.
+
 Run Watchtower in the same compose stack with its HTTP API on - the commented block in
-`docker-compose.yml` is a working example:
+the root `docker-compose.yml` is a working example:
 
 ```yaml
 watchtower:

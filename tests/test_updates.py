@@ -363,7 +363,8 @@ async def test_force_asks_the_registry_past_a_fresh_answer(
 
 def test_the_compose_example_and_the_default_image_agree() -> None:
     """The IMAGE constant is what the button updates; compose is what deploys it."""
-    compose = (Path(__file__).parents[1] / "docker-compose.yml").read_text()
+    root = Path(__file__).parents[1]
+    compose = (root / "examples" / "tailscale" / "docker-compose.yml").read_text()
     assert updates.parse_image(updates.IMAGE).name in compose
 
 

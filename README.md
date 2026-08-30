@@ -265,12 +265,14 @@ of around $5 per platform, with no subscription behind it.
 ```sh
 git clone https://github.com/sebastienstdenis/flighter
 cd flighter
-docker compose pull          # fetch the published image instead of compiling it here
-docker compose up -d
+docker compose up -d --build
 ```
 
 There is nothing to fill in first. That is the whole install: one container, one volume,
-one port. On first boot the app runs its own migrations, seeds the airport table with its
+one port. The stack compiles the image from the checkout it is in; to run the published
+one instead, `examples/tailscale/` does that.
+
+On first boot the app runs its own migrations, seeds the airport table with its
 timezones, generates the widget token, and starts serving on port 8000 of the host.
 
 The app has no login of its own. Anything that can reach the host on that port can read
@@ -323,18 +325,18 @@ an `environment:` block or a `.env` beside `docker-compose.yml`, using the names
 settings page wins over it from then on, and the file is optional, so a fresh clone
 without one starts fine.
 
-Pushing to `main` publishes a `linux/amd64` + `linux/arm64` image to
-`ghcr.io/sebastienstdenis/flighter:latest`, so updating the home stack is:
+Updating the stack above means rebuilding it:
 
 ```sh
-docker compose pull && docker compose up -d
+git pull && docker compose up -d --build
 ```
 
-The package inherits this repository's visibility, so it pulls anonymously with no
-`docker login` on the desktop. Publishing is gated behind a job that re-runs lint, types
-and tests, so a commit that fails CI never ships as `:latest`.
-
-To build locally instead of pulling, `docker compose build` still works from a checkout.
+Pushing to `main` also publishes a `linux/amd64` + `linux/arm64` image to
+`ghcr.io/sebastienstdenis/flighter:latest`, which is what `examples/tailscale/` runs and
+what the Update button on the settings page installs. The package inherits this
+repository's visibility, so it pulls anonymously with no `docker login` on the desktop.
+Publishing is gated behind a job that re-runs lint, types and tests, so a commit that
+fails CI never ships as `:latest`.
 
 The named `data` volume needs no setup. If you would rather keep the state in the
 checkout, point it at `./data:/app/data` and give that directory to the user the
@@ -376,10 +378,8 @@ That is a different origin from the one you had, so set it as the **public base 
 add *that* to the home screen - an icon saved from the `http://` address still points
 there, and still has no service worker. `tailscale serve reset` undoes all of it.
 
-That serves it on the host's own tailnet name. To give Flighter a device, a name and a
-certificate of its own instead - and stop publishing port 8000 on the host at all - run
-the `tailscale` sidecar alongside it: `examples/tailscale/` is a working compose stack
-that does exactly that.
+To give Flighter a device and a certificate of its own instead of the host's, run the
+sidecar in the stack: `examples/tailscale/` is a working example.
 
 ### Running from a checkout
 
