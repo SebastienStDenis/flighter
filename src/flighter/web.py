@@ -12,6 +12,7 @@ import logging
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
+from itertools import zip_longest
 from pathlib import Path
 from typing import Annotated, Any, Final
 
@@ -33,7 +34,7 @@ from .checks import check_calendar, check_service
 from .config import CREDENTIALS, SERVICES, Settings, mint_widget_token, write_secrets
 from .db import get_session, session_scope
 from .mail import FLAG_COLOURS, IDLE_CYCLE_SECONDS, message_url
-from .models import BookingSource, BookingStatus, FlightEvent
+from .models import BookingSource, BookingStatus, Confirmation, FlightEvent
 from .notify import NOTIFICATION_CHOICES, NOTIFICATION_FLAGS
 from .views import FlightView, build_views
 from .widget import connect_url, last_seen, script_source
@@ -517,18 +518,29 @@ def create_app(settings: Settings) -> FastAPI:
     async def update_ticket(
         session: SessionDep,
         booking_id: int,
-        confirmation_code: Annotated[str, Form()] = "",
+        confirmation_code: Annotated[list[str] | None, Form()] = None,
+        confirmation_name: Annotated[list[str] | None, Form()] = None,
         seat: Annotated[str, Form()] = "",
         notes: Annotated[str, Form()] = "",
         friend_name: Annotated[str, Form()] = "",
         return_tab: Annotated[str, Form()] = "",
     ) -> Response:
         """What is written on the ticket, which is the only part of a flight a person
-        gets to change. The flight itself is the airline's; a wrong one is deleted."""
+        gets to change. The flight itself is the airline's; a wrong one is deleted.
+
+        The confirmation boxes post as two lists, one row of the dialog to each pair of
+        entries, so a code and the name beside it are matched by position and nothing
+        else. Empty rows are dropped where the rest of the ticket is normalised.
+        """
         booking = await booking_repo.update_ticket(
             session,
             booking_id,
-            confirmation_code=confirmation_code.strip() or None,
+            confirmations=[
+                Confirmation(code.strip(), name.strip() or None)
+                for code, name in zip_longest(
+                    confirmation_code or [], confirmation_name or [], fillvalue=""
+                )
+            ],
             seat=seat.strip() or None,
             notes=notes.strip() or None,
             friend_name=friend_name.strip() or None,

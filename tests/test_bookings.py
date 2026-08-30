@@ -26,7 +26,14 @@ from flighter.bookings import (
 )
 from flighter.cadence import FEED_HORIZON
 from flighter.db import session_scope
-from flighter.models import Airport, Booking, EventKind, FlightEvent, FlightSnapshot
+from flighter.models import (
+    Airport,
+    Booking,
+    Confirmation,
+    EventKind,
+    FlightEvent,
+    FlightSnapshot,
+)
 
 JFK = "America/New_York"
 LHR = "Europe/London"
@@ -162,14 +169,14 @@ async def test_the_ticket_and_friend_name_are_the_only_things_an_edit_touches(se
         changed = await update_ticket(
             session,
             booking.id,
-            confirmation_code="X7QW2P",
+            confirmations=[Confirmation("X7QW2P")],
             seat="14A",
             notes=None,
             friend_name="  Sam  ",
         )
         assert changed is not None
-        assert (changed.confirmation_code, changed.seat, changed.notes, changed.friend_name) == (
-            "X7QW2P",
+        assert (changed.confirmations, changed.seat, changed.notes, changed.friend_name) == (
+            [Confirmation("X7QW2P", None)],
             "14A",
             None,
             "Sam",
@@ -189,22 +196,75 @@ async def test_a_seat_is_stored_the_way_the_box_that_took_it_drew_it(seeded: Non
         changed = await update_ticket(
             session,
             booking.id,
-            confirmation_code=" x7qw2p ",
+            confirmations=[Confirmation(" x7qw2p ")],
             seat=" 14a ",
             notes=None,
             friend_name=None,
         )
         assert changed is not None
-        assert (changed.confirmation_code, changed.seat) == ("X7QW2P", "14A")
+        assert (changed.confirmations, changed.seat) == ([Confirmation("X7QW2P", None)], "14A")
+
+
+async def test_a_ticket_keeps_every_code_it_was_given_in_the_order_it_was_given(
+    seeded: None,
+) -> None:
+    """A trip is regularly held together by more than one reference and only some of
+    them are named. A blank row is nothing, and a code entered twice is one code: the
+    dialog can post either, and neither is a second booking reference.
+    """
+    async with session_scope() as session:
+        booking = await book(session, datetime(2026, 9, 12, 9, 0))
+        changed = await update_ticket(
+            session,
+            booking.id,
+            confirmations=[
+                Confirmation("abc123", "  Air Canada  "),
+                Confirmation("   ", "Expedia"),
+                Confirmation("xy9z12", ""),
+                Confirmation("ABC123", "Air Canada"),
+            ],
+            seat=None,
+            notes=None,
+            friend_name=None,
+        )
+        assert changed is not None
+        assert changed.confirmations == [
+            Confirmation("ABC123", "Air Canada"),
+            Confirmation("XY9Z12", None),
+        ]
+
+
+async def test_naming_a_code_is_an_edit_the_calendar_hears_about(seeded: None) -> None:
+    """The calendar entry prints the name beside the code, so the name changing is a
+    change to what the entry says."""
+    async with session_scope() as session:
+        booking = await book(session, datetime(2026, 9, 12, 9, 0))
+        for name in (None, "Air Canada"):
+            await update_ticket(
+                session,
+                booking.id,
+                confirmations=[Confirmation("ABC123", name)],
+                seat=None,
+                notes=None,
+                friend_name=None,
+            )
+        assert await events_for(session, booking.id) == [
+            EventKind.BOOKING_ADDED,
+            EventKind.BOOKING_EDITED,
+            EventKind.BOOKING_EDITED,
+        ]
 
 
 async def test_an_imported_seat_is_stored_the_same_way(seeded: None) -> None:
     """An email states a seat in whatever case its template felt like."""
     async with session_scope() as session:
         booking = await book(
-            session, datetime(2026, 9, 12, 9, 0), seat="7f", confirmation_code="abc123"
+            session,
+            datetime(2026, 9, 12, 9, 0),
+            seat="7f",
+            confirmations=[Confirmation("abc123", "  Delta  ")],
         )
-        assert (booking.seat, booking.confirmation_code) == ("7F", "ABC123")
+        assert (booking.seat, booking.confirmations) == ("7F", [Confirmation("ABC123", "Delta")])
 
 
 async def test_recasing_a_seat_is_not_an_edit_worth_restating(seeded: None) -> None:
@@ -216,7 +276,7 @@ async def test_recasing_a_seat_is_not_an_edit_worth_restating(seeded: None) -> N
             await update_ticket(
                 session,
                 booking.id,
-                confirmation_code=None,
+                confirmations=[],
                 seat=typed,
                 notes=None,
                 friend_name=None,
@@ -256,7 +316,7 @@ async def test_a_ticket_edit_restates_the_flight_only_when_the_calendar_shows_it
         await update_ticket(
             session,
             booking.id,
-            confirmation_code=None,
+            confirmations=[],
             seat="12A",
             notes=None,
             friend_name=None,
@@ -264,7 +324,7 @@ async def test_a_ticket_edit_restates_the_flight_only_when_the_calendar_shows_it
         await update_ticket(
             session,
             booking.id,
-            confirmation_code=None,
+            confirmations=[],
             seat="12A",
             notes=None,
             friend_name=None,
@@ -272,7 +332,7 @@ async def test_a_ticket_edit_restates_the_flight_only_when_the_calendar_shows_it
         await update_ticket(
             session,
             booking.id,
-            confirmation_code=None,
+            confirmations=[],
             seat="12A",
             notes="aisle",
             friend_name=None,
@@ -286,7 +346,7 @@ async def test_a_ticket_edit_restates_the_flight_only_when_the_calendar_shows_it
 async def test_a_ticket_for_a_flight_that_is_not_there_is_none(seeded: None) -> None:
     async with session_scope() as session:
         missing = await update_ticket(
-            session, 99, confirmation_code=None, seat=None, notes=None, friend_name=None
+            session, 99, confirmations=[], seat=None, notes=None, friend_name=None
         )
         assert missing is None
 
@@ -297,7 +357,7 @@ async def test_an_owner_is_explicit_and_changing_it_restates_the_calendar(seeded
         changed = await update_ticket(
             session,
             booking.id,
-            confirmation_code=None,
+            confirmations=[],
             seat=None,
             notes=None,
             friend_name="  Sam  ",
@@ -306,7 +366,7 @@ async def test_an_owner_is_explicit_and_changing_it_restates_the_calendar(seeded
         await update_ticket(
             session,
             booking.id,
-            confirmation_code=None,
+            confirmations=[],
             seat=None,
             notes=None,
             friend_name="Sam",
@@ -314,7 +374,7 @@ async def test_an_owner_is_explicit_and_changing_it_restates_the_calendar(seeded
         await update_ticket(
             session,
             booking.id,
-            confirmation_code=None,
+            confirmations=[],
             seat=None,
             notes=None,
             friend_name=None,

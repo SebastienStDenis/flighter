@@ -45,6 +45,15 @@ class ExtractionError(RuntimeError):
     """The model answered with something that is not a valid extraction."""
 
 
+class ConfirmationCode(BaseModel):
+    """One booking reference off the email, with the label printed against it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    name: str | None
+
+
 class Segment(BaseModel):
     """One flight. A return trip is two of these, a connection is two more."""
 
@@ -60,7 +69,7 @@ class Segment(BaseModel):
     dest_iata: str
     departure_local: str
     arrival_local: str | None
-    confirmation_code: str | None
+    confirmations: list[ConfirmationCode]
     seat: str | None
 
     @field_validator("marketing_carrier", "operating_carrier", "origin_iata", "dest_iata")
@@ -276,9 +285,14 @@ def _segment_from(reservation: dict[str, Any]) -> Segment | None:
         dest_iata=dest,
         departure_local=departure,
         arrival_local=_naive_iso(flight.get("arrivalTime")),
-        confirmation_code=_text(reservation.get("reservationNumber")),
+        confirmations=_confirmations(_text(reservation.get("reservationNumber"))),
         seat=_text(seat),
     )
+
+
+def _confirmations(code: str | None) -> list[ConfirmationCode]:
+    """Structured data has one reservation number per reservation, and never a name."""
+    return [ConfirmationCode(code=code, name=None)] if code else []
 
 
 def _obj(value: Any) -> dict[str, Any]:
@@ -359,6 +373,20 @@ marketing_number is the digits alone ("1234"). Fill operating_carrier and \
 operating_number only when the email names a different airline actually flying the leg. \
 Carrier fields contain codes, never airline names. Endeavor Air is operating carrier \
 "9E"; its Delta Connection operating number is the same digits as the DL flight number.
+
+confirmations lists every booking reference printed for that segment, in the order \
+the email prints them: the airline's record locator or PNR, and any separate agency, \
+partner-airline, or per-passenger reference beside it. One reference usually covers the \
+whole trip, so repeat it on every segment it books. code is the reference exactly as \
+printed and nothing else - no surrounding words, no label. Set name only when the email \
+labels that particular code with something that distinguishes it from the others, such \
+as "Air Canada booking reference" or "Expedia itinerary number", and then name is that \
+distinguishing label alone: "Air Canada", "Expedia". Leave name null whenever the code \
+stands unlabelled or carries only a generic label such as "confirmation number", \
+"booking reference", "record locator", or "PNR" - including when there is only one \
+code. Never write a name the email does not print, and never name a code after the \
+airline of the segment just because you know it. Use an empty list when the email \
+prints no reference at all; never invent a code.
 
 Use null for anything the email does not state. Never guess an airport code, a seat, or \
 a time. confidence is your certainty that these specific segments, with these specific \
