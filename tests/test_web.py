@@ -314,6 +314,43 @@ def test_every_page_says_when_it_was_rendered(client: TestClient) -> None:
         assert abs(datetime.now(UTC) - rendered) < timedelta(seconds=5)
 
 
+def test_a_page_with_a_live_flight_carries_the_stamp_its_script_polls_against(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inside its day a flight's facts can move while the page is being read, so the
+    board and the flight's own page carry the change stamp. Days out nothing moves
+    faster than a person, and the pages carry nothing and will ask for nothing."""
+    soon = booking(
+        scheduled_departure_utc=NOW + timedelta(hours=2),
+        scheduled_arrival_utc=NOW + timedelta(hours=9),
+    )
+    show(monkeypatch, soon, None)
+    assert '<meta name="flight-stamp"' in client.get("/").text
+    assert '<meta name="flight-stamp"' in client.get("/f/1").text
+
+    show(monkeypatch, booking(), None)
+    assert '<meta name="flight-stamp"' not in client.get("/").text
+    assert '<meta name="flight-stamp"' not in client.get("/f/1").text
+
+
+def test_a_flight_the_poller_has_closed_the_book_on_is_not_watched(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    done = booking(
+        status="completed",
+        scheduled_departure_utc=NOW - timedelta(hours=9),
+        scheduled_arrival_utc=NOW - timedelta(hours=2),
+    )
+    show(monkeypatch, done, replace_snapshot(actual_on=NOW - timedelta(hours=2)))
+    assert '<meta name="flight-stamp"' not in client.get("/f/1").text
+
+
+def test_the_stamp_endpoint_answers_with_the_stamp_alone(client: TestClient) -> None:
+    answer = client.get("/api/stamp")
+    assert answer.status_code == 200
+    assert answer.json() == {"stamp": "0.0.0"}
+
+
 def test_the_board_says_what_to_do_when_there_are_no_flights(client: TestClient) -> None:
     page = client.get("/")
     assert page.status_code == 200

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from flighter.airports import UnknownAirport
 from flighter.bookings import (
+    change_stamp,
     create_booking,
     delete_booking,
     find_duplicate,
@@ -294,6 +295,27 @@ async def events_for(session: AsyncSession, booking_id: int) -> list[str]:
         .order_by(FlightEvent.id)
     )
     return list(await session.scalars(stmt))
+
+
+async def test_the_change_stamp_moves_with_each_thing_a_watching_page_reloads_for(
+    seeded: None,
+) -> None:
+    """The pages showing a live flight poll the stamp instead of the whole page, so the
+    poller writing a snapshot and a booking arriving or leaving each have to move it."""
+    async with session_scope() as session:
+        empty = await change_stamp(session)
+        booking = await book(session, datetime(2026, 9, 12, 9, 0))
+        added = await change_stamp(session)
+        assert added != empty
+
+        session.add(FlightSnapshot(booking_id=booking.id, raw={}))
+        await session.flush()
+        observed = await change_stamp(session)
+        assert observed != added
+
+        await delete_booking(session, booking.id)
+        await session.flush()
+        assert await change_stamp(session) != observed
 
 
 async def test_adding_a_flight_queues_it_for_the_calendar(seeded: None) -> None:
