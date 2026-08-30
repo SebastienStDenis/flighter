@@ -9,22 +9,30 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from flighter import ingest, notices, prefs
+from flighter.aeroapi import BudgetExceeded, BudgetStatus
 from flighter.airports import UnknownAirport
 from flighter.config import Settings
 from flighter.db import session_scope
 from flighter.extract import ConfirmationCode, Extraction, Segment
+from flighter.lookup import Candidate, OutOfRange
 from flighter.mail import Marked, Message, parse_message
 from flighter.models import IngestLog
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+SPENT_BUDGET = BudgetStatus(
+    spend_usd=Decimal("4.01"), cap_usd=Decimal("4.00"), tripped=True, month="2026-08"
+)
 
 
 def message(name: str) -> Message:
@@ -50,6 +58,61 @@ def extraction(*, confidence: float = 0.99) -> Extraction:
             )
         ],
     )
+
+
+class Schedule:
+    """Stands in for the published schedule: what FlightAware answers about a number.
+
+    Every leg the fixtures book is published here, so a test that says nothing about the
+    schedule reads as one where the airline flies what the email said it would.
+    """
+
+    def __init__(self) -> None:
+        self.asked: list[tuple[str, str, date]] = []
+        self.legs: dict[tuple[str, str], list[Candidate]] = {}
+        self.raises: Exception | None = None
+
+    def publishes(
+        self,
+        carrier: str,
+        number: str,
+        origin: str,
+        dest: str,
+        departure: str,
+        arrival: str | None = None,
+        **rest: Any,
+    ) -> None:
+        self.legs.setdefault((carrier, number), []).append(
+            Candidate(
+                marketing_carrier=carrier,
+                marketing_number=number,
+                origin_iata=origin,
+                dest_iata=dest,
+                departure_local=datetime.fromisoformat(departure),
+                arrival_local=datetime.fromisoformat(arrival) if arrival else None,
+                **rest,
+            )
+        )
+
+    async def find_flights(self, carrier: str, number: str, day: date) -> list[Candidate]:
+        self.asked.append((carrier, number, day))
+        if self.raises is not None:
+            raise self.raises
+        return [
+            leg for leg in self.legs.get((carrier, number), []) if leg.departure_local.date() == day
+        ]
+
+
+@pytest.fixture(autouse=True)
+def schedule(monkeypatch: pytest.MonkeyPatch) -> Schedule:
+    """No lookup in these tests reaches FlightAware, and none of them may skip one."""
+    published = Schedule()
+    published.publishes("DL", "1234", "JFK", "LAX", "2026-09-12T18:40:00", "2026-09-12T22:05:00")
+    published.publishes("AC", "8830", "YUL", "YYZ", "2026-10-03T07:15:00", "2026-10-03T08:45:00")
+    published.publishes("AC", "856", "YYZ", "LHR", "2026-10-03T21:20:00", "2026-10-04T09:05:00")
+    published.publishes("WS", "1502", "YYC", "YVR", "2026-11-17T06:30:00", "2026-11-17T07:12:00")
+    monkeypatch.setattr(ingest.lookup, "find_flights", published.find_flights)
+    return published
 
 
 class FakeSession:
@@ -268,6 +331,178 @@ async def test_a_shaky_extraction_is_booked_like_any_other(
     assert result.outcome == "created"
     assert "status" not in recorder.created[0]
     assert recorder.created[0]["extraction_confidence"] == pytest.approx(0.4)
+
+
+async def test_a_flight_no_airline_publishes_is_not_booked(
+    settings: Settings,
+    recorder: Recorder,
+    schedule: Schedule,
+    one_session: FakeSession,
+) -> None:
+    """The email was misread. Nothing goes on the board, and the reason names the flight."""
+    schedule.legs.clear()
+
+    result = await ingest.process_message(message("flight_jsonld.eml"), settings=settings)
+
+    assert result.outcome == "error"
+    assert result.error == "DL1234 is not on any airline's schedule for that day."
+    assert recorder.created == []
+    # Reading the same email tomorrow asks the same schedule the same question.
+    assert result.settled and not result.retryable
+
+
+async def test_an_itinerary_is_booked_whole_or_not_at_all(
+    settings: Settings,
+    recorder: Recorder,
+    schedule: Schedule,
+    one_session: FakeSession,
+) -> None:
+    """One invented leg discredits the reading, not merely the leg it invented."""
+    schedule.legs.pop(("AC", "856"))
+
+    result = await ingest.process_message(message("flight_package_jsonld.eml"), settings=settings)
+
+    assert result.outcome == "error"
+    assert result.error == "AC856 is not on any airline's schedule for that day."
+    assert recorder.created == []
+
+
+async def test_a_flight_on_another_route_is_not_the_one_the_email_named(
+    settings: Settings,
+    recorder: Recorder,
+    schedule: Schedule,
+    one_session: FakeSession,
+) -> None:
+    """DL1234 flies that day, but not out of JFK; the email named a flight of its own."""
+    schedule.legs.clear()
+    schedule.publishes("DL", "1234", "ATL", "LAX", "2026-09-12T18:40:00")
+
+    result = await ingest.process_message(message("flight_jsonld.eml"), settings=settings)
+
+    assert result.outcome == "error"
+    assert recorder.created == []
+
+
+async def test_the_airline_schedule_wins_over_the_time_the_email_printed(
+    settings: Settings,
+    recorder: Recorder,
+    schedule: Schedule,
+    one_session: FakeSession,
+) -> None:
+    """A confirmation goes stale the moment the airline retimes the leg it booked."""
+    schedule.legs.clear()
+    schedule.publishes(
+        "DL",
+        "1234",
+        "JFK",
+        "LAX",
+        "2026-09-12T19:25:00",
+        "2026-09-12T22:50:00",
+        operating_carrier="9E",
+        operating_number="4963",
+    )
+
+    result = await ingest.process_message(message("flight_jsonld.eml"), settings=settings)
+
+    assert result.outcome == "created"
+    (booked,) = recorder.created
+    assert booked["departure_local"] == datetime(2026, 9, 12, 19, 25)
+    assert booked["arrival_local"] == datetime(2026, 9, 12, 22, 50)
+    assert (booked["operating_carrier"], booked["operating_number"]) == ("9E", "4963")
+    # What the schedule has nothing to say about is still the email's to state.
+    assert [code.code for code in booked["confirmations"]] == ["K7QX2M"]
+    assert booked["seat"] == "14C"
+
+
+async def test_the_leg_taken_is_the_one_the_email_timed_closest_to(
+    settings: Settings,
+    recorder: Recorder,
+    schedule: Schedule,
+    one_session: FakeSession,
+) -> None:
+    """A number flown twice a day is two legs on one route, and only one was booked."""
+    schedule.legs.clear()
+    schedule.publishes("DL", "1234", "JFK", "LAX", "2026-09-12T07:30:00")
+    schedule.publishes("DL", "1234", "JFK", "LAX", "2026-09-12T19:10:00")
+
+    result = await ingest.process_message(message("flight_jsonld.eml"), settings=settings)
+
+    assert result.outcome == "created"
+    (booked,) = recorder.created
+    assert booked["departure_local"] == datetime(2026, 9, 12, 19, 10)
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [
+        OutOfRange(date(2027, 12, 1)),
+        BudgetExceeded(SPENT_BUDGET, just_tripped=False),
+        httpx.ConnectError("FlightAware did not answer"),
+    ],
+)
+async def test_a_schedule_that_cannot_be_asked_books_what_the_email_says(
+    raised: Exception,
+    settings: Settings,
+    recorder: Recorder,
+    schedule: Schedule,
+    one_session: FakeSession,
+) -> None:
+    """Not asked is not answered no: a booking is not lost over our own budget or outage."""
+    schedule.raises = raised
+
+    result = await ingest.process_message(message("flight_jsonld.eml"), settings=settings)
+
+    assert result.outcome == "created"
+    (booked,) = recorder.created
+    assert booked["departure_local"] == datetime(2026, 9, 12, 18, 40)
+
+
+async def test_the_schedule_is_asked_about_the_number_on_the_ticket(
+    settings: Settings,
+    recorder: Recorder,
+    schedule: Schedule,
+    one_session: FakeSession,
+) -> None:
+    """One lookup per leg, under the marketing number, on the day it leaves its origin."""
+    await ingest.process_message(message("flight_package_jsonld.eml"), settings=settings)
+
+    assert schedule.asked == [
+        ("AC", "8830", date(2026, 10, 3)),
+        ("AC", "856", date(2026, 10, 3)),
+    ]
+
+
+async def test_no_transaction_is_open_while_the_schedule_is_asked(
+    settings: Settings,
+    recorder: Recorder,
+    schedule: Schedule,
+    one_session: FakeSession,
+) -> None:
+    """A lookup takes the write lock twice of its own, and waits on the network between."""
+    asked = schedule.find_flights
+
+    async def slow_lookup(carrier: str, number: str, day: date) -> list[Candidate]:
+        assert one_session.in_use == 0, "a session was held across the schedule lookup"
+        return await asked(carrier, number, day)
+
+    schedule.find_flights = slow_lookup  # type: ignore[method-assign]
+
+    result = await ingest.process_message(message("flight_jsonld.eml"), settings=settings)
+
+    assert result.outcome == "created"
+    assert one_session.in_use == 0
+
+
+async def test_an_email_that_holds_no_flight_costs_no_lookup(
+    settings: Settings,
+    recorder: Recorder,
+    schedule: Schedule,
+    one_session: FakeSession,
+) -> None:
+    result = await ingest.process_message(message("airline_promo.eml"), settings=settings)
+
+    assert result.error == notices.NO_FLIGHT
+    assert schedule.asked == []
 
 
 async def test_a_flight_we_already_have_is_not_booked_twice(

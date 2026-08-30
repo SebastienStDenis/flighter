@@ -26,6 +26,29 @@ from flighter.mail import Message, parse_message
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
+BARE_NUMBER_MICRODATA = """
+<html><body>
+<div itemscope itemtype="http://schema.org/FlightReservation">
+  <meta itemprop="reservationNumber" content="CIDLT7"/>
+  <meta itemprop="reservationNumber" content="H-GJIZNZ"/>
+  <div itemprop="reservationFor" itemscope itemtype="http://schema.org/Flight">
+    <meta itemprop="flightNumber" content="161"/>
+    <div itemprop="airline" itemscope itemtype="http://schema.org/Airline">
+      <meta itemprop="iataCode" content="CI"/>
+    </div>
+    <div itemprop="departureAirport" itemscope itemtype="http://schema.org/Airport">
+      <meta itemprop="iataCode" content="ICN"/>
+    </div>
+    <meta itemprop="departureTime" content="2026-11-11T12:30:00+09:00"/>
+    <div itemprop="arrivalAirport" itemscope itemtype="http://schema.org/Airport">
+      <meta itemprop="iataCode" content="TPE"/>
+    </div>
+    <meta itemprop="arrivalTime" content="2026-11-11T14:20:00+08:00"/>
+  </div>
+</div>
+</body></html>
+"""
+
 MICRODATA = """
 <html><body>
 <div itemscope itemtype="http://schema.org/FlightReservation">
@@ -190,6 +213,47 @@ def test_microdata_is_read_like_jsonld() -> None:
     assert (segment.marketing_carrier, segment.marketing_number) == ("UA", "47")
     assert (segment.origin_iata, segment.dest_iata) == ("SFO", "EWR")
     assert segment.departure_local == "2026-12-01T08:15:00"
+
+
+def test_a_number_stated_without_its_designator_keeps_all_its_digits() -> None:
+    """`airline` carries the code and `flightNumber` only the digits: CI 161, not CI 1."""
+    extraction = from_jsonld(BARE_NUMBER_MICRODATA)
+    assert extraction is not None
+    (segment,) = extraction.segments
+    assert (segment.marketing_carrier, segment.marketing_number) == ("CI", "161")
+    assert (segment.origin_iata, segment.dest_iata) == ("ICN", "TPE")
+
+
+def test_a_reservation_number_stated_twice_is_two_codes_not_a_printed_list() -> None:
+    extraction = from_jsonld(BARE_NUMBER_MICRODATA)
+    assert extraction is not None
+    (segment,) = extraction.segments
+    assert [(c.code, c.name) for c in segment.confirmations] == [
+        ("CIDLT7", None),
+        ("H-GJIZNZ", None),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("carrier", "stated", "expected"),
+    [
+        ("CI", "161", ("CI", "161")),
+        ("CI", "CI161", ("CI", "161")),
+        ("CI", "CI 161", ("CI", "161")),
+        ("CI", "0161", ("CI", "161")),
+        ("CI", "CI0161", ("CI", "161")),
+        ("", "NH106", ("NH", "106")),
+        ("", "ACA871", ("ACA", "871")),
+        ("W6", "3312", ("W6", "3312")),
+        # Nothing to split: the segment is dropped for want of a carrier rather than
+        # having one invented out of the digits.
+        ("", "161", ("", "161")),
+    ],
+)
+def test_every_way_a_sender_states_a_flight_number(
+    carrier: str, stated: str, expected: tuple[str, str]
+) -> None:
+    assert extract._split_flight_number(carrier, stated) == expected
 
 
 def test_html_without_a_reservation_yields_nothing() -> None:

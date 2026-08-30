@@ -157,6 +157,12 @@ _FLIGHT_RESERVATION = "FlightReservation"
 # Airlines nest a multi-leg itinerary in one of these; each leg is its own reservation.
 _NESTING_KEYS = ("@graph", "subReservation", "itemListElement", "reservationFor")
 
+# A designator - anything ending in a letter, as IATA and ICAO both allow - and the
+# number after it, less the zeros a sender pads it with. The designator is optional so
+# that a number stated on its own stays whole instead of having its first digits read
+# as one.
+_FLIGHT_IDENT = re.compile(r"([A-Z0-9]*[A-Z])?0*(\d{1,4})")
+
 
 def from_jsonld(html: str) -> Extraction | None:
     """Read schema.org FlightReservations out of the HTML part.
@@ -264,7 +270,7 @@ def _segment_from(reservation: dict[str, Any]) -> Segment | None:
 
     airline = _obj(flight.get("airline"))
     carrier, number = _split_flight_number(
-        str(airline.get("iataCode") or ""), str(flight.get("flightNumber") or "")
+        _text(airline.get("iataCode")) or "", _text(flight.get("flightNumber")) or ""
     )
     origin = _iata(flight.get("departureAirport"))
     dest = _iata(flight.get("arrivalAirport"))
@@ -285,18 +291,24 @@ def _segment_from(reservation: dict[str, Any]) -> Segment | None:
         dest_iata=dest,
         departure_local=departure,
         arrival_local=_naive_iso(flight.get("arrivalTime")),
-        confirmations=_confirmations(_text(reservation.get("reservationNumber"))),
+        confirmations=_confirmations(reservation.get("reservationNumber")),
         seat=_text(seat),
     )
 
 
-def _confirmations(code: str | None) -> list[ConfirmationCode]:
-    """Structured data has one reservation number per reservation, and never a name."""
-    return [ConfirmationCode(code=code, name=None)] if code else []
+def _confirmations(value: Any) -> list[ConfirmationCode]:
+    """Every reservation number stated, in order. Structured data never labels them.
+
+    One reservation is meant to carry one number, but a sender that has both an airline
+    record locator and an agency reference states the property twice rather than choose.
+    """
+    return [ConfirmationCode(code=code, name=None) for code in _texts(value)]
 
 
 def _obj(value: Any) -> dict[str, Any]:
-    """Schema.org properties are objects, bare strings, or absent; normalise to a dict."""
+    """Schema.org properties are objects, bare strings, lists, or absent; normalise."""
+    if isinstance(value, list):
+        value = next((item for item in value if isinstance(item, dict)), None)
     return value if isinstance(value, dict) else {}
 
 
@@ -307,22 +319,33 @@ def _iata(airport: Any) -> str | None:
 
 
 def _text(value: Any) -> str | None:
-    if value is None:
-        return None
+    """A property stated more than once arrives as a list; the first value stated wins."""
+    return next(iter(_texts(value)), None)
+
+
+def _texts(value: Any) -> list[str]:
+    """Every value a property states, which is more than one when it is repeated."""
+    if isinstance(value, list):
+        return [text for item in value for text in _texts(item)]
+    if value is None or isinstance(value, dict):
+        return []
     stripped = str(value).strip()
-    return stripped or None
+    return [stripped] if stripped else []
 
 
 def _split_flight_number(carrier: str, flight_number: str) -> tuple[str, str]:
-    """`("NH", "NH106")` and `("", "NH106")` both mean NH 106."""
+    """`("NH", "NH106")`, `("NH", "106")` and `("", "NH106")` all mean NH 106.
+
+    Senders disagree on whether `flightNumber` repeats the designator the `airline`
+    property already carries, and on how many zeros they pad the number with.
+    """
     flight_number = flight_number.strip().upper().replace(" ", "")
     carrier = carrier.strip().upper()
-    if carrier and flight_number.startswith(carrier):
-        return carrier, flight_number[len(carrier) :].lstrip("0") or flight_number[len(carrier) :]
-    match = re.fullmatch(r"([A-Z0-9]{2,3}?)(\d{1,4})", flight_number)
-    if match:
-        return carrier or match.group(1), match.group(2)
-    return carrier, flight_number
+    match = _FLIGHT_IDENT.fullmatch(flight_number)
+    if match is None:
+        return carrier, flight_number
+    designator, number = match.groups()
+    return carrier or designator or "", number
 
 
 def _naive_iso(value: Any) -> str | None:

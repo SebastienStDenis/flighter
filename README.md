@@ -156,9 +156,13 @@ to its page here, and the flag comes off - the email itself does not move. If no
 be read out of it you get a push saying so, with a link that opens the email in Mail, and
 the flag stays on so the next pass tries again.
 
-Whatever was read out of the email is what lands on the board; there is no review step.
-If the flight it names is not yours, its page has **Stop tracking**, and the right one is
-two boxes away behind the **+** in the nav.
+What was read out of the email is put to the airline's own schedule before any of it is
+booked, the same schedule the **+** form reads: the flight number and the day come off the
+email, and where that flight goes and when are the airline's to say. A number no airline
+publishes that day is a misreading rather than a flight, and none of that email reaches the
+board - an itinerary read wrongly enough to invent a leg is not one to trust the rest of.
+Past that there is no review step. If the flight it names is not yours, its page has
+**Stop tracking**, and the right one is two boxes away behind the **+** in the nav.
 
 Something that fails for a passing reason - the model, iCloud, the network - is tried
 again after two minutes and again after ten. If it still fails, your phone is told once
@@ -168,10 +172,11 @@ the tab in the nav wears a mark while anything is there, so the board itself sta
 flights. That page is also the history of the mailbox: every email the service has looked
 at, what it made of each one, and the flights any of them put on the board.
 **Try again** hands it straight back to the watcher, which reads it again within half a
-minute - as long as it still carries the flag. Unflagging it in Mail drops it too. Two
+minute - as long as it still carries the flag. Unflagging it in Mail drops it too. Three
 things skip the retries and are set aside at once, because reading them again reads them
 the same way: an email naming an airport code the app has no row for, where the push names
-the code, and an email with no flight in it at all. Neither loses its flag on its own -
+the code, an email naming a flight no airline publishes, where the push names the flight,
+and an email with no flight in it at all. Neither loses its flag on its own -
 **Ignore** is what takes it off. An email once decided to hold no flight is read again if
 you flag it again: the flag came off with that decision, so one on it now is you overruling
 it.

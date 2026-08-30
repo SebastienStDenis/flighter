@@ -10,6 +10,7 @@ asks for the reason on its own and lets the card say the rest.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import NamedTuple
 
 HEADLINE = "Email could not be imported"
@@ -29,6 +30,13 @@ UNREADABLE = "This looks like a flight email, but no flight details could be rea
 def unknown_airport(iata: str) -> str:
     """The one failure that names the thing to correct: a code that is not an airport."""
     return f"{iata} is not a recognised airport code."
+
+
+def unpublished(flights: Sequence[str]) -> str:
+    """The flights an email named that no airline flies, and so nothing of it was booked."""
+    named = flights[0] if len(flights) == 1 else f"{', '.join(flights[:-1])} and {flights[-1]}"
+    verb = "is" if len(flights) == 1 else "are"
+    return f"{named} {verb} not on any airline's schedule for that day."
 
 
 class Notice(NamedTuple):
