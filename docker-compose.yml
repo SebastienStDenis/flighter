@@ -1,9 +1,7 @@
 services:
   app:
-    # Published by .github/workflows/release.yml on every push to main. `build` stays so
-    # a checkout can still compile its own, but the home stack pulls: `docker compose
-    # pull` fetches the built image rather than making the desktop compile it.
-    image: ghcr.io/sebastienstdenis/flighter:latest
+    # Compiled here from the Dockerfile beside this file. `examples/tailscale/` is the
+    # other way round: it runs the image the release workflow publishes.
     build: .
     container_name: flighter
     restart: unless-stopped
@@ -28,9 +26,11 @@ services:
 
   # The Update button on the settings page asks Watchtower to pull a newer image and
   # recreate the app - the app cannot replace its own container from inside it, so
-  # Watchtower holds the socket and the app only ever holds a token. Uncomment this (or
-  # fold the two environment lines into a Watchtower you already run), then enter
-  # http://watchtower:8080 and the token under Settings → Connections. See
+  # Watchtower holds the socket and the app only ever holds a token. It needs a published
+  # image to pull, so it does nothing for the build above; give `app` an `image:` of its
+  # own first, or use `examples/tailscale/`, which is already wired this way. Uncomment
+  # this (or fold the two environment lines into a Watchtower you already run), then
+  # enter http://watchtower:8080 and the token under Settings → Connections. See
   # docs/updates.md.
   #
   # watchtower:
