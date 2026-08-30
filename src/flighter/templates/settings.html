@@ -199,8 +199,8 @@
         {% for field in fields %}{{ box(field) }}{% endfor %}
       </fieldset>
       <div class="mt-4 flex items-center gap-2">
-        <button class="btn" data-save data-size="sm" type="submit">Save</button>
         <p class="save-error min-w-0 flex-1 text-xs text-stop" role="alert"></p>
+        <button class="btn" data-save data-size="sm" type="submit">Save</button>
       </div>
     </form>
     {{ caller() if caller }}
