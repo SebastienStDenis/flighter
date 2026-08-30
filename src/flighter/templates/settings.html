@@ -532,14 +532,19 @@
            data-watchtower="{{ '1' if watchtower_ready else '' }}">
         <p class="text-sm font-medium">Updates</p>
         <div class="mt-2 flex items-center gap-2">
-          <svg class="size-4 shrink-0 text-ok" id="update-current" viewBox="0 0 24 24"
-               fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-               stroke-linejoin="round" aria-hidden="true" hidden>
-            <path d="M20 6 9 17l-5-5"/>
-          </svg>
-          <p class="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+          <p class="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-muted-foreground">
             {%- if running_build %}<strong class="font-mono">{{ running_build }}</strong>
-            {%- else %}Unstamped build{% endif %}<span id="update-word"></span></p>
+            {%- else %}Unstamped build{% endif %}
+            {# The checkmark the registry earns: shown once it says nothing is newer. #}
+            <span class="flex items-center" id="update-current" hidden>
+              <svg class="size-4 text-ok" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                   aria-hidden="true">
+                <path d="M20 6 9 17l-5-5"/>
+              </svg>
+              <span class="sr-only">Current version</span>
+            </span>
+          </p>
           <button class="btn refresh-button shrink-0" data-variant="ghost"
                   data-size="icon-sm" type="button" id="update-check"
                   onclick="checkForUpdates(this)" title="Check for updates"
@@ -552,10 +557,25 @@
               <path d="M8 16H3v5"/>
             </svg>
           </button>
-          {# Submits the real form kept outside this one - forms do not nest - and only
-             shows once the registry has named a newer build for it to fetch. #}
+          {# A newer build is an up arrow and its number - a button while Watchtower is
+             connected to press it at, plain words while it is not. The button submits
+             the real form kept outside this one, because forms do not nest. #}
           <button class="btn shrink-0" data-size="sm" type="submit"
-                  form="update-form" id="update-run" hidden>Update</button>
+                  form="update-form" id="update-run" title="Update" hidden>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>
+            </svg>
+            <span class="sr-only">Update to </span><span class="font-mono" id="update-run-to"></span>
+          </button>
+          <span class="flex shrink-0 items-center gap-1 text-sm text-muted-foreground"
+                id="update-newer" hidden>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>
+            </svg>
+            <span class="sr-only">Newer build </span><span class="font-mono" id="update-newer-to"></span>
+          </span>
         </div>
         <p class="mt-2 text-xs text-muted-foreground" id="update-note" role="status"
            aria-live="polite" hidden></p>
@@ -1029,23 +1049,23 @@
     note.hidden = !text;
   }
 
-  // One line, three answers. Nothing newer: a checkmark on the version. Something
-  // newer: an Update button naming it - or, with no Watchtower to press it at, a note
-  // saying what is newer and where to connect. No answer: the note says why not.
+  // One line, three answers. Nothing newer: a checkmark on the version number.
+  // Something newer: an up arrow and its number - a button while Watchtower is there
+  // to press it at, plain words while it is not, with the note underneath saying where
+  // to connect one. No answer: the note says why not.
   function showUpdateState(state) {
-    var button = document.getElementById("update-run");
     var watchtower = !!document.getElementById("update-row").dataset.watchtower;
     var current = state.available === false;
+    var newer = state.available === true;
     document.getElementById("update-current").hidden = !current;
-    document.getElementById("update-word").textContent = current ? " — current version" : "";
-    button.hidden = !(state.available === true && watchtower);
-    if (state.available === true) {
-      button.textContent = "Update to " + shortSha(state.latest);
+    document.getElementById("update-run").hidden = !(newer && watchtower);
+    document.getElementById("update-newer").hidden = !(newer && !watchtower);
+    if (newer) {
+      var to = shortSha(state.latest);
+      document.getElementById("update-run-to").textContent = to;
+      document.getElementById("update-newer-to").textContent = to;
       updateNote(
-        watchtower
-          ? ""
-          : "A newer build (" + shortSha(state.latest) + ") is published. Connect " +
-            "Watchtower under Connections to install it from here."
+        watchtower ? "" : "Connect Watchtower under Connections to install updates from here."
       );
     } else if (current) {
       updateNote("");

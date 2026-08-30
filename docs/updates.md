@@ -2,10 +2,10 @@
 
 The Advanced section at the foot of **Settings → Preferences** holds the Updates row:
 the commit the running container was built from, with a refresh icon that asks the
-registry whether it holds a newer one. Nothing newer gets a checkmark on the version;
-something newer gets an "Update to …" button - once Watchtower is connected under
-**Settings → Connections → Advanced** - or, without one, a note naming the newer
-build. The check works with no Watchtower at all; only installing needs it.
+registry whether it holds a newer one. Nothing newer puts a checkmark next to the
+version; something newer shows an up arrow with the newer build's number - a button,
+once Watchtower is connected under **Settings → Connections → Advanced**, or plain
+text without one. The check works with no Watchtower at all; only installing needs it.
 
 ## How it works
 
