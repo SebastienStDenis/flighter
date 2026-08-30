@@ -1,10 +1,11 @@
 # Updating from the settings page
 
 The Advanced section at the foot of **Settings → Preferences** holds the Updates row:
-the commit the running container was built from, a button that asks the registry
-whether it holds a newer one, and - once Watchtower is connected under
-**Settings → Connections → Advanced** - an Update button that swaps them. The check
-works with no Watchtower at all; only installing needs it.
+the commit the running container was built from, with a refresh icon that asks the
+registry whether it holds a newer one. Nothing newer gets a checkmark on the version;
+something newer gets an "Update to …" button - once Watchtower is connected under
+**Settings → Connections → Advanced** - or, without one, a note naming the newer
+build. The check works with no Watchtower at all; only installing needs it.
 
 ## How it works
 
@@ -15,7 +16,7 @@ Flighter never touches the Docker socket. Three small parts add up to the button
 2. **The registry says which commit `:latest` is.** The app reads the standard
    `org.opencontainers.image.revision` label off the published image (an anonymous
    pull-scope token is enough for a public image), caches the answer for an hour, and
-   compares; **Check for updates** asks afresh regardless of the cache. A locally
+   compares; the refresh icon asks afresh regardless of the cache. A locally
    built image has no stamp; the row says so instead of guessing.
 3. **Watchtower does the swap.** The Update button POSTs to Watchtower's HTTP API
    (`/v1/update`, scoped to the Flighter image), and Watchtower pulls the image and

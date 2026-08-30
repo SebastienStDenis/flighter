@@ -646,6 +646,16 @@
     border-top-color: currentColor;
   }
 
+  /* A refresh icon asked to wait is its own spinner: the arrows turn, rather than a
+     second circle squeezing in beside them on an icon-sized button. */
+  .btn.refresh-button.is-busy::before {
+    @apply hidden;
+  }
+
+  .btn.refresh-button.is-busy svg {
+    @apply animate-spin;
+  }
+
   /* The button that copies a value stands on top of the value it copies, which is the
      one place on the page where a see-through control is a control with a string of
      characters running under it. Basecoat draws its outline button at 30% of the input

@@ -523,25 +523,42 @@
       {# Updates live here rather than beside the Watchtower connection: what is running
          and whether the registry holds something newer are answerable with no
          Watchtower at all, so the row stands on its own and only the Update button
-         waits on that connection. What is published fills in after the page, the way
-         the calendar picker does; the Check button asks the registry afresh. #}
+         waits on that connection. One line, three states: the version with a refresh
+         icon to ask the registry; a checkmark on it once the registry says nothing is
+         newer; an Update button naming the newer build when there is one. Anything
+         longer than the line - a restart under way, a registry that would not answer,
+         a Watchtower still to be connected - goes on the note underneath. #}
       <div class="border-t py-4" id="update-row" data-build="{{ build_id }}"
            data-watchtower="{{ '1' if watchtower_ready else '' }}">
         <p class="text-sm font-medium">Updates</p>
-        <div class="mt-2 flex items-center gap-3">
-          <p class="min-w-0 flex-1 text-xs text-muted-foreground" id="update-note"
-             role="status" aria-live="polite">
-            {%- if running_build %}Running <strong class="font-mono">{{ running_build }}</strong>.
-            {%- else %}Running an unstamped build.{% endif %}</p>
-          <button class="btn shrink-0" data-variant="outline" data-size="sm" type="button"
-                  id="update-check" onclick="checkForUpdates(this)">Check for updates</button>
-          {# Submits the real form kept outside this one - forms do not nest - so a
-             browser with no script still has an Update to press while Watchtower is
-             connected. With script, what is published decides whether it shows. #}
-          <button class="btn shrink-0" data-variant="outline" data-size="sm" type="submit"
-                  form="update-form" id="update-run"
-                  {{- ' hidden' if not watchtower_ready }}>Update</button>
+        <div class="mt-2 flex items-center gap-2">
+          <svg class="size-4 shrink-0 text-ok" id="update-current" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+               stroke-linejoin="round" aria-hidden="true" hidden>
+            <path d="M20 6 9 17l-5-5"/>
+          </svg>
+          <p class="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+            {%- if running_build %}<strong class="font-mono">{{ running_build }}</strong>
+            {%- else %}Unstamped build{% endif %}<span id="update-word"></span></p>
+          <button class="btn refresh-button shrink-0" data-variant="ghost"
+                  data-size="icon-sm" type="button" id="update-check"
+                  onclick="checkForUpdates(this)" title="Check for updates"
+                  aria-label="Check for updates">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+              <path d="M21 3v5h-5"/>
+              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+              <path d="M8 16H3v5"/>
+            </svg>
+          </button>
+          {# Submits the real form kept outside this one - forms do not nest - and only
+             shows once the registry has named a newer build for it to fetch. #}
+          <button class="btn shrink-0" data-size="sm" type="submit"
+                  form="update-form" id="update-run" hidden>Update</button>
         </div>
+        <p class="mt-2 text-xs text-muted-foreground" id="update-note" role="status"
+           aria-live="polite" hidden></p>
       </div>
     </details>
   </div>
@@ -988,18 +1005,16 @@
     } catch (error) {}
   })();
 
-  // The Check button is a person asking now, so the cached answer is not good enough:
+  // The refresh icon is a person asking now, so the cached answer is not good enough:
   // ?force=1 goes to the registry however recently the page last asked.
   async function checkForUpdates(button) {
-    var note = document.getElementById("update-note");
     setBusy(button, true);
-    note.textContent = "Checking the registry…";
     try {
       var response = await fetch("/settings/update/check?force=1");
       if (!response.ok) throw new Error(response.status);
       showUpdateState(await response.json());
     } catch (error) {
-      note.textContent = "Could not check for updates; is the server reachable?";
+      updateNote("Could not check for updates.");
     }
     setBusy(button, false);
   }
@@ -1008,35 +1023,37 @@
     return value ? value.slice(0, 7) : "";
   }
 
-  // The note says where things stand; the Update button shows only while there is
-  // something for it to do and a Watchtower to do it. With no comparison to go on -
-  // an unstamped build, a registry that would not answer - the button stays for a
-  // connected Watchtower, because Watchtower checks for itself and pulling nothing
-  // is a no-op.
-  function showUpdateState(state) {
+  function updateNote(text) {
     var note = document.getElementById("update-note");
+    note.textContent = text || "";
+    note.hidden = !text;
+  }
+
+  // One line, three answers. Nothing newer: a checkmark on the version. Something
+  // newer: an Update button naming it - or, with no Watchtower to press it at, a note
+  // saying what is newer and where to connect. No answer: the note says why not.
+  function showUpdateState(state) {
     var button = document.getElementById("update-run");
     var watchtower = !!document.getElementById("update-row").dataset.watchtower;
-    var running = shortSha(state.running) || "an unstamped build";
-    var offer = watchtower;
-    button.setAttribute("data-variant", "outline");
+    var current = state.available === false;
+    document.getElementById("update-current").hidden = !current;
+    document.getElementById("update-word").textContent = current ? " — current version" : "";
+    button.hidden = !(state.available === true && watchtower);
     if (state.available === true) {
-      note.textContent =
-        "A newer build is published: " + shortSha(state.latest) + " (running " + running + ")." +
-        (watchtower ? "" : " Connect Watchtower under Connections to install it from here.");
-      // The one moment the button is the point of the row, so it gets the weight.
-      button.removeAttribute("data-variant");
-    } else if (state.available === false) {
-      note.textContent = "Up to date: " + running + " is the latest published build.";
-      offer = false;
+      button.textContent = "Update to " + shortSha(state.latest);
+      updateNote(
+        watchtower
+          ? ""
+          : "A newer build (" + shortSha(state.latest) + ") is published. Connect " +
+            "Watchtower under Connections to install it from here."
+      );
+    } else if (current) {
+      updateNote("");
     } else if (state.running) {
-      note.textContent = "Running " + running + "; the registry could not be read.";
+      updateNote("The registry could not be read, so newer builds cannot be seen.");
     } else {
-      note.textContent = watchtower
-        ? "Running an unstamped build; only Watchtower can tell whether it is current."
-        : "Running an unstamped build; the registry cannot say whether it is current.";
+      updateNote("An unstamped build cannot be compared with the registry.");
     }
-    button.hidden = !offer;
   }
 
   // The update is Watchtower stopping this very server, so the request dying without an
@@ -1052,9 +1069,8 @@
   })();
 
   async function runUpdate(button) {
-    var note = document.getElementById("update-note");
     setBusy(button, true);
-    note.textContent = "Asking Watchtower…";
+    updateNote("Asking Watchtower…");
     try {
       var response = await fetch("/settings/update", {
         method: "POST",
@@ -1065,27 +1081,26 @@
         return {};
       });
       if (!answer.restarting) {
-        note.textContent = answer.detail || "Watchtower did not answer as expected.";
+        updateNote(answer.detail || "Watchtower did not answer as expected.");
         setBusy(button, false);
         return;
       }
     } catch (error) {
       // The connection dying mid-request is the update reaching this very container.
     }
-    note.textContent = "Updating — Flighter is restarting, this page will reload itself…";
-    awaitRestart(note, button);
+    updateNote("Updating — Flighter is restarting, this page will reload itself…");
+    awaitRestart(button);
   }
 
   // A new process answers with a new build id whether or not the image carries a commit
   // stamp, so that is what the poll watches for. Not answering is expected for a while:
   // the container is being pulled and recreated.
-  function awaitRestart(note, button) {
+  function awaitRestart(button) {
     var was = document.getElementById("update-row").dataset.build;
     var deadline = Date.now() + 3 * 60000;
     (function look() {
       if (Date.now() > deadline) {
-        note.textContent =
-          "Still not back on a new build — check the Watchtower logs.";
+        updateNote("Still not back on a new build — check the Watchtower logs.");
         setBusy(button, false);
         return;
       }

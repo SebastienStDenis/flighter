@@ -2702,16 +2702,15 @@ def test_a_flight_long_at_the_gate_is_filed_under_flown(
 
 def test_the_updates_row_stands_without_watchtower(client: TestClient) -> None:
     """Checking only takes the registry, so the row is there before any connection -
-    with the Update button held back, because installing is what Watchtower is for."""
+    and it says so, so the page's script holds the Update button back."""
     body = client.get("/settings").text
     assert "Watchtower" in body
     assert "Check for updates" in body
     assert 'id="update-form"' in body
     assert 'data-watchtower=""' in body
-    assert 'id="update-run" hidden' in body
 
 
-def test_a_connected_watchtower_gets_the_button(
+def test_a_connected_watchtower_is_marked_on_the_row(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings.watchtower_url = "http://watchtower:8080"
@@ -2719,7 +2718,6 @@ def test_a_connected_watchtower_gets_the_button(
     with build_client(settings, monkeypatch) as client:
         body = client.get("/settings").text
     assert 'data-watchtower="1"' in body
-    assert 'id="update-run" hidden' not in body
     # The address is shown back the way the Apple ID is; the token never is.
     assert "http://watchtower:8080" in body
     assert "wt-api-token-value" not in body
