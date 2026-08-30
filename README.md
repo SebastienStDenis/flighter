@@ -376,6 +376,11 @@ That is a different origin from the one you had, so set it as the **public base 
 add *that* to the home screen - an icon saved from the `http://` address still points
 there, and still has no service worker. `tailscale serve reset` undoes all of it.
 
+That serves it on the host's own tailnet name. To give Flighter a device, a name and a
+certificate of its own instead - and stop publishing port 8000 on the host at all - run
+the `tailscale` sidecar alongside it: `examples/tailscale/` is a working compose stack
+that does exactly that.
+
 ### Running from a checkout
 
 ```sh

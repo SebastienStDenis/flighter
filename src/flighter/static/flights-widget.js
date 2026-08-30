@@ -109,18 +109,18 @@ const SMALL_GAP = 3;
 // at a different pitch, so the same flights sat in different places from one reload to
 // the next.
 //
-// So it is a fixed distance again, and what the widget has left over is held under the
-// last flight instead. The column starts at the top whatever the size and however many
-// flights are on it, the break between two flights is the same break on a widget holding
+// So it is a fixed distance again, and what the widget has left over is held between the
+// last flight and the stamp instead. The column starts at the top whatever the size and
+// however many flights are on it, the break between two flights is the same break on a widget holding
 // two as on one holding seven, and room that is not spoken for reads as what it is: a
 // widget with three flights on it has three flights on it.
 //
-// Ten points is what the tightest size holds. A row is a shade under 36 - the heading,
-// the line under it and the three between them - so the large's seven rows and six of
-// these gaps fit inside what a 6.1in phone's large widget holds, and the medium's three
-// rows and two of them come out as close to full as that size gets. It is the figure to
-// cut first if a row ever comes out clipped.
-const FLIGHT_GAP = 10;
+// Eight points is what the tightest size holds with the stamp under it. A row is a shade
+// under 36 - the heading, the line under it and the three between them - and the stamp
+// takes twelve, so the large's seven rows, six of these gaps and the line beneath them
+// fit inside what a 6.1in phone's large widget holds, and the medium's three rows and two
+// of them do the same. It is the figure to cut first if a row ever comes out clipped.
+const FLIGHT_GAP = 8;
 
 // What every size but the Lock Screen keeps between its words and its own edge. A widget
 // whose words start against its rounded corner reads as one that ran out of room,
@@ -203,28 +203,28 @@ function connect() {
   return null;
 }
 
-// `stale` is all that is kept about where the flights came from. Nothing dates the cache
-// any more - no size draws the date - so the file's own modification time is not read,
-// and what the flag is still good for is the lock screen's dot and holding the script
-// back from replacing itself on a reload that never reached the server.
+// `fetchedAt` is the moment the flights being drawn came from: now when the server
+// answered, and the cache file's own modification date when it did not. `stale` says
+// which of the two it is - the word in front of the stamp, the lock screen's dot, and
+// whether the script may replace itself with the server's copy.
 async function load(server) {
   try {
     const data = await request(server);
     writeCache(data);
-    return { data, stale: false, rejected: false, error: null };
+    return { data, stale: false, fetchedAt: new Date(), rejected: false, error: null };
   } catch (error) {
     // Not the cache: yesterday's flights with a small mark on them would hide that the
     // token is wrong, and that is the one failure a reload never fixes.
     if (error instanceof TokenRejected) {
-      return { data: null, stale: false, rejected: true, error: null };
+      return { data: null, stale: false, fetchedAt: null, rejected: true, error: null };
     }
     // A stale widget beats a blank one. The flight has almost certainly not changed, and
     // the lock screen marks its heading with a dot to say the reading is the cache's.
     const cached = readCache();
     if (cached) {
-      return { data: cached, stale: true, rejected: false, error: null };
+      return { data: cached.data, stale: true, fetchedAt: cached.cachedAt, rejected: false, error: null };
     }
-    return { data: null, stale: false, rejected: false, error: String(error.message || error) };
+    return { data: null, stale: false, fetchedAt: null, rejected: false, error: String(error.message || error) };
   }
 }
 
@@ -317,7 +317,7 @@ function readCache() {
     return null;
   }
   try {
-    return JSON.parse(fm.readString(path));
+    return { data: JSON.parse(fm.readString(path)), cachedAt: fm.modificationDate(path) };
   } catch (error) {
     console.warn(`could not read cache: ${error}`);
     return null;
@@ -376,6 +376,9 @@ async function buildWidget(result) {
 
   if (flights.length === 0) {
     message(widget, "No upcoming flights");
+    if (!isAccessory) {
+      updatedLine(widget, result);
+    }
     return widget;
   }
 
@@ -391,6 +394,7 @@ async function buildWidget(result) {
   } else {
     renderList(widget, flights, logos);
   }
+  updatedLine(widget, result);
   return widget;
 }
 
@@ -501,10 +505,10 @@ function renderSmall(widget, flights, logos, board) {
     targetValue(line, flight);
   });
 
-  // And whatever is left over goes here, under the flights, rather than between them. A
-  // ListWidget centres what it holds when there is room to spare, so without this the
-  // square would sink its blocks towards the middle as soon as it had only one flight to
-  // draw.
+  // And whatever is left over goes here, between the flights and the stamp, rather than
+  // between the flights themselves. A ListWidget centres what it holds when there is room
+  // to spare, so without this the square would sink its blocks towards the middle as soon
+  // as it had only one flight to draw.
   widget.addSpacer();
 }
 
@@ -558,7 +562,8 @@ function renderList(widget, flights, logos) {
 
   // The room the size has left when it is holding fewer flights than it takes - which is
   // most of the time on the large. Held under the last row, so the first row is in the
-  // same place on a widget with two flights as on one with seven.
+  // same place on a widget with two flights as on one with seven, and so is the stamp the
+  // room is held above.
   widget.addSpacer();
 }
 
@@ -775,17 +780,39 @@ function pill(container, flight) {
   return badge;
 }
 
-// Nothing is drawn under the flights. Three lines have stood there and all three are
-// gone: the clock the times were on, the moment the data was fetched, and the reason the
-// server gave for its own data being behind. Each was true and none of them was what the
-// widget is picked up for, which is what the flights are doing - and each was paid for
-// out of the same purse, the height of a size that fits its rows within a point or two.
-// The last of them, the degraded reason, was the strongest of the three and still went:
-// it says the numbers may be behind, which the numbers themselves cannot show, but it
-// said it on every draw of a widget whose numbers are almost always fine.
+// The bottom of the widget: when what is drawn above it was got, on the phone's own
+// clock, centred under the flights the way a footnote is.
 //
-// So the bottom of the widget is the last flight on it. What is left of the cache and
-// the breaker is on the board, a tap away, where there is room to say it properly.
+// A clock face rather than an age. A widget is redrawn a few times an hour, so "4 min
+// ago" written at draw time is the one figure on screen guaranteed to be wrong by the
+// time anybody reads it, and wrong in the flattering direction. The time it was fetched
+// at is simply a fact, and stays one for as long as iOS leaves the widget alone.
+//
+// "Cached" rather than "Last updated" when the server could not be reached, because then
+// the time is when a file on the phone was written rather than when a server last spoke.
+// A cache the phone will not date can still be drawn, and then the word is the whole of
+// the line.
+//
+// It stands against the bottom edge rather than a fixed distance under the last flight:
+// the height a size has spare sits between the two, so the stamp is in the same place on
+// a widget holding two flights as on one holding seven. The Lock Screen has no line to
+// spare for it, and says what it can with the dot after its heading.
+function updatedLine(widget, result) {
+  const word = result.stale ? "Cached" : "Last updated";
+  const stamp = result.fetchedAt ? `${word} ${timeOfDay(result.fetchedAt)}` : word;
+  const line = widget.addText(stamp);
+  line.font = Font.systemFont(stampSize());
+  line.textColor = MUTED;
+  line.centerAlignText();
+  line.lineLimit = 1;
+  line.minimumScaleFactor = 0.7;
+}
+
+// Smaller than anything on a row, and smaller again on the square, where the type it is
+// under is already the size a 155pt widget can hold.
+function stampSize() {
+  return family === "small" ? 9 : 10;
+}
 
 function message(widget, headline, detail) {
   widget.addSpacer();
@@ -872,6 +899,15 @@ function timeZone() {
     console.warn(`could not read the time zone: ${error}`);
     return "";
   }
+}
+
+// A time of day as the phone writes one: its own zone, and 04:12 or 4:12 AM according to
+// how the reader has it set.
+function timeOfDay(date) {
+  const formatter = new DateFormatter();
+  formatter.useNoDateStyle();
+  formatter.useShortTimeStyle();
+  return formatter.string(date);
 }
 
 async function present(widget) {

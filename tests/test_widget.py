@@ -1211,24 +1211,25 @@ def test_the_gap_between_two_flights_is_one_fixed_distance_on_every_size() -> No
     where one flight ends and the next begins. It moved as well: a third flight booked,
     or a first one landed and dropped, redrew every row at a different pitch.
 
-    So the distance is fixed and the leftovers go under the last flight, where spare room
-    on a widget belongs. A row is a shade under 36 points - the heading, the line under
-    it, and the three between them - so the large's seven rows and six of these gaps fit
+    So the distance is fixed and the leftovers go between the last flight and the stamp
+    under it, where spare room on a widget belongs. A row is a shade under 36 points -
+    the heading, the line under it, and the three between them - and the stamp's line is
+    twelve, so the large's seven rows, six of these gaps and the line beneath them fit
     inside what a 6.1in phone's large widget holds, and the medium's three rows and two
-    gaps come out as close to full as that size gets. One figure rather than the medium's
-    eight points and the large's nine, because a break between two flights is the same
-    break whichever size draws it.
+    gaps do the same. One figure on every size, because a break between two flights is
+    the same break whichever size draws it.
     """
     source = script_source()
     assert "LARGE_GAP" not in source
-    assert "const FLIGHT_GAP = 10;" in source
+    assert "const FLIGHT_GAP = 8;" in source
     wide = source[source.index("function renderList(") : source.index("function titleRow(")]
     assert "widget.addSpacer(FLIGHT_GAP);" in wide
     assert "addSpacer(8)" not in wide and "addSpacer(9)" not in wide
     # The one fixed distance left inside a row: the heading and the line under it.
     assert "row.addSpacer(3);" in wide
     # And the flexible spacer is under the flights rather than between them, so a column
-    # of two starts where a column of seven starts.
+    # of two starts where a column of seven starts, and the stamp under both sits against
+    # the same edge.
     assert wide.index("widget.addSpacer(FLIGHT_GAP);") < wide.index("widget.addSpacer();")
     assert wide.count("widget.addSpacer();") == 1
 
@@ -1401,7 +1402,7 @@ def test_the_wide_sizes_draw_every_row_at_one_size() -> None:
     source = script_source()
     for drawn in (
         source[source.index("function targetLabel(") : source.index("// The other half")],
-        source[source.index("function pill(") : source.index("// Nothing is drawn under")],
+        source[source.index("function pill(") : source.index("// The bottom of the widget")],
     ):
         assert "minimumScaleFactor" in drawn
         assert 'if (family === "small") {' in drawn
@@ -1470,48 +1471,55 @@ def test_the_route_is_set_rather_than_left_to_fit() -> None:
     assert "Font.regularMonospacedSystemFont(TYPE.route)" in source
 
 
-def test_nothing_is_drawn_under_the_flights() -> None:
-    """Three lines have stood under the list and all three are gone.
+def test_the_stamp_is_the_one_line_under_the_flights() -> None:
+    """`Last updated 04:12`, centred, on the phone's own clock, and on every home screen
+    size: the square, the medium and the large, with flights on them or without. It is
+    a clock face rather than an age, because an age written at draw time is wrong by the
+    time it is read, and it is `Cached` in front of the time when the server could not
+    be reached, because then the time is when a file on the phone was written.
 
-    The clock its times were on, the moment the data was fetched, and the reason the
-    server gave for its own data being behind. Each was true; none of them was what a
-    widget is picked up for. The last to go was the strongest - the degraded reason says
-    the numbers may be behind, which the numbers cannot show for themselves - and it
-    still went, because it stood on every draw of a widget whose numbers are almost
-    always fine, and the height it stood in belongs to a size that fits its rows within
-    a point or two.
-
-    What is left under the last flight is the widget's own inset. The board is a tap
-    away and has room to say the rest properly.
+    The Lock Screen has no line to spare and keeps its dot. Nothing else stands down
+    there: not the clock the times are on, and not the server's reason for being behind.
     """
-    code = "\n".join(
-        line for line in script_source().splitlines() if not line.lstrip().startswith("//")
-    )
-    for gone in (
-        "Last updated",
-        "Cached",
-        "degraded",
-        "footer",
-        "updatedLine",
-        "staleNote",
-        "timeOfDay",
-        "fetchedAt",
-    ):
+    source = script_source()
+    code = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("//"))
+    stamp = source[source.index("function updatedLine(") : source.index("function message(")]
+    assert 'const word = result.stale ? "Cached" : "Last updated";' in stamp
+    assert "result.fetchedAt ? `${word} ${timeOfDay(result.fetchedAt)}` : word" in stamp
+    assert "line.centerAlignText();" in stamp
+    assert "line.textColor = MUTED;" in stamp
+    assert "line.font = Font.systemFont(stampSize());" in stamp
+    assert 'return family === "small" ? 9 : 10;' in stamp
+    # Drawn after the flights on every home screen size, and after the message when
+    # there are none, with the flexible spacer above it holding it against the bottom.
+    built = source[
+        source.index("async function buildWidget(") : source.index("function newWidget(")
+    ]
+    drawn = "updatedLine(widget, result);"
+    assert built.count(drawn) == 2
+    assert built.index("renderList(widget, flights, logos);") < built.rindex(drawn)
+    assert built.index("renderAccessory(") < built.rindex(drawn)
+    assert built.index('message(widget, "No upcoming flights");') < built.index(drawn)
+    assert f"if (!isAccessory) {{\n      {drawn}" in built
+    for gone in ("degraded", "footer", "staleNote", "CLOCK_NOTE"):
         assert gone not in code, gone
 
 
-def test_the_cache_keeps_no_date_now_that_nothing_reads_one() -> None:
-    """`stale` is all that is left of where the flights came from: the lock screen's dot,
-    and the guard that keeps a reload which never reached the server from replacing the
-    script with a copy it did not fetch. Nothing draws the age, so nothing reads the
-    cache file's modification time."""
+def test_the_cache_is_dated_by_the_file_that_holds_it() -> None:
+    """`fetchedAt` is the moment the flights being drawn came from: now when the server
+    answered, and the cache file's own modification date when it did not. A cache the
+    phone will not date is still drawn; the stamp is then the word on its own."""
     source = script_source()
     read = source[source.index("function readCache(") : source.index("// Each carrier's mark")]
-    assert "return JSON.parse(fm.readString(path));" in read
-    assert "modificationDate" not in source
+    assert (
+        "return { data: JSON.parse(fm.readString(path)), cachedAt: fm.modificationDate(path) };"
+        in read
+    )
     load = source[source.index("async function load(") : source.index("async function request(")]
+    assert "{ data, stale: false, fetchedAt: new Date(), rejected: false, error: null }" in load
+    assert "fetchedAt: cached.cachedAt" in load
     assert load.count("stale: true") == 1
-    assert "new Date()" not in load
+    assert load.count("fetchedAt:") == 4
 
 
 def test_the_lock_screen_gives_the_rung_its_own_line() -> None:
