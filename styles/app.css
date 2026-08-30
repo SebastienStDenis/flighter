@@ -486,8 +486,10 @@
      The rows carry their own padding so that a divider sits centred between two of them,
      and on the first row that padding lands on top of the card's own gap and reads as a
      hole under the heading. Only where there is a heading above it: a card that is
-     nothing but the list keeps its rows' padding as the card's own. */
-  .card > header + section > .divide-y {
+     nothing but the list keeps its rows' padding as the card's own. An Advanced heading
+     is a heading too. */
+  .card > header + section > .divide-y,
+  .accordion-tight > details > summary + .divide-y {
     @apply -mt-3 -mb-3;
   }
 
@@ -599,21 +601,20 @@
     @apply no-underline;
   }
 
-  /* Basecoat sizes its accordion for a page of prose. Here a disclosure sits inside a
-     step or a card, where that much air reads as a gap rather than as grouping. */
+  /* An Advanced box is a card whose heading is its whole header: the same 16px in from
+     every edge, 16px between the heading and what is under it, and 16px under that.
+     Basecoat's paddings already say so; what it adds is a transparent border on the
+     summary for its focus ring to colour, which stands the heading a pixel further in
+     than a card's title. The ring draws without it. */
   /* Centred, because Basecoat starts its chevron at the top of the first line for a
      summary that runs to several. Every one of these is a single phrase, and against
      one line the arrow sits high by half the difference between its 16px and the line
      it is meant to be pointing at. */
   .accordion-tight > details > summary {
-    @apply items-center py-2.5;
+    @apply items-center border-0;
   }
 
-  .accordion-tight > details > :not(summary) {
-    @apply pb-3;
-  }
-
-  /* Tighter again for a disclosure hanging off a step, where the step's own padding is
+  /* Tighter, for a disclosure hanging off a step, where the step's own padding is
      already holding it apart from the one below. */
   .accordion-inline > details > summary {
     @apply w-fit items-center justify-start gap-1 py-1;
