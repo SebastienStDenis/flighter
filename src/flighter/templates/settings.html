@@ -525,8 +525,7 @@
          icon to ask the registry; a checkmark on it once a check pressed on this page
          says nothing is newer; an Update button naming the newer build beside the one
          it would replace. Anything longer than the line - a restart under way, a
-         registry that would not answer, a Watchtower still to be connected - goes on
-         the note underneath. #}
+         registry that would not answer - goes on the note underneath. #}
       <div class="py-4" id="update-row" data-build="{{ build_id }}"
            data-watchtower="{{ '1' if watchtower_ready else '' }}">
         <p class="text-sm font-medium">Version</p>
@@ -1059,8 +1058,9 @@
   // One line, three answers. Nothing newer: a checkmark on the version number, but
   // only when `checked` says a check was pressed on this page - the load-time pass
   // leaves it down. Something newer: an up arrow and its number - a button while
-  // Watchtower is there to press it at, plain words while it is not, with the note
-  // underneath saying where to connect one. No answer: the note says why not.
+  // Watchtower is there to press it at, plain words while it is not; connecting one
+  // is an advanced setting, so the row does not campaign for it. No answer: the note
+  // says why not.
   function showUpdateState(state, checked) {
     var watchtower = !!document.getElementById("update-row").dataset.watchtower;
     var current = state.available === false;
@@ -1080,9 +1080,7 @@
       var to = shortSha(state.latest);
       document.getElementById("update-run-to").textContent = to;
       document.getElementById("update-newer-to").textContent = to;
-      updateNote(
-        watchtower ? "" : "Connect Watchtower under Connections to install updates from here."
-      );
+      updateNote("");
     } else if (current) {
       updateNote("");
     } else if (state.running) {
