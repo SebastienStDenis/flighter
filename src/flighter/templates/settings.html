@@ -524,9 +524,10 @@
          waits on that connection. One line, three states: the running version in a
          quiet chip, with a refresh icon to ask the registry; the chip gone green under
          a checkmark once a check pressed on this page says nothing is newer; a second
-         chip naming the newer build beside the one it would replace. Anything longer
-         than the line - a restart under way, a registry that would not answer - goes
-         on the note underneath. #}
+         chip naming the newer build beside the one it would replace. The note
+         underneath speaks only when something went wrong - a registry that would not
+         answer, a Watchtower that refused; while an update runs, the button's own
+         spinner is the whole of the story. #}
       <div class="py-4" id="update-row" data-build="{{ build_id }}"
            data-watchtower="{{ '1' if watchtower_ready else '' }}">
         <p class="text-sm font-medium">Version</p>
@@ -555,7 +556,7 @@
                Watchtower is connected - a real button - and the flat amber wash of an
                inactive chip while it is not. The button submits the real form kept
                outside this one, because forms do not nest. #}
-            <button class="btn shrink-0" data-size="xs" type="submit"
+            <button class="btn busy-swap shrink-0" data-size="xs" type="submit"
                     form="update-form" id="update-run" title="Update" hidden>
               <svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                    stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
@@ -573,7 +574,7 @@
               <span class="sr-only">Newer build </span><span class="font-mono" id="update-newer-to"></span>
             </span>
           </p>
-          <button class="btn refresh-button shrink-0" data-variant="ghost"
+          <button class="btn busy-swap shrink-0" data-variant="ghost"
                   data-size="icon-sm" type="button" id="update-check"
                   onclick="checkForUpdates(this)" title="Check for updates"
                   aria-label="Check for updates">
@@ -1114,9 +1115,11 @@
     });
   })();
 
+  // While the update runs, the button's arrow turned spinner is the whole of the
+  // story: the note stays for what goes wrong, not for narrating what is going right.
   async function runUpdate(button) {
     setBusy(button, true);
-    updateNote("Asking Watchtower…");
+    updateNote("");
     try {
       var response = await fetch("/settings/update", {
         method: "POST",
@@ -1134,7 +1137,6 @@
     } catch (error) {
       // The connection dying mid-request is the update reaching this very container.
     }
-    updateNote("Updating — Flighter is restarting, this page will reload itself…");
     awaitRestart(button);
   }
 

@@ -664,13 +664,15 @@
     border-top-color: currentColor;
   }
 
-  /* A refresh icon asked to wait steps aside for a plain spinner: the icon goes and
-     the circle stands where it stood, so an icon-sized button stays icon-sized. */
-  .btn.refresh-button.is-busy::before {
+  /* A button asked to wait becomes its own spinner: the icon steps aside and the
+     circle stands where it stood - the refresh arrows while a check runs, the update
+     arrow while Watchtower pulls the new build. The button's own gap spaces the
+     circle off any words beside it, so no margin of its own. */
+  .btn.busy-swap.is-busy::before {
     @apply mr-0;
   }
 
-  .btn.refresh-button.is-busy svg {
+  .btn.busy-swap.is-busy svg {
     @apply hidden;
   }
 
