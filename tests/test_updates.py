@@ -15,10 +15,11 @@ import pytest
 
 from flighter import updates
 from flighter.config import Settings
-from flighter.updates import ImageRef, UpdateStatus, parse_image
+from flighter.updates import ImageRef, Published, UpdateStatus, parse_image
 
 RUNNING = "a" * 40
 NEWER = "b" * 40
+VERSION = "v348"
 
 REF = ImageRef("ghcr.io", "sebastienstdenis/flighter", "latest")
 
@@ -34,7 +35,14 @@ INDEX = {
 
 MANIFEST = {"config": {"digest": "sha256:cfg"}}
 
-CONFIG = {"config": {"Labels": {"org.opencontainers.image.revision": NEWER}}}
+CONFIG = {
+    "config": {
+        "Labels": {
+            "org.opencontainers.image.revision": NEWER,
+            "org.opencontainers.image.version": VERSION,
+        }
+    }
+}
 
 
 def registry(asked: list[str] | None = None) -> httpx.MockTransport:
@@ -96,22 +104,25 @@ def test_the_watchtower_filter_is_the_ref_without_the_tag() -> None:
     assert REF.name == "ghcr.io/sebastienstdenis/flighter"
 
 
-async def test_the_revision_is_read_off_the_image_config() -> None:
+async def test_the_revision_and_version_are_read_off_the_image_config() -> None:
     async with httpx.AsyncClient(transport=registry(), follow_redirects=True) as client:
-        assert await updates.published_revision(REF, client) == NEWER
+        assert await updates.published_build(REF, client) == Published(NEWER, VERSION)
 
 
 async def test_the_token_dance_happens_once_for_the_whole_walk() -> None:
     asked: list[str] = []
     async with httpx.AsyncClient(transport=registry(asked), follow_redirects=True) as client:
-        await updates.published_revision(REF, client)
+        await updates.published_build(REF, client)
     assert asked.count("/token") == 1
 
 
 async def test_index_annotations_answer_without_the_walk() -> None:
     annotated = {
         "manifests": INDEX["manifests"],
-        "annotations": {"org.opencontainers.image.revision": NEWER},
+        "annotations": {
+            "org.opencontainers.image.revision": NEWER,
+            "org.opencontainers.image.version": VERSION,
+        },
     }
     asked: list[str] = []
 
@@ -120,8 +131,49 @@ async def test_index_annotations_answer_without_the_walk() -> None:
         return httpx.Response(200, json=annotated)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
-        assert await updates.published_revision(REF, client) == NEWER
+        assert await updates.published_build(REF, client) == Published(NEWER, VERSION)
     assert asked == ["/v2/sebastienstdenis/flighter/manifests/latest"]
+
+
+async def test_a_revision_alone_at_the_index_still_walks_for_the_version() -> None:
+    """Images from before the workflow counted versions annotate only their commit."""
+    annotated = {
+        "mediaType": INDEX["mediaType"],
+        "manifests": INDEX["manifests"],
+        "annotations": {"org.opencontainers.image.revision": NEWER},
+    }
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        answers = {
+            "/v2/sebastienstdenis/flighter/manifests/latest": annotated,
+            "/v2/sebastienstdenis/flighter/manifests/sha256:amd": MANIFEST,
+            "/v2/sebastienstdenis/flighter/blobs/sha256:cfg": CONFIG,
+        }
+        payload = answers.get(request.url.path)
+        return httpx.Response(200, json=payload) if payload else httpx.Response(404)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        assert await updates.published_build(REF, client) == Published(NEWER, VERSION)
+
+
+async def test_a_version_that_echoes_the_tag_is_not_one() -> None:
+    """The metadata step used to derive the version label from the tag, as "latest"."""
+    echoing = {
+        "config": {
+            "Labels": {
+                "org.opencontainers.image.revision": NEWER,
+                "org.opencontainers.image.version": "latest",
+            }
+        }
+    }
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/v2/sebastienstdenis/flighter/blobs/"):
+            return httpx.Response(200, json=echoing)
+        return httpx.Response(200, json=MANIFEST)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        assert await updates.published_build(REF, client) == Published(NEWER, None)
 
 
 async def test_an_unlabelled_image_answers_none_rather_than_raising() -> None:
@@ -134,7 +186,7 @@ async def test_an_unlabelled_image_answers_none_rather_than_raising() -> None:
         return handle(request)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(blob)) as client:
-        assert await updates.published_revision(REF, client) is None
+        assert await updates.published_build(REF, client) == Published(None, None)
 
 
 def test_available_is_honest_about_what_it_cannot_compare() -> None:
@@ -278,6 +330,7 @@ async def test_a_failed_registry_read_is_not_stamped_as_fresh(
 
     state = await updates.status(transport=registry())
     assert state.latest == NEWER
+    assert state.latest_version == VERSION
     assert state.error is None
     assert state.checked is not None
 

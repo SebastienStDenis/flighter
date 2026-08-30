@@ -34,6 +34,16 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The version below is a commit count, so the whole history has to be here.
+          fetch-depth: 0
+
+      # Nobody bumps a version by hand: the number is how many commits stand behind
+      # this build, so it rises on its own with every push and rebuilding the same
+      # commit yields the same number. The commit sha stays the identity the update
+      # check compares; this is the name a person reads.
+      - id: version
+        run: echo "version=v$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -71,6 +81,12 @@ jobs:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
           images: ghcr.io/${{ github.repository }}
+          # Overwrite the generated version label - "latest", read off the tag - with
+          # the counted one, so the registry can say what number the tag now carries.
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          annotations: |
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-
@@ -85,9 +101,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
-          # The settings page's update check compares this stamp with the revision
-          # the metadata step puts on the published image.
+          # The settings page's update check compares the sha stamp with the revision
+          # the metadata step puts on the published image; the version stamp is the
+          # human name the page shows for it.
           build-args: |
             GIT_SHA=${{ github.sha }}
+            GIT_VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

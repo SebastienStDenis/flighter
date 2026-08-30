@@ -1,23 +1,32 @@
 # Updating from the settings page
 
 The Advanced section at the foot of **Settings → Preferences** holds the Version row:
-the commit the running container was built from, with a refresh icon that asks the
+the version the running container was built as, with a refresh icon that asks the
 registry whether it holds a newer one. Nothing newer puts a checkmark next to the
 version; something newer shows an up arrow with the newer build's number - a button,
 once Watchtower is connected under **Settings → Connections → Advanced**, or plain
 text without one. The check works with no Watchtower at all; only installing needs it.
 
+The version number is nobody's to bump: the release workflow counts the commits
+behind each build (`git rev-list --count`), so `v348` simply means the 348th commit
+on `main` and the next push mints the next number on its own. The commit itself is
+still the exact identity of a build - it sits under the version's hover, and it is
+what the update check actually compares; the number is the name a person reads.
+
 ## How it works
 
 Flighter never touches the Docker socket. Three small parts add up to the button:
 
-1. **The image knows its commit.** The release workflow passes `GIT_SHA` as a build
-   argument, and the Dockerfile stamps it into the image as `FLIGHTER_BUILD_SHA`.
+1. **The image knows its commit and its number.** The release workflow passes
+   `GIT_SHA` and the counted `GIT_VERSION` as build arguments, and the Dockerfile
+   stamps them into the image as `FLIGHTER_BUILD_SHA` and `FLIGHTER_BUILD_VERSION`.
 2. **The registry says which commit `:latest` is.** The app reads the standard
    `org.opencontainers.image.revision` label off the published image (an anonymous
    pull-scope token is enough for a public image), caches the answer for an hour, and
-   compares; the refresh icon asks afresh regardless of the cache. A locally
-   built image has no stamp; the row says so instead of guessing.
+   compares; the refresh icon asks afresh regardless of the cache. The
+   `org.opencontainers.image.version` label rides along so a newer build is offered
+   under its number rather than its commit. A locally built image has no stamp; the
+   row says so instead of guessing.
 3. **Watchtower does the swap.** The Update button POSTs to Watchtower's HTTP API
    (`/v1/update`, scoped to the Flighter image), and Watchtower pulls the image and
    recreates the container. Because Watchtower answers only after the work is done,
