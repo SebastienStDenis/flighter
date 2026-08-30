@@ -49,45 +49,58 @@
       <h3 class="max-w-full"><span class="truncate pe-0.5 italic">{{ v.subject }}</span></h3>
       {% if v.account %}<p>{{ v.account }}</p>{% endif %}
     </section>
-    <aside class="flex-col items-end gap-1 self-start">
-      <div class="flex items-center gap-1">
-        {{ m.badge(v.status) }}
-        <a class="btn -mr-2" data-variant="ghost" data-size="icon-sm"
-           href="{{ email_url(v.row.message_id) }}"
-           title="Open in Mail" aria-label="Open in Mail">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect width="20" height="16" x="2" y="4" rx="2"/>
-            <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
-          </svg>
-        </a>
-      </div>
-      <span class="text-xs whitespace-nowrap text-muted-foreground">{{ v.when }}</span>
-    </aside>
-    {% if v.flights %}
-    <footer class="mt-2 flex-wrap justify-start gap-2">
-      {% for booking in v.flights %}
-      <a class="btn font-mono" data-variant="outline" data-size="xs" href="/f/{{ booking.id }}">
-        {{ m.logo(booking.marketing_carrier, "size-4") }}
-        {{ booking.marketing_carrier }}{{ booking.marketing_number }}
-        <span class="font-normal text-muted-foreground">
-          {{- booking.origin_iata }} &rarr; {{ booking.dest_iata }}</span>
+    <aside class="items-center gap-1 self-start">
+      {{ m.badge(v.status) }}
+      <a class="btn -mr-2" data-variant="ghost" data-size="icon-sm"
+         href="{{ email_url(v.row.message_id) }}"
+         title="Open in Mail" aria-label="Open in Mail">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect width="20" height="16" x="2" y="4" rx="2"/>
+          <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+        </svg>
       </a>
-      {% endfor %}
+    </aside>
+    {# How long ago closes the card, in the corner the eye leaves it on: it is the least
+       of what the card says, so it goes under everything the card is actually for. #}
+    {% set stamp %}
+    <span class="shrink-0 text-xs whitespace-nowrap text-muted-foreground">{{ v.when }}</span>
+    {% endset %}
+    {% if v.flights %}
+    {# The pills take the whole line and wrap down it: each one is a fixed width of words,
+       so on a narrow screen they stack rather than push the stamp off the corner. #}
+    <footer class="mt-2 items-end gap-2">
+      <div class="flex min-w-0 flex-1 flex-wrap justify-start gap-2">
+        {% for booking in v.flights %}
+        <a class="btn font-mono" data-variant="outline" data-size="xs" href="/f/{{ booking.id }}">
+          {{ m.logo(booking.marketing_carrier, "size-4") }}
+          {{ booking.marketing_carrier }}{{ booking.marketing_number }}
+          <span class="font-normal text-muted-foreground">
+            {{- booking.origin_iata }} &rarr; {{ booking.dest_iata }}</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% if not v.waiting %}{{ stamp }}{% endif %}
     </footer>
     {% endif %}
     {% if v.waiting %}
-    <footer class="mt-2 flex-wrap justify-start gap-2">
-      <form method="post" action="/mail/retry">
-        <input type="hidden" name="message_id" value="{{ v.row.message_id }}">
-        <button class="btn" data-variant="outline" data-size="sm" type="submit">
-          Try again</button>
-      </form>
-      <form method="post" action="/mail/ignore">
-        <input type="hidden" name="message_id" value="{{ v.row.message_id }}">
-        <button class="btn" data-variant="ghost" data-size="sm" type="submit">Ignore</button>
-      </form>
+    <footer class="mt-2 items-end gap-2">
+      <div class="flex min-w-0 flex-1 flex-wrap justify-start gap-2">
+        <form method="post" action="/mail/retry">
+          <input type="hidden" name="message_id" value="{{ v.row.message_id }}">
+          <button class="btn" data-variant="outline" data-size="sm" type="submit">
+            Try again</button>
+        </form>
+        <form method="post" action="/mail/ignore">
+          <input type="hidden" name="message_id" value="{{ v.row.message_id }}">
+          <button class="btn" data-variant="ghost" data-size="sm" type="submit">Ignore</button>
+        </form>
+      </div>
+      {{ stamp }}
     </footer>
+    {% endif %}
+    {% if not v.flights and not v.waiting %}
+    <footer class="justify-end">{{ stamp }}</footer>
     {% endif %}
   </div>
   {% endfor %}
