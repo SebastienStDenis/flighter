@@ -2770,6 +2770,26 @@ def test_a_connected_watchtower_is_marked_on_the_row(
     assert "wt-api-token-value" not in body
 
 
+def test_the_version_row_wears_the_counted_number_over_the_commit(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The row reads as a version, with the exact commit waiting under the hover."""
+    monkeypatch.setattr(updates, "RUNNING_SHA", "c" * 40)
+    monkeypatch.setattr(updates, "RUNNING_VERSION", "v348")
+    body = client.get("/settings").text
+    assert ">v348<" in body
+    assert f'title="{"c" * 40}"' in body
+
+
+def test_a_build_from_before_the_count_still_shows_its_commit(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(updates, "RUNNING_SHA", "c" * 40)
+    monkeypatch.setattr(updates, "RUNNING_VERSION", "")
+    body = client.get("/settings").text
+    assert f">{'c' * 7}<" in body
+
+
 def test_the_update_check_says_what_runs_and_what_is_published(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2777,12 +2797,16 @@ def test_the_update_check_says_what_runs_and_what_is_published(
         *, refresh: bool = True, force: bool = False, transport: Any = None
     ) -> updates.UpdateStatus:
         assert refresh and not force
-        return updates.UpdateStatus(running="a" * 40, latest="b" * 40, checked=1.0)
+        return updates.UpdateStatus(
+            running="a" * 40, latest="b" * 40, checked=1.0, latest_version="v348"
+        )
 
     monkeypatch.setattr(updates, "status", checked)
     answer = client.get("/settings/update/check").json()
     assert answer["available"] is True
     assert answer["running"] == "a" * 40 and answer["latest"] == "b" * 40
+    # The name the newer build is offered under; the comparison stays on the commits.
+    assert answer["latest_version"] == "v348"
     # What the poll after an update actually watches: any new image changes it.
     assert answer["build"]
 

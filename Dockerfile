@@ -23,11 +23,13 @@ COPY --chown=app:app scripts /app/scripts
 RUN mkdir -p /app/data && chown app:app /app/data
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
 
-# The commit this image was built from, stamped in by the release workflow so the
-# settings page can compare the running build with the registry's newest and offer an
-# update. Empty in a local build, which the page reads as "cannot say".
+# The commit this image was built from and the counted version number it goes by,
+# both stamped in by the release workflow: the commit is what the settings page
+# compares with the registry's newest to offer an update, the version is the name it
+# shows for either. Empty in a local build, which the page reads as "cannot say".
 ARG GIT_SHA=""
-ENV FLIGHTER_BUILD_SHA=$GIT_SHA
+ARG GIT_VERSION=""
+ENV FLIGHTER_BUILD_SHA=$GIT_SHA FLIGHTER_BUILD_VERSION=$GIT_VERSION
 
 USER app
 WORKDIR /app

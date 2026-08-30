@@ -542,7 +542,10 @@
                   </svg>
                   <span class="sr-only">Current version</span>
                 </span>
-                {%- if running_build %}<span class="font-mono">{{ running_build }}</span>
+                {#- The counted version number reads better than a commit, but the
+                    commit is still the exact answer, so it waits under the hover. #}
+                {%- if running_build %}<span class="font-mono"
+                  {%- if running_sha %} title="{{ running_sha }}"{% endif %}>{{ running_build }}</span>
                 {%- else %}Unstamped build{% endif %}
               </span>
               {# A newer build is a second chip right off the one it would replace, the
@@ -1085,7 +1088,9 @@
     document.getElementById("update-run").hidden = !(newer && watchtower);
     document.getElementById("update-newer").hidden = !(newer && !watchtower);
     if (newer) {
-      var to = shortSha(state.latest);
+      // The newer build under its counted version number where the registry says
+      // one, the short commit for builds from before the workflow counted.
+      var to = state.latest_version || shortSha(state.latest);
       document.getElementById("update-run-to").textContent = to;
       document.getElementById("update-newer-to").textContent = to;
       updateNote("");

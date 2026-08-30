@@ -629,7 +629,11 @@ def create_app(settings: Settings) -> FastAPI:
             # The Watchtower address is the other value shown back: a name on the
             # compose network, not a secret.
             "watchtower_url": settings.watchtower_url,
-            "running_build": updates.RUNNING_SHA[:7],
+            # The counted version number where the workflow stamped one, the short
+            # commit for images from before it counted; the full commit rides along
+            # as the hover for whoever needs the exact build.
+            "running_build": updates.RUNNING_VERSION or updates.RUNNING_SHA[:7],
+            "running_sha": updates.RUNNING_SHA,
             # The widget token is the other exception: it is handed to your own phone,
             # through the Connect link, and this page is where the phone gets it from.
             "widget_token": settings.widget_token,
@@ -900,6 +904,9 @@ def create_app(settings: Settings) -> FastAPI:
             {
                 "running": state.running,
                 "latest": state.latest,
+                # The number the newer build goes by, when the registry says one;
+                # display only, the comparison above is between commits.
+                "latest_version": state.latest_version,
                 "available": state.available,
                 "error": state.error,
                 "build": build,

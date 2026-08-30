@@ -29,17 +29,22 @@ from .config import Settings
 
 log = logging.getLogger(__name__)
 
-# Stamped by the release workflow (a build argument the Dockerfile turns into this
-# variable), so a container knows the commit it was built from. Empty in a checkout and
-# in images from before the workflow stamped it, which reads as "cannot say" rather
-# than breaking anything: the button still works, only the comparison goes quiet.
+# Stamped by the release workflow (build arguments the Dockerfile turns into these
+# variables), so a container knows the commit it was built from and the version number
+# the workflow counted for it - nobody sets that number, it is the commit count of the
+# build. Empty in a checkout and in images from before the workflow stamped them, which
+# reads as "cannot say" rather than breaking anything: the button still works, only
+# the comparison (or the friendlier name) goes quiet.
 RUNNING_SHA: Final = os.environ.get("FLIGHTER_BUILD_SHA", "")
+RUNNING_VERSION: Final = os.environ.get("FLIGHTER_BUILD_VERSION", "")
 
 # What the compose stack pulls, which is what "a new version" is measured against.
 IMAGE: Final = os.environ.get("FLIGHTER_IMAGE", "ghcr.io/sebastienstdenis/flighter:latest")
 
-# The standard OCI label the release workflow's metadata step already writes.
+# The standard OCI labels the release workflow writes: the revision is the identity
+# two builds are compared by, the version the name a newer one is offered under.
 REVISION_LABEL: Final = "org.opencontainers.image.revision"
+VERSION_LABEL: Final = "org.opencontainers.image.version"
 
 # A fresh answer is good for an hour: builds land on pushes to main, not by the minute,
 # and the settings page should not put four registry round trips behind every visit.
@@ -125,8 +130,8 @@ async def _registry_get(
     return response
 
 
-def _annotated(payload: Mapping[str, Any]) -> str | None:
-    value = (payload.get("annotations") or {}).get(REVISION_LABEL)
+def _named(values: Mapping[str, Any], key: str) -> str | None:
+    value = values.get(key)
     return value if isinstance(value, str) and value else None
 
 
@@ -146,34 +151,56 @@ def _platform_digest(index: Mapping[str, Any]) -> str | None:
     return None
 
 
-async def published_revision(ref: ImageRef, client: httpx.AsyncClient) -> str | None:
-    """The commit the registry's copy of the tag was built from, or None if it is unsaid.
+@dataclass(frozen=True)
+class Published:
+    """What the registry's copy of the tag says about itself, either part optional."""
 
-    The release workflow labels every image with its commit, so the answer is in the
-    image config; index and manifest annotations are read on the way because either
-    is the same answer one or two round trips sooner when present.
+    revision: str | None = None
+    version: str | None = None
+
+
+async def published_build(ref: ImageRef, client: httpx.AsyncClient) -> Published:
+    """The commit the registry's copy of the tag was built from, and its version number.
+
+    The release workflow labels every image with both, so the answers are in the image
+    config; index and manifest annotations are read on the way because either place is
+    the same answer one or two round trips sooner when present. The walk stops as soon
+    as both are in hand and goes to the end for whichever is still missing - images
+    from before the workflow counted versions carry only the commit.
     """
     auth: dict[str, str] = {}
+    revision: str | None = None
+    version: str | None = None
+
+    def took_all(values: Mapping[str, Any]) -> bool:
+        nonlocal revision, version
+        revision = revision or _named(values, REVISION_LABEL)
+        # The metadata step used to derive this label from the tag, so a value merely
+        # echoing the tag ("latest") is the derivation, not a version.
+        found = _named(values, VERSION_LABEL)
+        version = version or (found if found != ref.tag else None)
+        return revision is not None and version is not None
+
     response = await _registry_get(client, auth, ref.manifest_url(ref.tag), _MANIFEST_TYPES)
     payload: dict[str, Any] = response.json()
-    if revision := _annotated(payload):
-        return revision
+    if took_all(payload.get("annotations") or {}):
+        return Published(revision, version)
     if "manifests" in payload:
         digest = _platform_digest(payload)
         if digest is None:
-            return None
+            return Published(revision, version)
         response = await _registry_get(client, auth, ref.manifest_url(digest), _MANIFEST_TYPES)
         payload = response.json()
-        if revision := _annotated(payload):
-            return revision
+        if took_all(payload.get("annotations") or {}):
+            return Published(revision, version)
     config = payload.get("config") or {}
     digest = config.get("digest")
     if not isinstance(digest, str):
-        return None
+        return Published(revision, version)
     response = await _registry_get(client, auth, ref.blob_url(digest), "application/octet-stream")
     labels = (response.json().get("config") or {}).get("Labels") or {}
-    value = labels.get(REVISION_LABEL)
-    return value if isinstance(value, str) and value else None
+    took_all(labels)
+    return Published(revision, version)
 
 
 @dataclass(frozen=True)
@@ -182,6 +209,9 @@ class UpdateStatus:
     latest: str | None = None
     error: str | None = None
     checked: float | None = None
+    # The published build's counted version number, carried for display alone: the
+    # comparison stays on commits, which name a build exactly.
+    latest_version: str | None = None
 
     @property
     def available(self) -> bool | None:
@@ -221,12 +251,16 @@ async def status(
             async with httpx.AsyncClient(
                 timeout=10, transport=transport, follow_redirects=True
             ) as client:
-                latest = await published_revision(parse_image(IMAGE), client)
+                published = await published_build(parse_image(IMAGE), client)
         except Exception as exc:
             log.warning("could not read the registry for %s", IMAGE, exc_info=True)
-            _status = UpdateStatus(RUNNING_SHA, _status.latest, str(exc))
+            _status = UpdateStatus(
+                RUNNING_SHA, _status.latest, str(exc), None, _status.latest_version
+            )
         else:
-            _status = UpdateStatus(RUNNING_SHA, latest, None, time.monotonic())
+            _status = UpdateStatus(
+                RUNNING_SHA, published.revision, None, time.monotonic(), published.version
+            )
     return _status
 
 
