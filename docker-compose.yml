@@ -34,10 +34,14 @@ services:
   # docs/updates.md.
   #
   # watchtower:
-  #   image: containrrr/watchtower
+  #   # The maintained fork; the archived containrrr/watchtower speaks the same API
+  #   # and works too.
+  #   image: nickfedor/watchtower
   #   container_name: watchtower
   #   restart: unless-stopped
   #   environment:
+  #     # The fork's spelling is WATCHTOWER_HTTP_API_ENDPOINTS=update; this older one
+  #     # is what both it and the original understand.
   #     - WATCHTOWER_HTTP_API_UPDATE=true
   #     - WATCHTOWER_HTTP_API_TOKEN=choose-a-long-random-string
   #     # Keeps the scheduled sweep running alongside the button; without this line,

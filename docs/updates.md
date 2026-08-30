@@ -27,9 +27,13 @@ Run Watchtower in the same compose stack with its HTTP API on - the commented bl
 
 ```yaml
 watchtower:
-  image: containrrr/watchtower
+  # The maintained fork (nicholas-fedor/watchtower); the archived
+  # containrrr/watchtower speaks the same API and works too.
+  image: nickfedor/watchtower
   restart: unless-stopped
   environment:
+    # The fork's own spelling is WATCHTOWER_HTTP_API_ENDPOINTS=update; this older
+    # one is understood by both it and the original.
     - WATCHTOWER_HTTP_API_UPDATE=true
     - WATCHTOWER_HTTP_API_TOKEN=choose-a-long-random-string
     # Keep the scheduled sweep as well as the button.
@@ -37,6 +41,11 @@ watchtower:
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
 ```
+
+Both implementations are spoken to the same way: `POST /v1/update` with the bearer
+token, scoped to the Flighter image. The fork routes that endpoint for POST alone, so
+the connection check knocks with POST too (and a deliberately wrong token, which
+either implementation turns away at the door without updating anything).
 
 Then, under **Settings → Connections → Advanced → Watchtower**, enter:
 

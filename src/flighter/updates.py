@@ -261,7 +261,11 @@ async def probe(
         if answer.status_code == 401:
             return False, "Watchtower rejected the token"
         try:
-            answer = await client.get(f"{base}/v1/update", headers=_bearer("deliberately-wrong"))
+            # POST, not GET: the maintained fork (nickfedor/watchtower) routes the
+            # update endpoint for POST alone and answers anything else 405 before its
+            # auth is ever consulted, while the original wraps auth around every
+            # method. A POST with a wrong token is refused at the door by both.
+            answer = await client.post(f"{base}/v1/update", headers=_bearer("deliberately-wrong"))
         except Exception as exc:
             return False, f"could not reach Watchtower at {base}: {exc}"
     if answer.status_code == 401:
@@ -336,6 +340,14 @@ async def trigger(
         return Outcome(False, f"could not reach Watchtower at {base}: {exc}")
     if response.status_code == 401:
         return Outcome(False, "Watchtower rejected the token.")
+    if response.status_code == 429:
+        # The fork holds one update at a time and says so; the original never sends it
+        # for a targeted request.
+        return Outcome(False, "Watchtower is busy with another update; try again in a moment.")
+    if response.status_code == 202:
+        # Accepted-but-not-done, from the fork's async mode: the outcome is unknown, so
+        # it is watched for the way silence is.
+        return Outcome(True, "Watchtower is updating.", restarting=True)
     if response.status_code != 200:
         return Outcome(False, f"Watchtower answered HTTP {response.status_code}.")
     # Answering at all means this container was not restarted, and that means there

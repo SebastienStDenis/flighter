@@ -173,13 +173,20 @@ async def test_the_probe_names_a_rejected_token(settings: Settings) -> None:
 async def test_the_probe_never_sends_the_real_token_at_the_update_endpoint(
     settings: Settings,
 ) -> None:
-    """With metrics off, the fallback knock must not be able to start an update."""
+    """With metrics off, the fallback knock must not be able to start an update.
+
+    The stand-in answers the way the maintained fork (nickfedor/watchtower) does: the
+    update route exists for POST alone and refuses any other method before it ever
+    reads the token, so a probe that knocked with GET would fail here on a 405.
+    """
     tokens: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/metrics":
             return httpx.Response(404)
         assert request.url.path == "/v1/update"
+        if request.method != "POST":
+            return httpx.Response(405)
         tokens.append(request.headers["Authorization"])
         return httpx.Response(401)
 
@@ -220,6 +227,27 @@ async def test_a_refusal_comes_back_as_one(settings: Settings) -> None:
     outcome = await updates.trigger(watchtower(settings), transport=httpx.MockTransport(handle))
     assert not outcome.ok
     assert "token" in outcome.detail
+
+
+async def test_a_busy_watchtower_is_a_message_rather_than_a_number(settings: Settings) -> None:
+    """The fork holds one update at a time and answers 429 while it does."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"Retry-After": "30"})
+
+    outcome = await updates.trigger(watchtower(settings), transport=httpx.MockTransport(handle))
+    assert not outcome.ok
+    assert "busy" in outcome.detail
+
+
+async def test_an_accepted_update_is_watched_rather_than_called_done(settings: Settings) -> None:
+    """202 is the fork's async mode: started, outcome unknown, so it reads as silence."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(202)
+
+    outcome = await updates.trigger(watchtower(settings), transport=httpx.MockTransport(handle))
+    assert outcome.ok and outcome.restarting
 
 
 async def test_silence_is_read_as_the_update_arriving(settings: Settings) -> None:
