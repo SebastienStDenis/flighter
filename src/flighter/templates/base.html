@@ -165,20 +165,32 @@
       if (document.visibilityState === "visible") reach();
       else show(false);
     }
+    // Under the stale mark the feed can have nothing newer, so a young page with no
+    // connection has nothing to warn about yet.
     function show(unreachable) {
+      if (since() < STALE_MS) return;
       stale.querySelector("[data-note]").textContent =
         (unreachable ? "No connection, loaded " : "Loaded ") + figure(since()) + " ago";
       stale.hidden = false;
     }
+    // A reload would eat whatever is half-typed in an open dialog, so it waits; the
+    // next minute's look, or the next return, reloads once the box is closed.
+    function refresh() {
+      if (document.querySelector("dialog[open]")) return;
+      location.reload();
+    }
     // The server's clock decides whether the page is really old before it is reloaded:
     // a phone whose clock runs ahead would otherwise find every fresh page stale and
-    // reload without end.
-    function reach() {
+    // reload without end. A return from the background reloads on any answer instead:
+    // the time away was measured here, against one clock, so there is no loop to guard
+    // against - and either way a page is only ever replaced when the server answered,
+    // so with no connection the copy in hand stays, whatever its age.
+    function reach(returned) {
       fetch("/healthz", { cache: "no-store", signal: AbortSignal.timeout(4000) }).then(
         function (response) {
           var serverNow = Date.parse(response.headers.get("date"));
           if (!response.ok) show(true);
-          else if (isNaN(serverNow) || serverNow - rendered >= STALE_MS) location.reload();
+          else if (returned || isNaN(serverNow) || serverNow - rendered >= STALE_MS) refresh();
           else stale.hidden = true;
         },
         function () {
@@ -186,9 +198,21 @@
         }
       );
     }
+    // Installed on a home screen or a dock the page is kept alive in the background
+    // rather than opened fresh, so bringing it forward is the one open that never asks
+    // the server - and a flagged email or an add from another device can land seconds
+    // later, well inside the stale mark. Back after more than a moment away, ask. The
+    // moment is so that flicking to another app and straight back does not flash.
+    var AWAY_MS = 30000;
+    var hiddenAt = NaN;
     window.addEventListener("online", age);
     document.addEventListener("visibilitychange", function () {
-      if (document.visibilityState === "visible") age();
+      if (document.visibilityState !== "visible") {
+        hiddenAt = Date.now();
+        return;
+      }
+      if (Date.now() - hiddenAt >= AWAY_MS) reach(true);
+      else age();
     });
 
     tick();
