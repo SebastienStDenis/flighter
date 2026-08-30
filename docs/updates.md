@@ -1,7 +1,8 @@
 # Updating from the settings page
 
-The Updates card on **Settings → Connections** shows the commit the running container
-was built from, whether the registry holds a newer one, and a button that swaps them.
+The Advanced section at the foot of **Settings → Connections** holds the Watchtower
+connection and an Updates row: the commit the running container was built from,
+whether the registry holds a newer one, and a button that swaps them.
 
 ## How it works
 
@@ -37,7 +38,7 @@ watchtower:
     - /var/run/docker.sock:/var/run/docker.sock
 ```
 
-Then, under **Settings → Connections → Watchtower**, enter:
+Then, under **Settings → Connections → Advanced → Watchtower**, enter:
 
 - **API address**: `http://watchtower:8080` (the compose service name; the port never
   needs publishing on the host, the app reaches it over the compose network).

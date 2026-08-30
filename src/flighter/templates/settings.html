@@ -251,7 +251,19 @@
                      rel="noopener">console.anthropic.com</a>. Only flagged emails are
                      processed.'},
          ], 'Extract flight details from email') }}
+    </div>
+  </section>
+</div>
 
+{# Watchtower is the one connection that is about the deployment rather than about a
+   flight, so it stands behind Advanced with the update button it powers rather than
+   among the accounts every deployment needs. What is published fills in after the
+   page, the way the calendar picker does; the button works without it, because
+   Watchtower checks for itself and pulling nothing is a no-op. #}
+<div class="accordion accordion-tight mt-3 rounded-lg border px-3">
+  <details>
+    <summary class="text-base font-semibold tracking-tight">Advanced {{ chevron() }}</summary>
+    <div class="divide-y">
       {{ account('watchtower', 'Watchtower', watchtower_ready, [
            {'name': 'watchtower_url', 'label': 'API address', 'type': 'text',
             'inputmode': 'url', 'value': watchtower_url,
@@ -262,41 +274,30 @@
            {'name': 'watchtower_token', 'label': 'API token',
             'help': 'The value of <code>WATCHTOWER_HTTP_API_TOKEN</code> on the
                      Watchtower container.'},
-         ], 'Update Flighter from the card below') }}
+         ], 'Update Flighter from the row below') }}
+      <div class="py-4">
+        <p class="text-sm font-medium">Updates</p>
+        {% if not watchtower_ready %}
+        <p class="mt-1 text-sm text-muted-foreground">Connect Watchtower above to pull
+          the newest published build from here. Until then its scheduled sweep, if one
+          is running, is what picks new builds up.</p>
+        {% else %}
+        <div class="mt-2 flex items-center gap-3" id="update-row" data-build="{{ build_id }}">
+          <p class="min-w-0 flex-1 text-xs text-muted-foreground" id="update-note"
+             role="status" aria-live="polite">
+            {%- if running_build %}Running <strong class="font-mono">{{ running_build }}</strong>.
+            {%- else %}Running an unstamped build.{% endif %}</p>
+          {# A real form so a browser with no script still has something to press; the
+             script intercepts it to watch the restart instead. #}
+          <form method="post" action="/settings/update" id="update-form">
+            <button class="btn shrink-0" data-variant="outline" data-size="sm"
+                    type="submit">Update</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
     </div>
-  </section>
-</div>
-
-{# The app's own version, and the button that hands the swap to Watchtower. A card of
-   its own rather than folded into the connection above: connecting Watchtower happens
-   once, updating is why this tab gets opened again. What is published fills in after
-   the page, the way the calendar picker does; the button works without it, because
-   Watchtower checks for itself and pulling nothing is a no-op. #}
-<div class="card mt-3" data-size="sm">
-  <header>
-    <h3>Updates</h3>
-    <p>Pull the newest published build and restart Flighter.</p>
-  </header>
-  <section>
-    {% if not watchtower_ready %}
-    <p class="text-sm text-muted-foreground">Connect Watchtower above to update from
-      here. Until then its scheduled sweep, if one is running, is what picks new builds
-      up.</p>
-    {% else %}
-    <div class="flex items-center gap-3" id="update-row" data-build="{{ build_id }}">
-      <p class="min-w-0 flex-1 text-xs text-muted-foreground" id="update-note"
-         role="status" aria-live="polite">
-        {%- if running_build %}Running <strong class="font-mono">{{ running_build }}</strong>.
-        {%- else %}Running an unstamped build.{% endif %}</p>
-      {# A real form so a browser with no script still has something to press; the
-         script intercepts it to watch the restart instead. #}
-      <form method="post" action="/settings/update" id="update-form">
-        <button class="btn shrink-0" data-variant="outline" data-size="sm"
-                type="submit">Update</button>
-      </form>
-    </div>
-    {% endif %}
-  </section>
+  </details>
 </div>
 {% endset %}
 
