@@ -520,22 +520,24 @@
           </select>
         </div>
       </fieldset>
-      {# Updates live here rather than beside the Watchtower connection: what is running
-         and whether the registry holds something newer are answerable with no
+      {# The version lives here rather than beside the Watchtower connection: what is
+         running and whether the registry holds something newer are answerable with no
          Watchtower at all, so the row stands on its own and only the Update button
          waits on that connection. One line, three states: the version with a refresh
-         icon to ask the registry; a checkmark on it once the registry says nothing is
-         newer; an Update button naming the newer build when there is one. Anything
-         longer than the line - a restart under way, a registry that would not answer,
-         a Watchtower still to be connected - goes on the note underneath. #}
-      <div class="border-t py-4" id="update-row" data-build="{{ build_id }}"
+         icon to ask the registry; a checkmark on it once a check pressed on this page
+         says nothing is newer; an Update button naming the newer build when there is
+         one. Anything longer than the line - a restart under way, a registry that
+         would not answer, a Watchtower still to be connected - goes on the note
+         underneath. #}
+      <div class="py-4" id="update-row" data-build="{{ build_id }}"
            data-watchtower="{{ '1' if watchtower_ready else '' }}">
-        <p class="text-sm font-medium">Updates</p>
+        <p class="text-sm font-medium">Version</p>
         <div class="mt-2 flex items-center gap-2">
           <p class="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-muted-foreground">
             {%- if running_build %}<strong class="font-mono">{{ running_build }}</strong>
             {%- else %}Unstamped build{% endif %}
-            {# The checkmark the registry earns: shown once it says nothing is newer. #}
+            {# The checkmark a pressed check earns: shown once the registry says nothing
+               is newer, and never carried over from an earlier page load. #}
             <span class="flex items-center" id="update-current" hidden>
               <svg class="size-4 text-ok" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
@@ -1013,9 +1015,10 @@
   }
 
   // What is running is in the page; what is published is a few registry round trips
-  // away, so the Updates row fills in after the page the way the calendar picker does.
+  // away, so the Version row fills in after the page the way the calendar picker does.
   // A check that fails changes nothing: the row already says what is running, and the
-  // Check button is there to ask again.
+  // Check button is there to ask again. This pass never raises the checkmark - that is
+  // earned by a check pressed on this page, not remembered from an earlier load.
   (async function () {
     if (!document.getElementById("update-row")) return;
     try {
@@ -1026,13 +1029,16 @@
   })();
 
   // The refresh icon is a person asking now, so the cached answer is not good enough:
-  // ?force=1 goes to the registry however recently the page last asked.
+  // ?force=1 goes to the registry however recently the page last asked. The checkmark
+  // goes down for the duration - it speaks for the answer under way, not the last one -
+  // and fades back in only if this check says nothing is newer.
   async function checkForUpdates(button) {
+    document.getElementById("update-current").hidden = true;
     setBusy(button, true);
     try {
       var response = await fetch("/settings/update/check?force=1");
       if (!response.ok) throw new Error(response.status);
-      showUpdateState(await response.json());
+      showUpdateState(await response.json(), true);
     } catch (error) {
       updateNote("Could not check for updates.");
     }
@@ -1049,15 +1055,24 @@
     note.hidden = !text;
   }
 
-  // One line, three answers. Nothing newer: a checkmark on the version number.
-  // Something newer: an up arrow and its number - a button while Watchtower is there
-  // to press it at, plain words while it is not, with the note underneath saying where
-  // to connect one. No answer: the note says why not.
-  function showUpdateState(state) {
+  // One line, three answers. Nothing newer: a checkmark on the version number, but
+  // only when `checked` says a check was pressed on this page - the load-time pass
+  // leaves it down. Something newer: an up arrow and its number - a button while
+  // Watchtower is there to press it at, plain words while it is not, with the note
+  // underneath saying where to connect one. No answer: the note says why not.
+  function showUpdateState(state, checked) {
     var watchtower = !!document.getElementById("update-row").dataset.watchtower;
     var current = state.available === false;
     var newer = state.available === true;
-    document.getElementById("update-current").hidden = !current;
+    var check = document.getElementById("update-current");
+    check.hidden = !(current && checked);
+    if (!check.hidden) {
+      // Taking the class off and forcing a reflow replays the fade on every check,
+      // not only the first: a checkmark that was up a moment ago still comes back in.
+      check.classList.remove("fade-in");
+      void check.offsetWidth;
+      check.classList.add("fade-in");
+    }
     document.getElementById("update-run").hidden = !(newer && watchtower);
     document.getElementById("update-newer").hidden = !(newer && !watchtower);
     if (newer) {

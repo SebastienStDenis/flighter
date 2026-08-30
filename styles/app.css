@@ -646,14 +646,26 @@
     border-top-color: currentColor;
   }
 
-  /* A refresh icon asked to wait is its own spinner: the arrows turn, rather than a
-     second circle squeezing in beside them on an icon-sized button. */
+  /* A refresh icon asked to wait steps aside for a plain spinner: the icon goes and
+     the circle stands where it stood, so an icon-sized button stays icon-sized. */
   .btn.refresh-button.is-busy::before {
-    @apply hidden;
+    @apply mr-0;
   }
 
   .btn.refresh-button.is-busy svg {
-    @apply animate-spin;
+    @apply hidden;
+  }
+
+  /* An element earned just now rather than remembered: it fades in instead of snapping.
+     The class is re-added on each earning, so the fade replays every time. */
+  .fade-in {
+    animation: fade-in 0.3s ease-out;
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
   }
 
   /* The button that copies a value stands on top of the value it copies, which is the

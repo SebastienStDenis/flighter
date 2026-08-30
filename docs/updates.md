@@ -1,6 +1,6 @@
 # Updating from the settings page
 
-The Advanced section at the foot of **Settings → Preferences** holds the Updates row:
+The Advanced section at the foot of **Settings → Preferences** holds the Version row:
 the commit the running container was built from, with a refresh icon that asks the
 registry whether it holds a newer one. Nothing newer puts a checkmark next to the
 version; something newer shows an up arrow with the newer build's number - a button,
