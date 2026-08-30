@@ -15,11 +15,11 @@ what it booked is still on the board the flag simply comes off again. Either way
 phone is told once, when there is nothing left to try, which is why the state already on
 file is read before the new one is written.
 
-No transaction is open while the model is reading an email. Every transaction here takes
-the database's one write lock the moment it begins, and a model call can take most of a
-minute, so a session held across it would hold every page of the web UI for as long.
-The row is read in one short transaction and written in another, with nothing locked
-between them.
+No transaction is open while the model is reading an email, or while the airline is being
+asked whether it flies what the email named. Every transaction here takes the database's
+one write lock the moment it begins, and either call can take most of a minute, so a
+session held across one would hold every page of the web UI for as long. The row is read
+in one short transaction and written in another, with nothing locked between them.
 """
 
 from __future__ import annotations
@@ -27,13 +27,16 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import notices, prefs
+from . import lookup, notices, prefs
+from .aeroapi import BudgetExceeded
 from .airports import UnknownAirport, airport_tz
 from .bookings import create_booking, find_duplicate, on_board_from_message
 from .config import Settings, get_settings
@@ -96,6 +99,19 @@ class Ingested(NamedTuple):
     retryable: bool = True
 
 
+class Scheduled(NamedTuple):
+    """An email's flights as the airline's own schedule states them.
+
+    `unpublished` names the flights the schedule was asked about and had no answer for.
+    A flight it could not be asked about - a date no schedule reaches yet, a spent
+    budget, a FlightAware that did not answer - is not one of them: not asked is not the
+    same as answered no, and an email is not thrown away over it.
+    """
+
+    segments: tuple[Segment, ...] = ()
+    unpublished: tuple[str, ...] = ()
+
+
 class Standing(NamedTuple):
     """What the ingest log already says about a message, and whether its flights are there.
 
@@ -132,6 +148,7 @@ async def process_message(message: Message, *, settings: Settings | None = None)
     settings = settings or get_settings()
     try:
         extraction = await _extract(message, settings)
+        scheduled = await _against_the_schedule(extraction)
     except Exception as exc:
         log.exception("failed to extract %s", message.id)
         async with session_scope() as session:
@@ -143,8 +160,15 @@ async def process_message(message: Message, *, settings: Settings | None = None)
                 return await _record(session, message, _no_flight(), extraction)
             if not extraction.segments:
                 return await _record(session, message, _unreadable(), extraction)
+            if scheduled.unpublished:
+                return await _record(
+                    session, message, _unpublished(scheduled.unpublished), extraction
+                )
             return await _record(
-                session, message, await _book(session, message, extraction), extraction
+                session,
+                message,
+                await _book(session, message, extraction, scheduled.segments),
+                extraction,
             )
         except UnknownAirport as exc:
             log.warning("%s names an airport we have no row for: %s", message.id, exc.iata)
@@ -164,6 +188,82 @@ async def _extract(message: Message, settings: Settings) -> Extraction | None:
     if not looks_like_flight(message):
         return None
     return from_jsonld(message.text_html) or await from_model(message, settings=settings)
+
+
+async def _against_the_schedule(extraction: Extraction | None) -> Scheduled:
+    """Ask the airline what each flight the email named is, before any of them is booked.
+
+    What the add form has always done and this path never did. An email is read, however
+    carefully, and a misreading books a flight nobody is on; a schedule is published, and
+    a number no airline publishes that day is not a flight whatever the email seemed to
+    say.
+
+    An email that names one is booked no further, not even the legs of it that are real:
+    an itinerary read wrongly enough to invent a flight is not one to trust the rest of,
+    and the email keeps its flag with the flight named for a person to look at.
+
+    Nothing is locked while this runs, as during the model call above it: every lookup
+    opens transactions of its own, and a session held across one would hold the whole web
+    UI for as long as FlightAware takes to answer.
+    """
+    if extraction is None or not extraction.is_flight_confirmation:
+        return Scheduled()
+    published = [await _as_published(segment) for segment in extraction.segments]
+    return Scheduled(
+        tuple(segment for segment in published if segment is not None),
+        tuple(
+            f"{stated.marketing_carrier}{stated.marketing_number}"
+            for stated, found in zip(extraction.segments, published, strict=True)
+            if found is None
+        ),
+    )
+
+
+async def _as_published(segment: Segment) -> Segment | None:
+    """The segment as the airline publishes it, or None when no airline publishes it.
+
+    The email is kept for everything a schedule does not state - the confirmation codes,
+    the seat - and the schedule wins on everything it does, which is the bargain the add
+    form strikes: what is typed is a flight number and a day, and where it goes and when
+    are the airline's to say.
+    """
+    departure = segment.departure_at
+    flight = f"{segment.marketing_carrier}{segment.marketing_number}"
+    if departure is None:
+        # No day to ask about. `_book_segment` says so, and says which segment it is.
+        return segment
+
+    try:
+        legs = await lookup.find_flights(
+            segment.marketing_carrier, segment.marketing_number, departure.date()
+        )
+    except (lookup.OutOfRange, BudgetExceeded, httpx.HTTPError) as exc:
+        log.info(
+            "taking %s as the email states it; the schedule could not be asked: %s", flight, exc
+        )
+        return segment
+
+    on_route = [
+        leg
+        for leg in legs
+        if (leg.origin_iata, leg.dest_iata) == (segment.origin_iata, segment.dest_iata)
+    ]
+    if not on_route:
+        log.warning("no %s leaves %s on %s", flight, segment.origin_iata, departure.date())
+        return None
+
+    # A number flown twice a day is two legs on one route, and the one the email means is
+    # the one it timed closest to.
+    leg = min(on_route, key=lambda leg: abs(leg.departure_local - departure))
+    arrival = leg.arrival_local or segment.arrival_at
+    return segment.model_copy(
+        update={
+            "departure_local": leg.departure_local.isoformat(),
+            "arrival_local": arrival.isoformat() if arrival else None,
+            "operating_carrier": leg.operating_carrier or segment.operating_carrier,
+            "operating_number": leg.operating_number or segment.operating_number,
+        }
+    )
 
 
 def _failed(exc: Exception) -> Ingested:
@@ -195,6 +295,15 @@ def _unreadable() -> Ingested:
     return Ingested(ERROR, error=notices.UNREADABLE, retryable=False)
 
 
+def _unpublished(flights: tuple[str, ...]) -> Ingested:
+    """The email named a flight no airline flies that day, and nothing of it was booked.
+
+    Set aside at once rather than retried: a schedule answers tomorrow what it answered
+    today, and asking again spends a lookup to be told so.
+    """
+    return Ingested(ERROR, error=notices.unpublished(flights), retryable=False)
+
+
 def _unknown_airport(exc: UnknownAirport) -> Ingested:
     """A failure that is decided the moment it happens, rather than swept again.
 
@@ -205,11 +314,13 @@ def _unknown_airport(exc: UnknownAirport) -> Ingested:
     return Ingested(ERROR, error=notices.unknown_airport(exc.iata), retryable=False)
 
 
-async def _book(session: AsyncSession, message: Message, extraction: Extraction) -> Ingested:
-    booked = [
-        await _book_segment(session, message, extraction, segment)
-        for segment in extraction.segments
-    ]
+async def _book(
+    session: AsyncSession,
+    message: Message,
+    extraction: Extraction,
+    segments: Sequence[Segment],
+) -> Ingested:
+    booked = [await _book_segment(session, message, extraction, segment) for segment in segments]
     outcomes = [outcome for outcome, _ in booked]
     return Ingested(
         next((o for o in _OUTCOME_PRECEDENCE if o in outcomes), IngestOutcome.NO_FLIGHT),
