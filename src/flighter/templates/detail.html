@@ -138,8 +138,7 @@
 {% endset %}
 {% call bc.dialog(
      id='ticket',
-     title='Ticket',
-     description='The flight itself is the airline\'s to state. If it is the wrong one, stop tracking it and add the right number.',
+     title='Details',
      footer=ticket_footer,
      header_attrs={'class': 'pe-8'}) %}
 <form id="ticket-form" method="post" action="/f/{{ id }}/ticket">
