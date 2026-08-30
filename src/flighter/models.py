@@ -8,9 +8,10 @@ would silently erase events.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, NamedTuple
 
 from sqlalchemy import (
     JSON,
@@ -75,6 +76,19 @@ class EventKind(StrEnum):
     BAGGAGE_CLAIM_ASSIGNED = "BaggageClaimAssigned"
     CANCELLED = "Cancelled"
     DIVERTED = "Diverted"
+
+
+class Confirmation(NamedTuple):
+    """One booking reference, under the name the ticket files it under.
+
+    A trip is regularly held together by more than one code - the airline's record
+    locator, the agency's itinerary number, a second locator for whoever is travelling
+    beside you - and only some of them are labelled where they are printed. The name is
+    that label and nothing more: absent whenever the ticket did not give one.
+    """
+
+    code: str
+    name: str | None = None
 
 
 def _one_of(column: str, values: type[StrEnum]) -> str:
@@ -183,7 +197,12 @@ class Booking(Base):
     departure_local_date: Mapped[date] = mapped_column(Date, nullable=False)
     scheduled_arrival_utc: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
-    confirmation_code: Mapped[str | None] = mapped_column(Text)
+    # Read and written through `confirmations`, below. A JSON list rather than a table
+    # of its own: the codes are only ever read alongside the booking that holds them,
+    # and saving the ticket rewrites all of them at once.
+    _confirmations: Mapped[list[dict[str, str | None]]] = mapped_column(
+        "confirmations", JSON, nullable=False, server_default="[]"
+    )
     seat: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
     friend_name: Mapped[str | None] = mapped_column(Text)
@@ -203,6 +222,19 @@ class Booking(Base):
     events: Mapped[list[FlightEvent]] = relationship(
         back_populates="booking", cascade="all, delete-orphan"
     )
+
+    @property
+    def confirmations(self) -> list[Confirmation]:
+        """Every code on the booking, in the order it was entered.
+
+        Empty on a booking that has not been written yet: the column fills from its
+        default on the way in, and until then there is nothing there to read.
+        """
+        return [Confirmation(row["code"] or "", row["name"]) for row in self._confirmations or []]
+
+    @confirmations.setter
+    def confirmations(self, values: Sequence[Confirmation]) -> None:
+        self._confirmations = [{"code": one.code, "name": one.name} for one in values]
 
 
 class FlightSnapshot(Base):

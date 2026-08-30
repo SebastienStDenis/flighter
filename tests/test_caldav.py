@@ -25,7 +25,7 @@ from flighter.caldav import (
     macos_calendar_link,
 )
 from flighter.config import Settings
-from flighter.models import Airport, Booking, FlightSnapshot
+from flighter.models import Airport, Booking, Confirmation, FlightSnapshot
 from flighter.prefs import Prefs
 
 BASE_URL = "https://flights.example.com"
@@ -79,7 +79,7 @@ def booking(**fields: object) -> Booking:
         # 15:20 in Los Angeles.
         "scheduled_arrival_utc": datetime(2026, 9, 12, 22, 20, tzinfo=UTC),
         "status": "active",
-        "confirmation_code": "ABC123",
+        "confirmations": [Confirmation("ABC123")],
         "seat": "14A",
     }
     base.update(fields)
@@ -126,6 +126,24 @@ def test_normal_flight() -> None:
     assert description.endswith(f"\n\n{BASE_URL}/f/7")
 
 
+def test_every_confirmation_is_listed_under_the_name_it_is_filed_under() -> None:
+    """A trip held together by two references is two lines, each saying whose it is. An
+    unnamed code keeps the bare word, because there is nothing else to call it."""
+    held = booking(
+        confirmations=[
+            Confirmation("ABC123", "Air Canada"),
+            Confirmation("XY9Z12", "Expedia"),
+            Confirmation("QQ4R5T"),
+        ]
+    )
+    [event] = event_body(held, None, AIRPORTS, base_url=BASE_URL).walk("VEVENT")
+    description = str(event["DESCRIPTION"])
+
+    assert "Confirmation (Air Canada): ABC123" in description
+    assert "Confirmation (Expedia): XY9Z12" in description
+    assert "Confirmation: QQ4R5T" in description
+
+
 def test_a_friend_calendar_event_names_the_friend() -> None:
     body = event_body(booking(friend_name="Sam"), None, AIRPORTS, base_url=BASE_URL)
     [event] = body.walk("VEVENT")
@@ -153,7 +171,7 @@ def test_the_entry_is_the_ticket_and_says_who_flies_it() -> None:
 
 
 def test_missing_values_are_omitted_not_printed() -> None:
-    text = ical_for(confirmation_code=None, seat=None)
+    text = ical_for(confirmations=[], seat=None)
     assert "None" not in text
     assert "Confirmation" not in text
     assert "Seat" not in text

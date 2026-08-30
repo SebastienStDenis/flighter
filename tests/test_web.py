@@ -35,6 +35,7 @@ from flighter.models import (
     Airport,
     Booking,
     BookingStatus,
+    Confirmation,
     FlightEvent,
     FlightSnapshot,
     IngestLog,
@@ -706,7 +707,7 @@ def test_a_flight_with_nothing_known_yet_still_renders(
 def test_a_flight_in_the_air_renders_what_is_worth_knowing(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    show(monkeypatch, booking(confirmation_code="X7QW2P", seat="14A"), full_snapshot())
+    show(monkeypatch, booking(confirmations=[Confirmation("X7QW2P")], seat="14A"), full_snapshot())
 
     body = client.get("/f/1").text
     assert "B27" in body and "A14" in body
@@ -1565,13 +1566,17 @@ def test_a_flight_that_is_not_on_the_calendar_offers_no_link(
 def test_the_ticket_and_owner_are_what_the_page_lets_you_change(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    show(monkeypatch, booking(confirmation_code="X7QW2P", seat="14A"), empty_snapshot())
+    show(
+        monkeypatch,
+        booking(confirmations=[Confirmation("X7QW2P")], seat="14A"),
+        empty_snapshot(),
+    )
 
     body = client.get("/f/1").text
 
     assert 'action="/f/1/ticket"' in body
     assert 'action="/f/1/owner"' not in body
-    for box in ("confirmation_code", "seat", "notes", "friend_name"):
+    for box in ("confirmation_code", "confirmation_name", "seat", "notes", "friend_name"):
         assert f'name="{box}"' in body
     assert re.search(r'name="owner" value="me"[^>]+ checked', body)
     assert 'name="owner" value="friend"' in body
@@ -1582,6 +1587,46 @@ def test_the_ticket_and_owner_are_what_the_page_lets_you_change(
     # The flight itself is the airline's statement, so nothing on the page edits it.
     for never in ("/f/1/edit", 'name="origin_iata"', 'type="datetime-local"', "Looks right"):
         assert never not in body
+
+
+def test_every_confirmation_gets_a_row_of_its_own_under_the_name_it_is_filed_under(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two codes are two facts about the flight, and what tells them apart is whose
+    booking each one is rather than the codes themselves."""
+    show(
+        monkeypatch,
+        booking(
+            confirmations=[
+                Confirmation("X7QW2P", "Air Canada"),
+                Confirmation("QQ4R5T"),
+            ]
+        ),
+        empty_snapshot(),
+    )
+
+    body = client.get("/f/1").text
+
+    assert "Confirmation (Air Canada)" in body
+    assert "X7QW2P" in body and "QQ4R5T" in body
+    # Each row copies its own code, so no two of them can share a target.
+    assert 'id="confirmation-code-1"' in body and 'id="confirmation-code-2"' in body
+    # Both are in the dialog too, each beside the name it is saved under.
+    assert 'value="X7QW2P"' in body and 'value="Air Canada"' in body
+    assert 'value="QQ4R5T"' in body
+
+
+def test_a_flight_with_no_confirmation_still_has_a_row_and_a_box(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    show(monkeypatch, booking(), empty_snapshot())
+
+    body = client.get("/f/1").text
+
+    assert "Confirmation" in body
+    # Nothing to copy, and one empty pair of boxes to type the first code into.
+    assert "confirmation-code-" not in body
+    assert body.count('name="confirmation_code"') == 1
 
 
 def test_the_friend_owner_is_selected_in_the_ticket_editor(
@@ -1619,7 +1664,8 @@ def test_saving_the_ticket_hands_the_booking_layer_what_was_written(
     response = client.post(
         "/f/1/ticket",
         data={
-            "confirmation_code": " X7QW2P ",
+            "confirmation_code": [" X7QW2P ", "", "QQ4R5T"],
+            "confirmation_name": ["Air Canada", "", ""],
             "seat": "14A",
             "notes": "",
             "friend_name": "  Sam  ",
@@ -1633,7 +1679,11 @@ def test_saving_the_ticket_hands_the_booking_layer_what_was_written(
     # A blank box is nothing on the ticket, not an empty string in the database.
     assert written == {
         "id": 1,
-        "confirmation_code": "X7QW2P",
+        "confirmations": [
+            Confirmation("X7QW2P", "Air Canada"),
+            Confirmation("", None),
+            Confirmation("QQ4R5T", None),
+        ],
         "seat": "14A",
         "notes": None,
         "friend_name": "Sam",

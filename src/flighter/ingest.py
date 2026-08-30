@@ -47,7 +47,7 @@ from .mail import (
     Marked,
     Message,
 )
-from .models import Booking, BookingSource, IngestLog, IngestOutcome
+from .models import Booking, BookingSource, Confirmation, IngestLog, IngestOutcome
 from .notify import Notifier
 from .timezones import to_utc
 
@@ -255,7 +255,7 @@ async def _book_segment(
         arrival_local=segment.arrival_at,
         source=BookingSource.EMAIL,
         source_message_id=message.id,
-        confirmation_code=segment.confirmation_code,
+        confirmations=[Confirmation(one.code, one.name) for one in segment.confirmations],
         seat=segment.seat,
         extraction_confidence=extraction.confidence,
     )

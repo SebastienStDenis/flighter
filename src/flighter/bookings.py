@@ -19,7 +19,14 @@ from sqlalchemy.orm import aliased
 from .airlines import normalise_operator
 from .airports import airport_tz
 from .cadence import first_poll_at
-from .models import Booking, BookingStatus, EventKind, FlightEvent, FlightSnapshot
+from .models import (
+    Booking,
+    BookingStatus,
+    Confirmation,
+    EventKind,
+    FlightEvent,
+    FlightSnapshot,
+)
 from .timezones import same_local_date, to_local, to_utc
 
 log = logging.getLogger(__name__)
@@ -77,7 +84,7 @@ async def create_booking(
     arrival_local: datetime | None = None,
     source: str,
     source_message_id: str | None = None,
-    confirmation_code: str | None = None,
+    confirmations: Sequence[Confirmation] = (),
     seat: str | None = None,
     notes: str | None = None,
     friend_name: str | None = None,
@@ -114,7 +121,6 @@ async def create_booking(
         scheduled_departure_utc=departure_utc,
         departure_local_date=to_local(departure_utc, origin_tz).date(),
         scheduled_arrival_utc=arrival_utc,
-        confirmation_code=_ticket_code(confirmation_code),
         seat=_ticket_code(seat),
         notes=notes,
         friend_name=_friend_name(friend_name),
@@ -122,6 +128,7 @@ async def create_booking(
         extraction_confidence=extraction_confidence,
         next_poll_at=first_poll_at(now, departure_utc) if status == BookingStatus.ACTIVE else None,
     )
+    booking.confirmations = _confirmations(confirmations)
     session.add(booking)
     await session.flush()
     if booking.status == BookingStatus.ACTIVE:
@@ -149,7 +156,7 @@ async def update_ticket(
     session: AsyncSession,
     booking_id: int,
     *,
-    confirmation_code: str | None,
+    confirmations: Sequence[Confirmation],
     seat: str | None,
     notes: str | None,
     friend_name: str | None,
@@ -162,18 +169,19 @@ async def update_ticket(
     booking = await session.get(Booking, booking_id)
     if booking is None:
         return None
-    shown = (booking.confirmation_code, booking.seat, booking.friend_name)
-    booking.confirmation_code = _ticket_code(confirmation_code)
+    shown = (booking.confirmations, booking.seat, booking.friend_name)
+    booking.confirmations = _confirmations(confirmations)
     booking.seat = _ticket_code(seat)
     booking.notes = notes
     booking.friend_name = _friend_name(friend_name)
-    # The calendar entry carries the code and the seat; notes never leave the app. What
-    # is compared is what was stored, not what was typed: `14a` over `14A` is the same
-    # seat once written down, and re-sending the calendar entry for it would be noise.
+    # The calendar entry carries the codes and the seat; notes never leave the app.
+    # What is compared is what was stored, not what was typed: `14a` over `14A` is the
+    # same seat once written down, and re-sending the calendar entry for it would be
+    # noise.
     if (
         booking.status != BookingStatus.ARCHIVED
         and (
-            booking.confirmation_code,
+            booking.confirmations,
             booking.seat,
             booking.friend_name,
         )
@@ -396,6 +404,24 @@ def _friend_name(name: str | None) -> str | None:
     if name is None:
         return None
     return name.strip() or None
+
+
+def _confirmations(values: Sequence[Confirmation]) -> list[Confirmation]:
+    """The codes as they will be stored: normalised, unnamed unless named, in order.
+
+    A code that repeats keeps the first name it was given rather than appearing twice,
+    which is what a form submitted with a row filled in twice would otherwise write.
+    """
+    kept: list[Confirmation] = []
+    seen: set[str] = set()
+    for value in values:
+        code = _ticket_code(value.code)
+        if code is None or code in seen:
+            continue
+        seen.add(code)
+        name = value.name.strip() if value.name else None
+        kept.append(Confirmation(code, name or None))
+    return kept
 
 
 def _ticket_code(value: str | None) -> str | None:

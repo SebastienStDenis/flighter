@@ -184,8 +184,9 @@ def event_body(
     operated = operated_note(booking.operating_carrier, booking.operating_number)
     if operated:
         lines.append(operated)
-    if booking.confirmation_code:
-        lines.append(f"Confirmation: {booking.confirmation_code}")
+    for confirmation in booking.confirmations:
+        named = f"Confirmation ({confirmation.name})" if confirmation.name else "Confirmation"
+        lines.append(f"{named}: {confirmation.code}")
     if booking.seat:
         lines.append(f"Seat: {booking.seat}")
     gate = snapshot.gate_origin if snapshot else None

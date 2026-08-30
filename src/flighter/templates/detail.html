@@ -63,8 +63,15 @@
   </header>
   <section>
     <div class="item-group -mx-2.5 w-auto gap-0">
-      {{ m.detail("Confirmation", dash(v.booking.confirmation_code), mono=true,
-                  copy='confirmation-code' if v.booking.confirmation_code else none) }}
+      {# One row per code. The name a code was filed under goes beside the word it
+         qualifies, because what tells two codes apart is which booking each belongs to
+         rather than the codes themselves. #}
+      {% for c in v.booking.confirmations %}
+      {{ m.detail("Confirmation (" ~ c.name ~ ")" if c.name else "Confirmation", c.code,
+                  mono=true, copy='confirmation-code-' ~ loop.index) }}
+      {% else %}
+      {{ m.detail("Confirmation", dash(none), mono=true) }}
+      {% endfor %}
       {{ m.detail("Seat", dash(v.booking.seat), mono=true) }}
       {{ m.detail("Notes", dash(v.booking.notes)) }}
       {{ m.detail("Owner", v.booking.friend_name or "Me", friend=v if v.booking.friend_name else none) }}
@@ -107,6 +114,25 @@
   </section>
 </div>
 
+{# A code and the name it is filed under, posted as a pair. The two boxes are matched by
+   position when the form is read, so a row is added and removed whole. #}
+{% macro confirmation_row(code='', name='') %}
+<div class="flex gap-2" data-confirmation>
+  <input class="input min-w-0 flex-1 font-mono uppercase" type="text"
+         name="confirmation_code" maxlength="20" autocapitalize="characters"
+         autocomplete="off" aria-label="Confirmation code" value="{{ code }}">
+  <input class="input min-w-0 flex-1" type="text" name="confirmation_name" maxlength="40"
+         autocomplete="off" aria-label="Name" placeholder="Name" value="{{ name or '' }}">
+  <button class="btn shrink-0" data-variant="ghost" data-size="icon" type="button"
+          title="Remove" aria-label="Remove" onclick="removeConfirmation(this)">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+    </svg>
+  </button>
+</div>
+{% endmacro %}
+
 {% set ticket_footer %}
 <button class="btn" id="ticket-save" type="submit" form="ticket-form">Save</button>
 {% endset %}
@@ -119,19 +145,25 @@
 <form id="ticket-form" method="post" action="/f/{{ id }}/ticket">
   <input type="hidden" name="return_tab" value="{{ return_tab }}">
   <fieldset class="fieldset gap-4">
-    <div class="grid grid-cols-2 gap-3">
-      <div role="group" class="field">
-        <label for="confirmation_code">Confirmation</label>
-        <input class="font-mono uppercase" type="text" id="confirmation_code"
-               name="confirmation_code" maxlength="12" autocapitalize="characters"
-               autocomplete="off" value="{{ v.booking.confirmation_code or '' }}">
+    <div role="group" class="field">
+      <label>Confirmation</label>
+      <div id="confirmations" class="flex flex-col gap-2">
+        {%- for c in v.booking.confirmations %}
+        {{ confirmation_row(c.code, c.name) }}
+        {%- else %}
+        {{ confirmation_row() }}
+        {%- endfor %}
       </div>
-      <div role="group" class="field">
-        <label for="seat">Seat</label>
-        <input class="font-mono uppercase" type="text" id="seat" name="seat" maxlength="6"
-               autocapitalize="characters" autocomplete="off"
-               value="{{ v.booking.seat or '' }}">
-      </div>
+      {# As wide as the words on it: it adds a row to the list above, and a button the
+         width of the dialog would read as something the dialog itself does. #}
+      <button class="btn w-auto self-start" data-variant="outline" data-size="sm"
+              type="button" onclick="addConfirmation()">Add another</button>
+    </div>
+    <div role="group" class="field">
+      <label for="seat">Seat</label>
+      <input class="font-mono uppercase" type="text" id="seat" name="seat" maxlength="6"
+             autocapitalize="characters" autocomplete="off"
+             value="{{ v.booking.seat or '' }}">
     </div>
     <div role="group" class="field">
       <label for="notes">Notes</label>
@@ -172,6 +204,36 @@
     control.focus();
   }
 
+  function addConfirmation() {
+    var rows = document.getElementById("confirmations");
+    // A copy of the row that is already there, emptied. The markup of a row is written
+    // once, in the template, and a blank one is what that row is without its values.
+    var row = rows.firstElementChild.cloneNode(true);
+    row.querySelectorAll("input").forEach(function (input) {
+      input.value = "";
+    });
+    rows.appendChild(row);
+    row.querySelector("input").focus();
+    // A row arriving or leaving changes what the form would post, and neither fires the
+    // input event the save button watches for.
+    rows.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function removeConfirmation(button) {
+    var rows = document.getElementById("confirmations");
+    var row = button.closest("[data-confirmation]");
+    // The last row is emptied rather than taken away: with nothing left there would be
+    // no box to type the first code back into.
+    if (rows.children.length > 1) {
+      row.remove();
+    } else {
+      row.querySelectorAll("input").forEach(function (input) {
+        input.value = "";
+      });
+    }
+    rows.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
   function setOwner(owner) {
     var field = document.getElementById("friend-name-field");
     var input = document.getElementById("friend_name");
@@ -186,18 +248,19 @@
   }
 
   // Save is off until the ticket would read differently. What the form would post is
-  // what counts: with Me picked the name is not sent at all, so switching owner is a
-  // change even though the box behind it still holds what it held.
+  // what counts, in the order it would post it: with Me picked the name is not sent at
+  // all, so switching owner is a change even though the box behind it still holds what
+  // it held. Empty boxes are left out, so a confirmation row opened and not filled in
+  // is not a change either.
   (function () {
     var form = document.getElementById("ticket-form");
     var save = document.getElementById("ticket-save");
     function state() {
-      var entered = new FormData(form);
-      return ["confirmation_code", "seat", "notes", "friend_name"]
-        .map(function (name) {
-          return (entered.get(name) || "").trim();
-        })
-        .join("\n");
+      var entered = [];
+      new FormData(form).forEach(function (value, name) {
+        if (name !== "return_tab" && value.trim()) entered.push(name + "=" + value.trim());
+      });
+      return entered.join("\n");
     }
     var saved = state();
     function showSaveState() {

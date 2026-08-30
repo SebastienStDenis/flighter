@@ -14,6 +14,7 @@ from flighter.extract import (
     MAX_RETRIES,
     MODEL,
     REQUEST_TIMEOUT_SECONDS,
+    ConfirmationCode,
     Extraction,
     ExtractionError,
     from_jsonld,
@@ -55,7 +56,19 @@ MODEL_ANSWER = """
  "segments": [{"marketing_carrier": "WS", "marketing_number": "1502",
  "operating_carrier": null, "operating_number": null, "origin_iata": "YYC",
  "dest_iata": "YVR", "departure_local": "2026-11-17T06:30:00",
- "arrival_local": "2026-11-17T07:12:00", "confirmation_code": "8HTGRX", "seat": "12A"}]}
+ "arrival_local": "2026-11-17T07:12:00",
+ "confirmations": [{"code": "8HTGRX", "name": null}], "seat": "12A"}]}
+"""
+
+TWO_REFERENCE_ANSWER = """
+{"is_flight_confirmation": true, "confidence": 0.92,
+ "segments": [{"marketing_carrier": "WS", "marketing_number": "1502",
+ "operating_carrier": null, "operating_number": null, "origin_iata": "YYC",
+ "dest_iata": "YVR", "departure_local": "2026-11-17T06:30:00",
+ "arrival_local": "2026-11-17T07:12:00",
+ "confirmations": [{"code": "8HTGRX", "name": "WestJet"},
+ {"code": "1094427718", "name": "Expedia"}, {"code": "QQ4R5T", "name": null}],
+ "seat": "12A"}]}
 """
 
 
@@ -141,7 +154,7 @@ def test_jsonld_is_read_exactly() -> None:
     assert segment.marketing_number == "1234"
     assert segment.origin_iata == "JFK"
     assert segment.dest_iata == "LAX"
-    assert segment.confirmation_code == "K7QX2M"
+    assert segment.confirmations == [ConfirmationCode(code="K7QX2M", name=None)]
     assert segment.seat == "14C"
 
 
@@ -204,6 +217,24 @@ async def test_model_answer_is_validated_into_an_extraction(settings: Settings) 
     assert segment.marketing_carrier == "WS"
     assert segment.departure_at == datetime(2026, 11, 17, 6, 30)
     assert extraction.confidence == pytest.approx(0.92)
+
+
+async def test_a_leg_booked_under_two_references_keeps_both(settings: Settings) -> None:
+    """An agency booking prints its own number beside the airline's, and each is labelled
+    where it is printed. A third code the email named nothing keeps no name at all."""
+    client = FakeAnthropic(TWO_REFERENCE_ANSWER)
+    extraction = await from_model(
+        message("flight_plain.eml"),
+        settings=settings,
+        client=client,  # type: ignore[arg-type]
+    )
+    assert extraction is not None
+    (segment,) = extraction.segments
+    assert segment.confirmations == [
+        ConfirmationCode(code="8HTGRX", name="WestJet"),
+        ConfirmationCode(code="1094427718", name="Expedia"),
+        ConfirmationCode(code="QQ4R5T", name=None),
+    ]
 
 
 async def test_model_request_pins_the_schema_and_the_model(settings: Settings) -> None:

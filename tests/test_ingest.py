@@ -20,7 +20,7 @@ from flighter import ingest, notices, prefs
 from flighter.airports import UnknownAirport
 from flighter.config import Settings
 from flighter.db import session_scope
-from flighter.extract import Extraction, Segment
+from flighter.extract import ConfirmationCode, Extraction, Segment
 from flighter.mail import Marked, Message, parse_message
 from flighter.models import IngestLog
 
@@ -45,7 +45,7 @@ def extraction(*, confidence: float = 0.99) -> Extraction:
                 dest_iata="YVR",
                 departure_local="2026-11-17T06:30:00",
                 arrival_local="2026-11-17T07:12:00",
-                confirmation_code="8HTGRX",
+                confirmations=[ConfirmationCode(code="8HTGRX", name=None)],
                 seat="12A",
             )
         ],
@@ -165,7 +165,9 @@ async def test_structured_confirmation_becomes_an_active_booking(
     logged = one_session.log["flight_jsonld.eml"]
     assert logged.outcome == "created"
     assert logged.raw_extraction is not None
-    assert logged.raw_extraction["segments"][0]["confirmation_code"] == "K7QX2M"
+    assert logged.raw_extraction["segments"][0]["confirmations"] == [
+        {"code": "K7QX2M", "name": None}
+    ]
 
 
 async def test_multi_segment_itinerary_books_every_leg(

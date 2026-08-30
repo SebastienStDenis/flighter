@@ -24,7 +24,7 @@ arrives while you are still at the wrong end of the terminal.
 ## Why it is built this way
 
 **Bookings and observations are separate.** A booking is what you or an email asserts:
-the flight, and what is on the ticket. Only the ticket part - confirmation code, seat,
+the flight, and what is on the ticket. Only the ticket part - confirmation codes, seat,
 notes - can be edited; a booking that names the wrong flight is deleted and the right one
 added. A snapshot is what FlightAware saw, is append-only, and is never corrected. Change detection is a diff of the newest two snapshots, so rewriting a snapshot
 would erase the very event it should have raised.
