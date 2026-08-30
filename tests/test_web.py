@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
-from flighter import notices, prefs, web
+from flighter import notices, prefs, updates, web
 from flighter.aeroapi import BREAKER_KEY, BudgetExceeded, BudgetStatus
 from flighter.caldav import CalendarUnavailable, Collection
 from flighter.checks import CheckResult
@@ -1777,8 +1777,8 @@ def test_a_connection_already_made_stays_folded_away(client: TestClient) -> None
     body = client.get("/settings").text
     rows = re.findall(r'<details class="setting"([^>]*)>', body)
 
-    # Anthropic is the one this deployment has not connected.
-    assert [" open" in row for row in rows] == [False, False, False, True]
+    # Anthropic and Watchtower are the ones this deployment has not connected.
+    assert [" open" in row for row in rows] == [False, False, False, True, True]
 
 
 def test_a_connection_not_made_yet_cannot_be_saved_without_its_credentials(
@@ -2698,3 +2698,90 @@ def test_a_flight_long_at_the_gate_is_filed_under_flown(
     assert "Flown" in body and 'class="card' not in body
     assert rows(body) == ["1"]
     assert 'id="flight-tabs-panel-3"' in body
+
+
+def test_the_settings_page_offers_the_update_card(client: TestClient) -> None:
+    """Unconnected, the card says what would make the button work rather than hiding."""
+    body = client.get("/settings").text
+    assert "Watchtower" in body
+    assert "Connect Watchtower above" in body
+    assert 'id="update-form"' not in body
+
+
+def test_a_connected_watchtower_gets_the_button(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings.watchtower_url = "http://watchtower:8080"
+    settings.watchtower_token = "wt-api-token-value"
+    with build_client(settings, monkeypatch) as client:
+        body = client.get("/settings").text
+    assert 'id="update-form"' in body
+    # The address is shown back the way the Apple ID is; the token never is.
+    assert "http://watchtower:8080" in body
+    assert "wt-api-token-value" not in body
+
+
+def test_the_update_check_says_what_runs_and_what_is_published(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def checked(*, refresh: bool = True, transport: Any = None) -> updates.UpdateStatus:
+        assert refresh
+        return updates.UpdateStatus(running="a" * 40, latest="b" * 40, checked=1.0)
+
+    monkeypatch.setattr(updates, "status", checked)
+    answer = client.get("/settings/update/check").json()
+    assert answer["available"] is True
+    assert answer["running"] == "a" * 40 and answer["latest"] == "b" * 40
+    # What the poll after an update actually watches: any new image changes it.
+    assert answer["build"]
+
+
+def test_the_poll_stays_off_the_registry(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def unchecked(*, refresh: bool = True, transport: Any = None) -> updates.UpdateStatus:
+        assert not refresh
+        return updates.UpdateStatus(running="")
+
+    monkeypatch.setattr(updates, "status", unchecked)
+    answer = client.get("/settings/update/check?poll=1").json()
+    assert answer["available"] is None
+
+
+def test_an_update_without_watchtower_is_refused(client: TestClient) -> None:
+    response = client.post("/settings/update", headers={"Accept": "application/json"})
+    assert response.status_code == 400
+    assert "Connect Watchtower" in response.json()["detail"]
+
+
+def test_an_update_is_handed_to_watchtower(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings.watchtower_url = "http://watchtower:8080"
+    settings.watchtower_token = "secret"
+
+    async def restarting(handed: Settings) -> updates.Outcome:
+        assert handed is settings
+        return updates.Outcome(True, "Watchtower is updating.", restarting=True)
+
+    monkeypatch.setattr(updates, "trigger", restarting)
+    with build_client(settings, monkeypatch) as client:
+        answer = client.post("/settings/update", headers={"Accept": "application/json"})
+    assert answer.status_code == 200
+    assert answer.json() == {"ok": True, "restarting": True, "detail": "Watchtower is updating."}
+
+
+def test_a_watchtower_refusal_lands_on_the_page_for_a_browser_with_no_script(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings.watchtower_url = "http://watchtower:8080"
+    settings.watchtower_token = "secret"
+
+    async def refused(handed: Settings) -> updates.Outcome:
+        return updates.Outcome(False, "Watchtower rejected the token.")
+
+    monkeypatch.setattr(updates, "trigger", refused)
+    with build_client(settings, monkeypatch) as client:
+        response = client.post("/settings/update")
+    assert response.status_code == 502
+    assert "Watchtower rejected the token." in response.text

@@ -151,14 +151,27 @@ async def _check_anthropic(settings: Settings) -> CheckResult:
     return CheckResult("anthropic", True, "key accepted")
 
 
+async def _check_watchtower(settings: Settings) -> CheckResult:
+    """Asks the API to prove itself without asking it to update anything; see `updates`."""
+    if not settings.watchtower_configured:
+        return CheckResult(
+            "watchtower", False, "add the Watchtower address and token under Connections"
+        )
+    from . import updates
+
+    ok, detail = await updates.probe(settings)
+    return CheckResult("watchtower", ok, detail)
+
+
 # What proves each section of the settings page before it is allowed to save. Anthropic
-# is here but not in `run_checks`: a deployment that has no key for it is not a broken
-# one, but a key that was just typed and does not work is.
+# and Watchtower are here but not in `run_checks`: a deployment that has neither is not
+# a broken one, but a value that was just typed and does not work is.
 SERVICE_CHECKS = {
     "icloud": _check_mail,
     "flightaware": _check_aeroapi,
     "pushover": _check_pushover,
     "anthropic": _check_anthropic,
+    "watchtower": _check_watchtower,
 }
 
 

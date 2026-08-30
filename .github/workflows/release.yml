@@ -65,6 +65,10 @@ jobs:
 
       - id: meta
         uses: docker/metadata-action@v5
+        env:
+          # Annotate the index as well as the images, so the update check can read the
+          # revision off its first manifest request instead of walking to the config.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -80,5 +84,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          # The settings page's update check compares this stamp with the revision
+          # the metadata step puts on the published image.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
