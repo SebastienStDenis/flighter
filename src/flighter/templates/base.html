@@ -310,6 +310,22 @@
   // last copy of each page is kept for when the server cannot be reached; see sw.js.
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js?v={{ build_id }}");
+    // A new release's worker takes over the moment it lands (see sw.js), but the page
+    // in front was painted by the old one out of the old shell. Reloading on the
+    // handover is what makes an update whole on the first open instead of the second.
+    // The very first worker claims the page too, and that handover must not reload:
+    // an install loop on a browser that re-registers is worse than no cache at all.
+    var controlled = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener("controllerchange", function () {
+      if (!controlled) {
+        controlled = true;
+        return;
+      }
+      // The same courtesy the stale reload pays: a reload would eat whatever is
+      // half-typed in an open dialog, and the old shell can carry one more entry.
+      if (document.querySelector("dialog[open]")) return;
+      location.reload();
+    });
   }
 </script>
 </body>
