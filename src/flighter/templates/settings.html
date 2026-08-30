@@ -523,10 +523,10 @@
          Watchtower at all, so the row stands on its own and only the Update button
          waits on that connection. One line, three states: the version with a refresh
          icon to ask the registry; a checkmark on it once a check pressed on this page
-         says nothing is newer; an Update button naming the newer build when there is
-         one. Anything longer than the line - a restart under way, a registry that
-         would not answer, a Watchtower still to be connected - goes on the note
-         underneath. #}
+         says nothing is newer; an Update button naming the newer build beside the one
+         it would replace. Anything longer than the line - a restart under way, a
+         registry that would not answer, a Watchtower still to be connected - goes on
+         the note underneath. #}
       <div class="py-4" id="update-row" data-build="{{ build_id }}"
            data-watchtower="{{ '1' if watchtower_ready else '' }}">
         <p class="text-sm font-medium">Version</p>
@@ -544,6 +544,28 @@
               </svg>
               <span class="sr-only">Current version</span>
             </span>
+            {# A newer build stands where the checkmark would, right off the version it
+               would replace: the same up arrow and mono number either way - a compact
+               button while Watchtower is connected to press it at, plain words while it
+               is not. The button submits the real form kept outside this one, because
+               forms do not nest. #}
+            <button class="btn shrink-0 gap-1 px-2" data-variant="outline" data-size="sm"
+                    type="submit" form="update-form" id="update-run" title="Update" hidden>
+              <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                   aria-hidden="true">
+                <path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>
+              </svg>
+              <span class="sr-only">Update to </span><span class="font-mono" id="update-run-to"></span>
+            </button>
+            <span class="flex shrink-0 items-center gap-1" id="update-newer" hidden>
+              <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                   aria-hidden="true">
+                <path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>
+              </svg>
+              <span class="sr-only">Newer build </span><span class="font-mono" id="update-newer-to"></span>
+            </span>
           </p>
           <button class="btn refresh-button shrink-0" data-variant="ghost"
                   data-size="icon-sm" type="button" id="update-check"
@@ -557,25 +579,6 @@
               <path d="M8 16H3v5"/>
             </svg>
           </button>
-          {# A newer build is an up arrow and its number - a button while Watchtower is
-             connected to press it at, plain words while it is not. The button submits
-             the real form kept outside this one, because forms do not nest. #}
-          <button class="btn shrink-0" data-size="sm" type="submit"
-                  form="update-form" id="update-run" title="Update" hidden>
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>
-            </svg>
-            <span class="sr-only">Update to </span><span class="font-mono" id="update-run-to"></span>
-          </button>
-          <span class="flex shrink-0 items-center gap-1 text-sm text-muted-foreground"
-                id="update-newer" hidden>
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>
-            </svg>
-            <span class="sr-only">Newer build </span><span class="font-mono" id="update-newer-to"></span>
-          </span>
         </div>
         <p class="mt-2 text-xs text-muted-foreground" id="update-note" role="status"
            aria-live="polite" hidden></p>
