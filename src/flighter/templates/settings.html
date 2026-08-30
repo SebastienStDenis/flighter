@@ -257,24 +257,22 @@
 
 {# Watchtower is the one connection that is about the deployment rather than about a
    flight, so it stands behind Advanced rather than among the accounts every deployment
-   needs. The Updates row it powers lives with the other preferences, under
+   needs. The Version row it powers lives with the other preferences, under
    Preferences → Advanced, because knowing whether a newer build exists never needed
    Watchtower - only installing one does. #}
 <div class="accordion accordion-tight mt-3 rounded-lg border px-3">
   <details id="connections-advanced">
     <summary class="text-base font-semibold tracking-tight">Advanced {{ chevron() }}</summary>
-    <div class="divide-y">
+    {# One row on its own in here, so the paddings that centre a divider between two
+       rows have nothing to centre: the row's own top padding is pulled back into the
+       summary's, and the wrapper's bottom padding is dropped for the row's own. #}
+    <div class="-mt-2 pb-0">
       {{ account('watchtower', 'Watchtower', watchtower_ready, [
            {'name': 'watchtower_url', 'label': 'API address', 'type': 'text',
             'inputmode': 'url', 'value': watchtower_url,
-            'help': 'Where Watchtower answers from this container, usually
-                     <code>http://watchtower:8080</code>. Run Watchtower with
-                     <code>WATCHTOWER_HTTP_API_UPDATE=true</code>; see
-                     <code>docker-compose.yml</code>.'},
-           {'name': 'watchtower_token', 'label': 'API token',
-            'help': 'The value of <code>WATCHTOWER_HTTP_API_TOKEN</code> on the
-                     Watchtower container.'},
-         ], 'Powers the Update button under Preferences → Advanced') }}
+            'help': 'Watchtower endpoint, usually <code>http://watchtower:8080</code>.'},
+           {'name': 'watchtower_token', 'label': 'API token'},
+         ], 'Request updates under Preferences → Advanced') }}
     </div>
   </details>
 </div>
