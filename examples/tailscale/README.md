@@ -1,7 +1,7 @@
 # Flighter behind a Tailscale sidecar
 
-The root `docker-compose.yml` publishes port 8000 on the host and leaves reaching it to
-you. This is the variant that ends up with a real certificate and no published port at
+The `default/` stack beside this one publishes port 8000 on the host and leaves reaching
+it to you. This is the variant that ends up with a real certificate and no published port at
 all: a `tailscale` sidecar joins the tailnet as its own device named `flighter`, the app
 shares that network namespace, and `tailscale serve` terminates TLS and proxies to the
 app on `127.0.0.1:8000`.

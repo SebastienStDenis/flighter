@@ -27,7 +27,8 @@ Flighter never touches the Docker socket. Three small parts add up to the button
 ## Setting it up
 
 Run Watchtower in the same compose stack with its HTTP API on - the commented block in
-`docker-compose.yml` is a working example:
+`examples/default/docker-compose.yml` is a working example, and
+`examples/tailscale/` ships it already uncommented:
 
 ```yaml
 watchtower:

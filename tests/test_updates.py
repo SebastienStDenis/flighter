@@ -308,10 +308,13 @@ async def test_force_asks_the_registry_past_a_fresh_answer(
     assert len(asked) > walked
 
 
-def test_the_compose_example_and_the_default_image_agree() -> None:
+def test_the_compose_examples_and_the_default_image_agree() -> None:
     """The IMAGE constant is what the button updates; compose is what deploys it."""
-    compose = (Path(__file__).parents[1] / "docker-compose.yml").read_text()
-    assert updates.parse_image(updates.IMAGE).name in compose
+    name = updates.parse_image(updates.IMAGE).name
+    examples = sorted((Path(__file__).parents[1] / "examples").glob("*/docker-compose.yml"))
+    assert examples
+    for compose in examples:
+        assert name in compose.read_text(), compose
 
 
 @pytest.fixture(autouse=True)
