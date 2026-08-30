@@ -214,6 +214,24 @@
   .badge[data-variant='warn']  { --tone: var(--warn); }
   .badge[data-variant='stop']  { --tone: var(--stop); }
 
+  /* A value wearing the shape of a small button without being one - the version row's
+     inactive chips. Cut to the same height and corner as an xs button so the one real
+     button among them reads as the active member of the family, and toned the way the
+     badges are so the colour still says the state; what says "not pressable" is the
+     flat wash where the button has its solid blue. */
+  .chip {
+    @apply inline-flex h-6 shrink-0 items-center gap-1 border px-2 text-xs
+      font-medium whitespace-nowrap transition-colors;
+    border-radius: min(var(--radius-md), 8px);
+    background-color: color-mix(in oklab, var(--tone, var(--quiet)) 10%, var(--card));
+    border-color: color-mix(in oklab, var(--tone, var(--quiet)) 25%, transparent);
+    color: var(--tone, var(--quiet));
+  }
+
+  .chip[data-tone='quiet'] { --tone: var(--quiet); }
+  .chip[data-tone='ok']    { --tone: var(--ok); }
+  .chip[data-tone='warn']  { --tone: var(--warn); }
+
   .friend-avatar {
     background-color: hsl(var(--friend-hue) 55% 50% / 12%);
     color: hsl(var(--friend-hue) 35% 38%);
