@@ -294,6 +294,20 @@ async def test_a_fresh_answer_is_not_asked_for_again(monkeypatch: pytest.MonkeyP
     assert len(asked) == walked
 
 
+async def test_force_asks_the_registry_past_a_fresh_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Check button means now, so a fresh cache does not stand in for the registry."""
+    monkeypatch.setattr(updates, "_status", UpdateStatus(running=RUNNING))
+    asked: list[str] = []
+    await updates.status(transport=registry(asked))
+    walked = len(asked)
+
+    again = await updates.status(force=True, transport=registry(asked))
+    assert again.latest == NEWER
+    assert len(asked) > walked
+
+
 def test_the_compose_example_and_the_default_image_agree() -> None:
     """The IMAGE constant is what the button updates; compose is what deploys it."""
     compose = (Path(__file__).parents[1] / "docker-compose.yml").read_text()

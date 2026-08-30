@@ -852,15 +852,17 @@ def create_app(settings: Settings) -> FastAPI:
         return JSONResponse({"ok": True}) if wants_json else _saved("connections")
 
     @app.get("/settings/update/check")
-    async def update_check(poll: bool = False) -> JSONResponse:
-        """What is running and what is published, for the card that offers the button.
+    async def update_check(poll: bool = False, force: bool = False) -> JSONResponse:
+        """What is running and what is published, for the row that offers the buttons.
 
-        Asked twice over: once as the settings page opens, to say whether anything newer
-        exists, and every couple of seconds while an update runs, to notice the process
-        has been replaced. The poll passes ?poll=1 and stays off the registry - the
-        answer it needs is in `build`, which any new image changes.
+        Asked three ways: as the settings page opens, to say whether anything newer
+        exists; with ?force=1 when the Check button is pressed, which goes to the
+        registry however fresh the cache is; and every couple of seconds while an
+        update runs, to notice the process has been replaced. The poll passes ?poll=1
+        and stays off the registry - the answer it needs is in `build`, which any new
+        image changes.
         """
-        state = await updates.status(refresh=not poll)
+        state = await updates.status(refresh=not poll, force=force)
         return JSONResponse(
             {
                 "running": state.running,
@@ -893,9 +895,9 @@ def create_app(settings: Settings) -> FastAPI:
         if not outcome.ok:
             context = await settings_context(request, session)
             context["error"] = f"Watchtower: {outcome.detail}"
-            context["tab"] = "connections"
+            context["tab"] = "preferences"
             return page(request, "settings.html", context, status_code=502)
-        return _saved("connections")
+        return _saved("preferences")
 
     @app.post("/settings/widget/token")
     async def rotate_widget_token() -> Response:

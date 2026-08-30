@@ -256,12 +256,12 @@
 </div>
 
 {# Watchtower is the one connection that is about the deployment rather than about a
-   flight, so it stands behind Advanced with the update button it powers rather than
-   among the accounts every deployment needs. What is published fills in after the
-   page, the way the calendar picker does; the button works without it, because
-   Watchtower checks for itself and pulling nothing is a no-op. #}
+   flight, so it stands behind Advanced rather than among the accounts every deployment
+   needs. The Updates row it powers lives with the other preferences, under
+   Preferences → Advanced, because knowing whether a newer build exists never needed
+   Watchtower - only installing one does. #}
 <div class="accordion accordion-tight mt-3 rounded-lg border px-3">
-  <details>
+  <details id="connections-advanced">
     <summary class="text-base font-semibold tracking-tight">Advanced {{ chevron() }}</summary>
     <div class="divide-y">
       {{ account('watchtower', 'Watchtower', watchtower_ready, [
@@ -274,28 +274,7 @@
            {'name': 'watchtower_token', 'label': 'API token',
             'help': 'The value of <code>WATCHTOWER_HTTP_API_TOKEN</code> on the
                      Watchtower container.'},
-         ], 'Update Flighter from the row below') }}
-      <div class="py-4">
-        <p class="text-sm font-medium">Updates</p>
-        {% if not watchtower_ready %}
-        <p class="mt-1 text-sm text-muted-foreground">Connect Watchtower above to pull
-          the newest published build from here. Until then its scheduled sweep, if one
-          is running, is what picks new builds up.</p>
-        {% else %}
-        <div class="mt-2 flex items-center gap-3" id="update-row" data-build="{{ build_id }}">
-          <p class="min-w-0 flex-1 text-xs text-muted-foreground" id="update-note"
-             role="status" aria-live="polite">
-            {%- if running_build %}Running <strong class="font-mono">{{ running_build }}</strong>.
-            {%- else %}Running an unstamped build.{% endif %}</p>
-          {# A real form so a browser with no script still has something to press; the
-             script intercepts it to watch the restart instead. #}
-          <form method="post" action="/settings/update" id="update-form">
-            <button class="btn shrink-0" data-variant="outline" data-size="sm"
-                    type="submit">Update</button>
-          </form>
-        </div>
-        {% endif %}
-      </div>
+         ], 'Powers the Update button under Preferences → Advanced') }}
     </div>
   </details>
 </div>
@@ -541,10 +520,37 @@
           </select>
         </div>
       </fieldset>
+      {# Updates live here rather than beside the Watchtower connection: what is running
+         and whether the registry holds something newer are answerable with no
+         Watchtower at all, so the row stands on its own and only the Update button
+         waits on that connection. What is published fills in after the page, the way
+         the calendar picker does; the Check button asks the registry afresh. #}
+      <div class="border-t py-4" id="update-row" data-build="{{ build_id }}"
+           data-watchtower="{{ '1' if watchtower_ready else '' }}">
+        <p class="text-sm font-medium">Updates</p>
+        <div class="mt-2 flex items-center gap-3">
+          <p class="min-w-0 flex-1 text-xs text-muted-foreground" id="update-note"
+             role="status" aria-live="polite">
+            {%- if running_build %}Running <strong class="font-mono">{{ running_build }}</strong>.
+            {%- else %}Running an unstamped build.{% endif %}</p>
+          <button class="btn shrink-0" data-variant="outline" data-size="sm" type="button"
+                  id="update-check" onclick="checkForUpdates(this)">Check for updates</button>
+          {# Submits the real form kept outside this one - forms do not nest - so a
+             browser with no script still has an Update to press while Watchtower is
+             connected. With script, what is published decides whether it shows. #}
+          <button class="btn shrink-0" data-variant="outline" data-size="sm" type="submit"
+                  form="update-form" id="update-run"
+                  {{- ' hidden' if not watchtower_ready }}>Update</button>
+        </div>
+      </div>
     </details>
   </div>
 
 </form>
+
+{# The post behind the Update button. It stands outside the preferences form because
+   forms do not nest; the button up in Advanced reaches it by name. #}
+<form method="post" action="/settings/update" id="update-form"></form>
 {% endset %}
 
 {# A step is a number, an imperative, and at most one line saying what the tap does. The
@@ -686,6 +692,19 @@
         history.replaceState(null, "", address);
       });
     });
+  })();
+
+  // A save made inside the Advanced accordion carries a mark through the redirect so
+  // the section is standing open when the page comes back. The mark is then taken off
+  // the address: it recorded a moment, not a preference, and a reload later should
+  // open the page the way it always opens.
+  (function () {
+    var address = new URL(location.href);
+    if (!address.searchParams.has("advanced")) return;
+    var advanced = document.getElementById("connections-advanced");
+    if (advanced) advanced.open = true;
+    address.searchParams.delete("advanced");
+    history.replaceState(null, "", address);
   })();
 
   // isSecureContext is the browser's own answer to the question the service worker asks,
@@ -911,8 +930,12 @@
       });
       if (response.ok) {
         // Back on the tab it was saved from. Which rows are open is the page's own
-        // answer: the one just connected has nothing left to ask for.
-        location.assign("/settings?tab=connections");
+        // answer: the one just connected has nothing left to ask for. A save made
+        // inside Advanced comes back with Advanced still standing open, so what folds
+        // away is the row that was connected and not the section it was found in.
+        var target = "/settings?tab=connections";
+        if (form.closest("#connections-advanced")) target += "&advanced=1";
+        location.assign(target);
         return;
       }
       var answer = await response.json().catch(function () {
@@ -953,9 +976,9 @@
   }
 
   // What is running is in the page; what is published is a few registry round trips
-  // away, so the Updates card fills in after the page the way the calendar picker does.
-  // A check that fails changes nothing: the card already says what is running, and the
-  // button never depended on the answer.
+  // away, so the Updates row fills in after the page the way the calendar picker does.
+  // A check that fails changes nothing: the row already says what is running, and the
+  // Check button is there to ask again.
   (async function () {
     if (!document.getElementById("update-row")) return;
     try {
@@ -965,27 +988,55 @@
     } catch (error) {}
   })();
 
+  // The Check button is a person asking now, so the cached answer is not good enough:
+  // ?force=1 goes to the registry however recently the page last asked.
+  async function checkForUpdates(button) {
+    var note = document.getElementById("update-note");
+    setBusy(button, true);
+    note.textContent = "Checking the registry…";
+    try {
+      var response = await fetch("/settings/update/check?force=1");
+      if (!response.ok) throw new Error(response.status);
+      showUpdateState(await response.json());
+    } catch (error) {
+      note.textContent = "Could not check for updates; is the server reachable?";
+    }
+    setBusy(button, false);
+  }
+
   function shortSha(value) {
     return value ? value.slice(0, 7) : "";
   }
 
+  // The note says where things stand; the Update button shows only while there is
+  // something for it to do and a Watchtower to do it. With no comparison to go on -
+  // an unstamped build, a registry that would not answer - the button stays for a
+  // connected Watchtower, because Watchtower checks for itself and pulling nothing
+  // is a no-op.
   function showUpdateState(state) {
     var note = document.getElementById("update-note");
-    var button = document.querySelector("#update-form button");
+    var button = document.getElementById("update-run");
+    var watchtower = !!document.getElementById("update-row").dataset.watchtower;
     var running = shortSha(state.running) || "an unstamped build";
+    var offer = watchtower;
+    button.setAttribute("data-variant", "outline");
     if (state.available === true) {
       note.textContent =
-        "A newer build is published: " + shortSha(state.latest) + " (running " + running + ").";
-      // The one moment the button is the point of the page, so it gets the weight.
+        "A newer build is published: " + shortSha(state.latest) + " (running " + running + ")." +
+        (watchtower ? "" : " Connect Watchtower under Connections to install it from here.");
+      // The one moment the button is the point of the row, so it gets the weight.
       button.removeAttribute("data-variant");
     } else if (state.available === false) {
-      note.textContent = "Up to date on " + running + ".";
+      note.textContent = "Up to date: " + running + " is the latest published build.";
+      offer = false;
     } else if (state.running) {
       note.textContent = "Running " + running + "; the registry could not be read.";
     } else {
-      note.textContent =
-        "Running an unstamped build; only Watchtower can tell whether it is current.";
+      note.textContent = watchtower
+        ? "Running an unstamped build; only Watchtower can tell whether it is current."
+        : "Running an unstamped build; the registry cannot say whether it is current.";
     }
+    button.hidden = !offer;
   }
 
   // The update is Watchtower stopping this very server, so the request dying without an
@@ -996,7 +1047,7 @@
     if (!form) return;
     form.addEventListener("submit", function (event) {
       event.preventDefault();
-      runUpdate(form.querySelector("button"));
+      runUpdate(document.getElementById("update-run"));
     });
   })();
 
