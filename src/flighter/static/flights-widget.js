@@ -127,6 +127,16 @@ const FLIGHT_GAP = 8;
 // whatever it is holding.
 const INSET = 14;
 
+// What the stamp keeps from the bottom edge instead. The flights are set in from the
+// corner because a row is words that have to be read, and a row against the corner
+// reads as one that ran out of room; the stamp is a footnote in a quieter colour and
+// two sizes down, and a footnote is read in the margin. Set at the rows' own inset it
+// stood off the edge by more than it stood off the last flight, and the eye read the
+// line as adrift between the two. Eight is the gap between two flights, and the least
+// the flexible spacer above the stamp ever gives, so on a widget drawing every flight
+// its size takes the stamp has the same air over it as under it.
+const STAMP_INSET = 8;
+
 const family = config.widgetFamily || "medium";
 const isAccessory = family.startsWith("accessory");
 // Per-element tap targets exist only on medium and large. Everywhere else the whole
@@ -411,7 +421,8 @@ function newWidget() {
     // holds - but the lines are what they are, and what that widget actually has is
     // room to spare below them. Tightening the one size with air left over was three
     // points spent to make a widget look full, and what it bought was words nearer the
-    // rounded corner than any other size sets them.
+    // rounded corner than any other size sets them. The bottom is the stamp's to set,
+    // once it is drawn.
     widget.setPadding(INSET, INSET, INSET, INSET);
   }
   return widget;
@@ -797,6 +808,9 @@ function pill(container, flight) {
 // the height a size has spare sits between the two, so the stamp is in the same place on
 // a widget holding two flights as on one holding seven. The Lock Screen has no line to
 // spare for it, and says what it can with the dot after its heading.
+//
+// Nearer that edge than the flights are to theirs: the widget's bottom inset is the
+// stamp's own, and the rows' fourteen points stay on the other three sides.
 function updatedLine(widget, result) {
   const word = result.stale ? "Cached" : "Last updated";
   const stamp = result.fetchedAt ? `${word} ${timeOfDay(result.fetchedAt)}` : word;
@@ -806,6 +820,7 @@ function updatedLine(widget, result) {
   line.centerAlignText();
   line.lineLimit = 1;
   line.minimumScaleFactor = 0.7;
+  widget.setPadding(INSET, INSET, STAMP_INSET, INSET);
 }
 
 // Smaller than anything on a row, and smaller again on the square, where the type it is

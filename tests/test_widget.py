@@ -1490,6 +1490,12 @@ def test_the_stamp_is_the_one_line_under_the_flights() -> None:
     assert "line.textColor = MUTED;" in stamp
     assert "line.font = Font.systemFont(stampSize());" in stamp
     assert 'return family === "small" ? 9 : 10;' in stamp
+    # Nearer the bottom edge than the flights are to theirs: eight points, the gap
+    # between two flights and the least the spacer above the stamp gives, so a full
+    # widget's stamp has the same air over it as under it. The rows keep fourteen on
+    # the other three sides.
+    assert "const STAMP_INSET = 8;" in source
+    assert "widget.setPadding(INSET, INSET, STAMP_INSET, INSET);" in stamp
     # Drawn after the flights on every home screen size, and after the message when
     # there are none, with the flexible spacer above it holding it against the bottom.
     built = source[
