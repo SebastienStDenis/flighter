@@ -51,7 +51,7 @@ does the same thing at once, and says so.
 | `accessoryRectangular` (Lock Screen) | Next flight only, three tight lines. **iOS 16 or later.** |
 | Small | Two flights, three lines each |
 | Medium | Up to three flights, two lines each, each row tappable |
-| Large | Up to seven of the same rows, with a little more air between them |
+| Large | Up to seven of the same rows |
 
 The widget tells the server which size it is, and the server sends a list that long. How
 many rows fit is the one thing about the layout the server cannot work out for itself,
@@ -130,9 +130,9 @@ The gap between two rows is a fixed one, and a row that closed up its own spare 
 would sit nearer its neighbour than the rest of the column for no reason a reader could
 see.
 
-The gap between two rows is ten points, on every size and however many rows there are.
-The flights start at the top and what the widget has left over is held under the last of
-them.
+The gap between two rows is eight points, on every size and however many rows there are.
+The flights start at the top, the stamp saying when they were got sits against the bottom
+edge, and what the widget has left over is held between the two.
 
 It was the leftover room itself for a while, shared equally between the gaps, so the
 flights filled the widget edge to edge whatever their number. What that missed is that a
@@ -145,13 +145,12 @@ the list, and every row was redrawn at a different pitch, so the same flights sa
 somewhere else from one reload to the next. A fixed gap keeps a break between two flights
 reading as one break, of one width, wherever the widget is in its week.
 
-Ten is what the tightest size holds. A row is a shade under 36 points - the heading, the
-line under it, and the three between them - so the large's seven rows and six gaps fit
-inside what a 6.1in phone's large widget holds, and the medium's three rows and two gaps
-come out as close to full as that size gets. It is the figure to cut first if a row ever
-comes out clipped. It is also one figure rather than the eight points the medium used to
-keep and the nine the large did: the same break, drawn the same width, on whichever size
-the reader is holding.
+Eight is what the tightest size holds with the stamp under it. A row is a shade under 36
+points - the heading, the line under it, and the three between them - and the stamp's line
+is twelve, so the large's seven rows, six gaps and the line beneath them fit inside what a
+6.1in phone's large widget holds, and the medium's three rows and two gaps do the same. It
+is the figure to cut first if a row ever comes out clipped. It is also one figure on every
+size: the same break, drawn the same width, on whichever widget the reader is holding.
 
 The marks are `plane-takeoff`, `plane-landing` and `armchair` from Lucide, which is the
 icon set the web UI is drawn with, and they stand where TERM, GATE and SEAT used to. The
@@ -220,8 +219,9 @@ which is the only clock the reader has to read it on, and a zone after a time th
 already theirs is a thing to read and then discount.
 
 The foot of the widget used to say so - `Times on your phone's clock`, and on the square
-a shortening of it sharing the line with the timestamp. Nothing is drawn under the
-flights now: see [The bottom of the widget](#the-bottom-of-the-widget).
+a shortening of it sharing the line with the stamp. The stamp is the only thing down there
+now, and it is on the same clock as everything above it: see
+[The bottom of the widget](#the-bottom-of-the-widget).
 
 The day goes in front whenever the time is not today's **on the phone's clock**: `02:00`
 on its own reads as today's, and a flight leaving tomorrow morning would otherwise look
@@ -275,31 +275,41 @@ own polling cadence for the closest flight on the list.
 
 ### The bottom of the widget
 
-Nothing. The bottom of the widget is the last flight on it, and under that the same inset
-every other edge keeps.
+`Last updated 04:12`, centred, on the phone's own clock. It is drawn on the square, the
+medium and the large, in the quieter of the two colours and smaller than anything above
+it, so it reads as a note about the widget rather than as one more line of the last
+flight. Centred, because a line starting where the flights start reads as another row of
+the list.
 
-Three lines have stood there and all three are gone. The note naming the clock the times
-were on: a time on a widget is read on the watch in the hand holding it, which is the
-only clock there is to read it on. `Last updated 04:12`: a fact about the phone, on a
-widget that is picked up to see what the flights are doing. And the reason the server
-gave for its own data being behind - the AeroAPI budget breaker tripped, or polling
-stalled - which was the strongest of the three, because it says something the numbers
-cannot show for themselves, and which still went: it stood on every draw of a widget
-whose numbers are almost always fine, and it stood in height that belongs to a size
-fitting its rows within a point or two. The board carries that banner, and reads the
-breaker straight from the latch, so nothing is lost by the phone not being told twice;
-the payload no longer carries `degraded` or `degraded_reason` at all.
+A clock face rather than an age. A widget is redrawn a few times an hour, so `4 min ago`
+written at draw time is the one figure on screen guaranteed to be wrong by the time
+anybody reads it, and wrong in the flattering direction. The time it was fetched at is a
+fact, and stays one for as long as iOS leaves the widget alone.
 
-A cache is no longer dated either. The Lock Screen still marks a cached reading with a
-`·` after the heading, which costs no line and no height, and that is the whole of what
-the widget says about where its numbers came from. A rejected token is the exception on
-every size: the widget says so in place of the flights, because no reload will fix it and
-a widget quietly drawing last week's flights is worse than a widget saying it is stuck.
+`Cached 04:12` when the server could not be reached, because then the time is when a file
+on the phone was written rather than when a server last spoke. A phone that will not date
+its own cache gets `Cached` on its own. The Lock Screen has no line to spare and says the
+same thing with a `·` after its heading.
+
+It stands against the bottom edge rather than a fixed distance under the last flight. The
+height a size has spare sits between the two, so the stamp is in the same place on a
+widget holding two flights as on one holding seven, and so is the first row.
+
+The line costs twelve points against a row's shade under 36, and the gap between two
+flights is what pays for it. No size gives up a flight for it: the server sends 2, 3 and
+7.
+
+It is the only line down there. The clock the times are on is not named, because a time
+on a widget is read on the watch in the hand holding it, which is the only clock there is
+to read it on. And the reason the server might give for its own data being behind - the
+AeroAPI budget breaker tripped, or polling stalled - is not drawn either, because it would
+stand on every draw of a widget whose numbers are almost always fine: the board carries
+that banner, and reads the breaker straight from the latch, so the payload carries no
+`degraded` or `degraded_reason` at all.
+
+A rejected token is the exception on every size: the widget says so in place of the
+flights, because no reload will fix it and a widget quietly drawing last week's flights is
+worse than a widget saying it is stuck.
 
 What the widget does not have room to say properly, the board says: it is one tap away
 from every size, and the tap targets are the flights themselves.
-
-None of this bought another flight, on any size. The note never had a line of its own -
-it shared one with the stamp - and a line down there, the whole of it, is twelve points
-against a row's shade under 36 before the gap above it. What the room bought is the air
-under the last flight, which is where a widget's spare height sits.
