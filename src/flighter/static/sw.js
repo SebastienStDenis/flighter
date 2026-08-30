@@ -4,8 +4,11 @@
 // to the server first, and the copy is served when the server cannot be reached. The
 // page itself says how old it is, so a gate number from an hour ago reads as one.
 
-const SHELL = "shell-v7";
+// The release is in the worker's own address, put there as it was registered, so a new
+// build is a new worker and its caches start over: activation below drops the old
+// release's shell and pages wholesale rather than trusting anything to refresh them.
 const RELEASE = new URL(self.location.href || self.location.origin).searchParams.get("v") || "v1";
+const SHELL = `shell-${RELEASE}`;
 const PAGES = `pages-${RELEASE}`;
 const AIRLINE_LOGOS = "airline-logos-v1";
 const AIRLINE_LOGO_ORIGIN = "https://www.gstatic.com";
@@ -39,7 +42,14 @@ const OFFLINE_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"
 </section></main></body></html>`;
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(SHELL).then((cache) => cache.addAll(ASSETS)));
+  // Fetched past the browser's own cache: this install exists because the app changed,
+  // and Safari's copy of an asset can outlive the release it came from, so a shell
+  // built through it would be the new worker guarding the old files.
+  event.waitUntil(
+    caches
+      .open(SHELL)
+      .then((cache) => cache.addAll(ASSETS.map((asset) => new Request(asset, { cache: "reload" }))))
+  );
   self.skipWaiting();
 });
 
@@ -71,13 +81,13 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (url.pathname.startsWith("/static/")) {
-    // Served from the cache so the shell paints offline and instantly, then refreshed in
-    // the background: an upgrade that ships a new stylesheet must not be invisible until
-    // somebody remembers to rename the cache.
+    // Served from the cache so the shell paints offline and instantly, then refreshed
+    // in the background - asking the server rather than the browser's cache, whose
+    // copy can be exactly as old as the one being refreshed.
     event.respondWith(
       caches.open(SHELL).then((cache) =>
         cache.match(request).then((hit) => {
-          const fresh = fetch(request)
+          const fresh = fetch(request, { cache: "no-cache" })
             .then((response) => {
               if (response.ok) cache.put(request, response.clone());
               return response;

@@ -45,6 +45,24 @@ log = logging.getLogger(__name__)
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
 
+
+class RevalidatedStaticFiles(StaticFiles):
+    """Static files the browser may keep but must ask about before reusing.
+
+    Served bare, these carry no Cache-Control at all, and Safari invents a lifetime
+    from Last-Modified - so an app saved to an iOS home screen or a macOS dock keeps
+    the old stylesheet long after an update, and hands it back even to the service
+    worker's own refreshes. `no-cache` means store, but revalidate: the ask is a
+    conditional request the unchanged file answers with an empty 304, so staying
+    current costs a round trip and not a re-download.
+    """
+
+    def file_response(self, *args: Any, **kwargs: Any) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # Archived bookings are gone as far as the UI is concerned. Active and completed rows
 # are partitioned by the same lifecycle boundary the cards and widget use.
 BOARD_STATUSES = (BookingStatus.ACTIVE, BookingStatus.COMPLETED)
@@ -200,7 +218,7 @@ def create_app(settings: Settings) -> FastAPI:
         openapi_url=None,
         dependencies=[Depends(note_problems), Depends(note_origin)],
     )
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    app.mount("/static", RevalidatedStaticFiles(directory=STATIC), name="static")
     app.include_router(widget_router)
 
     # Once for the process rather than per use: it also tells the poll after an update
@@ -920,10 +938,16 @@ def create_app(settings: Settings) -> FastAPI:
         return _saved("widget")
 
     # A service worker may only control paths below its own, so this one is served from
-    # the root even though it lives with the rest of the static files.
+    # the root even though it lives with the rest of the static files. Its address
+    # already changes with every release, but `no-cache` keeps any one address from
+    # being remembered past its file changing underneath it.
     @app.get("/sw.js", include_in_schema=False)
     async def service_worker() -> FileResponse:
-        return FileResponse(STATIC / "sw.js", media_type="text/javascript")
+        return FileResponse(
+            STATIC / "sw.js",
+            media_type="text/javascript",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     @app.get("/healthz")
     async def healthz() -> JSONResponse:

@@ -1683,6 +1683,16 @@ def test_the_friend_owner_is_selected_in_the_ticket_editor(
 def test_the_service_worker_version_tracks_the_application_code(client: TestClient) -> None:
     body = client.get("/").text
     assert re.search(r'serviceWorker\.register\("/sw\.js\?v=[a-f0-9]{12}"\)', body)
+    # And the page reloads itself when a new release's worker takes over, so an update
+    # is whole on the first open rather than half old shell.
+    assert "controllerchange" in body
+
+
+def test_the_shell_is_stored_but_never_trusted_without_asking(client: TestClient) -> None:
+    """Bare of a Cache-Control header, Safari invents a lifetime from Last-Modified,
+    and an app saved to an iOS home screen or macOS dock keeps last release's files."""
+    for path in ("/static/flighter.css", "/sw.js"):
+        assert client.get(path).headers["cache-control"] == "no-cache"
 
 
 def test_saving_the_ticket_hands_the_booking_layer_what_was_written(

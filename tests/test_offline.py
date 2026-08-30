@@ -14,6 +14,7 @@ import pytest
 WORKER = Path(__file__).parents[1] / "src" / "flighter" / "static" / "sw.js"
 HARNESS = Path(__file__).parent / "fixtures" / "sw_pages.js"
 LOGO_HARNESS = Path(__file__).parent / "fixtures" / "sw_logos.js"
+UPGRADE_HARNESS = Path(__file__).parent / "fixtures" / "sw_upgrade.js"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the worker")
@@ -47,3 +48,17 @@ def test_the_worker_keeps_loaded_airline_logos_for_offline_use() -> None:
     assert outcome["storageFailures"] == ["storage fallback"] * 3
     assert outcome["ignored"] == [False, False, False]
     assert outcome["caches"] == ["airline-logos-v1"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the worker")
+def test_a_new_release_starts_its_caches_over_and_never_trusts_the_browsers() -> None:
+    """An app saved to a home screen keeps the old release's files exactly as long as
+    anything lets it: the new worker's shell must be fetched past the browser's cache,
+    and the old release's shell and pages must not survive its activation."""
+    rendered = subprocess.run(
+        ["node", str(UPGRADE_HARNESS), str(WORKER)], capture_output=True, text=True, check=True
+    ).stdout
+    outcome = json.loads(rendered)
+    assert outcome["caches"] == ["airline-logos-v1", "shell-newbuild"]
+    assert outcome["precached"] and set(outcome["precached"]) == {"reload"}
+    assert outcome["refresh"]["cache"] == "no-cache"
