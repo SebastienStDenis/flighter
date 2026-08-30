@@ -26,5 +26,25 @@ services:
       # as uid 10001, so that directory has to be owned by it: chown 10001:10001 data.
       - data:/app/data
 
+  # The Update button on the settings page asks Watchtower to pull a newer image and
+  # recreate the app - the app cannot replace its own container from inside it, so
+  # Watchtower holds the socket and the app only ever holds a token. Uncomment this (or
+  # fold the two environment lines into a Watchtower you already run), then enter
+  # http://watchtower:8080 and the token under Settings → Connections. See
+  # docs/updates.md.
+  #
+  # watchtower:
+  #   image: containrrr/watchtower
+  #   container_name: watchtower
+  #   restart: unless-stopped
+  #   environment:
+  #     - WATCHTOWER_HTTP_API_UPDATE=true
+  #     - WATCHTOWER_HTTP_API_TOKEN=choose-a-long-random-string
+  #     # Keeps the scheduled sweep running alongside the button; without this line,
+  #     # updates only happen when the button asks for one.
+  #     - WATCHTOWER_HTTP_API_PERIODIC_POLLS=true
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+
 volumes:
   data:

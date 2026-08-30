@@ -9,6 +9,7 @@
 {% set flightaware_ready = connected['aeroapi_key'] %}
 {% set pushover_ready = connected['pushover_token'] and connected['pushover_user_key'] %}
 {% set calendar_ready = prefs.calendar_configured %}
+{% set watchtower_ready = connected['watchtower_url'] and connected['watchtower_token'] %}
 
 <h1 class="mb-4 text-xl font-semibold tracking-tight">Settings</h1>
 
@@ -252,6 +253,51 @@
          ], 'Extract flight details from email') }}
     </div>
   </section>
+</div>
+
+{# Watchtower is the one connection that is about the deployment rather than about a
+   flight, so it stands behind Advanced with the update button it powers rather than
+   among the accounts every deployment needs. What is published fills in after the
+   page, the way the calendar picker does; the button works without it, because
+   Watchtower checks for itself and pulling nothing is a no-op. #}
+<div class="accordion accordion-tight mt-3 rounded-lg border px-3">
+  <details>
+    <summary class="text-base font-semibold tracking-tight">Advanced {{ chevron() }}</summary>
+    <div class="divide-y">
+      {{ account('watchtower', 'Watchtower', watchtower_ready, [
+           {'name': 'watchtower_url', 'label': 'API address', 'type': 'text',
+            'inputmode': 'url', 'value': watchtower_url,
+            'help': 'Where Watchtower answers from this container, usually
+                     <code>http://watchtower:8080</code>. Run Watchtower with
+                     <code>WATCHTOWER_HTTP_API_UPDATE=true</code>; see
+                     <code>docker-compose.yml</code>.'},
+           {'name': 'watchtower_token', 'label': 'API token',
+            'help': 'The value of <code>WATCHTOWER_HTTP_API_TOKEN</code> on the
+                     Watchtower container.'},
+         ], 'Update Flighter from the row below') }}
+      <div class="py-4">
+        <p class="text-sm font-medium">Updates</p>
+        {% if not watchtower_ready %}
+        <p class="mt-1 text-sm text-muted-foreground">Connect Watchtower above to pull
+          the newest published build from here. Until then its scheduled sweep, if one
+          is running, is what picks new builds up.</p>
+        {% else %}
+        <div class="mt-2 flex items-center gap-3" id="update-row" data-build="{{ build_id }}">
+          <p class="min-w-0 flex-1 text-xs text-muted-foreground" id="update-note"
+             role="status" aria-live="polite">
+            {%- if running_build %}Running <strong class="font-mono">{{ running_build }}</strong>.
+            {%- else %}Running an unstamped build.{% endif %}</p>
+          {# A real form so a browser with no script still has something to press; the
+             script intercepts it to watch the restart instead. #}
+          <form method="post" action="/settings/update" id="update-form">
+            <button class="btn shrink-0" data-variant="outline" data-size="sm"
+                    type="submit">Update</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </details>
 </div>
 {% endset %}
 
@@ -904,6 +950,111 @@
     event.stopPropagation();
     var form = document.getElementById(key + "-remove");
     form.requestSubmit(form.querySelector('button[name="forget"]'));
+  }
+
+  // What is running is in the page; what is published is a few registry round trips
+  // away, so the Updates card fills in after the page the way the calendar picker does.
+  // A check that fails changes nothing: the card already says what is running, and the
+  // button never depended on the answer.
+  (async function () {
+    if (!document.getElementById("update-row")) return;
+    try {
+      var response = await fetch("/settings/update/check");
+      if (!response.ok) throw new Error(response.status);
+      showUpdateState(await response.json());
+    } catch (error) {}
+  })();
+
+  function shortSha(value) {
+    return value ? value.slice(0, 7) : "";
+  }
+
+  function showUpdateState(state) {
+    var note = document.getElementById("update-note");
+    var button = document.querySelector("#update-form button");
+    var running = shortSha(state.running) || "an unstamped build";
+    if (state.available === true) {
+      note.textContent =
+        "A newer build is published: " + shortSha(state.latest) + " (running " + running + ").";
+      // The one moment the button is the point of the page, so it gets the weight.
+      button.removeAttribute("data-variant");
+    } else if (state.available === false) {
+      note.textContent = "Up to date on " + running + ".";
+    } else if (state.running) {
+      note.textContent = "Running " + running + "; the registry could not be read.";
+    } else {
+      note.textContent =
+        "Running an unstamped build; only Watchtower can tell whether it is current.";
+    }
+  }
+
+  // The update is Watchtower stopping this very server, so the request dying without an
+  // answer is the button working. Anything with an answer is a refusal or "nothing
+  // newer"; anything without one is watched for the restart instead.
+  (function () {
+    var form = document.getElementById("update-form");
+    if (!form) return;
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      runUpdate(form.querySelector("button"));
+    });
+  })();
+
+  async function runUpdate(button) {
+    var note = document.getElementById("update-note");
+    setBusy(button, true);
+    note.textContent = "Asking Watchtower…";
+    try {
+      var response = await fetch("/settings/update", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(15000),
+      });
+      var answer = await response.json().catch(function () {
+        return {};
+      });
+      if (!answer.restarting) {
+        note.textContent = answer.detail || "Watchtower did not answer as expected.";
+        setBusy(button, false);
+        return;
+      }
+    } catch (error) {
+      // The connection dying mid-request is the update reaching this very container.
+    }
+    note.textContent = "Updating — Flighter is restarting, this page will reload itself…";
+    awaitRestart(note, button);
+  }
+
+  // A new process answers with a new build id whether or not the image carries a commit
+  // stamp, so that is what the poll watches for. Not answering is expected for a while:
+  // the container is being pulled and recreated.
+  function awaitRestart(note, button) {
+    var was = document.getElementById("update-row").dataset.build;
+    var deadline = Date.now() + 3 * 60000;
+    (function look() {
+      if (Date.now() > deadline) {
+        note.textContent =
+          "Still not back on a new build — check the Watchtower logs.";
+        setBusy(button, false);
+        return;
+      }
+      fetch("/settings/update/check?poll=1", {
+        cache: "no-store",
+        signal: AbortSignal.timeout(4000),
+      })
+        .then(function (response) {
+          return response.json();
+        })
+        .then(
+          function (state) {
+            if (state.build && state.build !== was) location.reload();
+            else setTimeout(look, 2000);
+          },
+          function () {
+            setTimeout(look, 2000);
+          }
+        );
+    })();
   }
 </script>
 

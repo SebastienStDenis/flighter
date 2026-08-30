@@ -27,7 +27,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import bookings as booking_repo
-from . import ingest, lookup, prefs, views
+from . import ingest, lookup, prefs, updates, views
 from .aeroapi import BudgetExceeded, budget_status, clear_breaker
 from .caldav import CalendarClient, CalendarUnavailable, Collection, macos_calendar_link
 from .checks import check_calendar, check_service
@@ -203,6 +203,10 @@ def create_app(settings: Settings) -> FastAPI:
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     app.include_router(widget_router)
 
+    # Once for the process rather than per use: it also tells the poll after an update
+    # that the process answering is a new one, stamped commit or not.
+    build = _build_id()
+
     templates = Jinja2Templates(directory=str(TEMPLATES))
     templates.env.globals.update(
         at=views.at,
@@ -214,7 +218,7 @@ def create_app(settings: Settings) -> FastAPI:
         duration=views.duration,
         email_url=message_url,
         logo_url=views.logo_url,
-        build_id=_build_id(),
+        build_id=build,
         # The add dialog is on every page, so whether there is anything to look a flight
         # up with is read as the page is drawn rather than passed into each one.
         flightaware_configured=lambda: settings.aeroapi_configured,
@@ -589,6 +593,10 @@ def create_app(settings: Settings) -> FastAPI:
             # than proving anything about it.
             "connected": {name: bool(getattr(settings, name)) for name in CREDENTIALS},
             "icloud_email": settings.icloud_email,
+            # The Watchtower address is the other value shown back: a name on the
+            # compose network, not a secret.
+            "watchtower_url": settings.watchtower_url,
+            "running_build": updates.RUNNING_SHA[:7],
             # The widget token is the other exception: it is handed to your own phone,
             # through the Connect link, and this page is where the phone gets it from.
             "widget_token": settings.widget_token,
@@ -768,6 +776,8 @@ def create_app(settings: Settings) -> FastAPI:
         anthropic_api_key: Annotated[str, Form()] = "",
         pushover_token: Annotated[str, Form()] = "",
         pushover_user_key: Annotated[str, Form()] = "",
+        watchtower_url: Annotated[str, Form()] = "",
+        watchtower_token: Annotated[str, Form()] = "",
     ) -> Response:
         """Store one service's credentials, or forget them.
 
@@ -790,6 +800,8 @@ def create_app(settings: Settings) -> FastAPI:
             "anthropic_api_key": anthropic_api_key,
             "pushover_token": pushover_token,
             "pushover_user_key": pushover_user_key,
+            "watchtower_url": watchtower_url,
+            "watchtower_token": watchtower_token,
         }
         # The page asks over fetch so the answer can land beside the button that was
         # pressed. A browser with no script posts the form and gets the page back.
@@ -838,6 +850,52 @@ def create_app(settings: Settings) -> FastAPI:
                 context["tab"] = "connections"
                 return page(request, "settings.html", context, status_code=400)
         return JSONResponse({"ok": True}) if wants_json else _saved("connections")
+
+    @app.get("/settings/update/check")
+    async def update_check(poll: bool = False) -> JSONResponse:
+        """What is running and what is published, for the card that offers the button.
+
+        Asked twice over: once as the settings page opens, to say whether anything newer
+        exists, and every couple of seconds while an update runs, to notice the process
+        has been replaced. The poll passes ?poll=1 and stays off the registry - the
+        answer it needs is in `build`, which any new image changes.
+        """
+        state = await updates.status(refresh=not poll)
+        return JSONResponse(
+            {
+                "running": state.running,
+                "latest": state.latest,
+                "available": state.available,
+                "error": state.error,
+                "build": build,
+            }
+        )
+
+    @app.post("/settings/update")
+    async def run_update(request: Request, session: SessionDep) -> Response:
+        """Hand the update to Watchtower.
+
+        The likeliest way for this to go well is for this process to be stopped before
+        it can say so, which is why the page's script treats a connection that dies here
+        as progress rather than failure and goes on to watch for the restart.
+        """
+        if not settings.watchtower_configured:
+            refusal = "Connect Watchtower under Connections first."
+            if _wants_json(request):
+                return JSONResponse({"ok": False, "detail": refusal}, status_code=400)
+            raise HTTPException(status_code=400, detail=refusal)
+        outcome = await updates.trigger(settings)
+        if _wants_json(request):
+            return JSONResponse(
+                {"ok": outcome.ok, "restarting": outcome.restarting, "detail": outcome.detail},
+                status_code=200 if outcome.ok else 502,
+            )
+        if not outcome.ok:
+            context = await settings_context(request, session)
+            context["error"] = f"Watchtower: {outcome.detail}"
+            context["tab"] = "connections"
+            return page(request, "settings.html", context, status_code=502)
+        return _saved("connections")
 
     @app.post("/settings/widget/token")
     async def rotate_widget_token() -> Response:

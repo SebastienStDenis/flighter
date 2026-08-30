@@ -55,6 +55,7 @@ SERVICES = (
     Service("flightaware", "FlightAware", ("aeroapi_key",)),
     Service("pushover", "Pushover", ("pushover_token", "pushover_user_key")),
     Service("anthropic", "Anthropic", ("anthropic_api_key",)),
+    Service("watchtower", "Watchtower", ("watchtower_url", "watchtower_token")),
 )
 
 CREDENTIALS = tuple(name for service in SERVICES for name in service.fields)
@@ -108,6 +109,13 @@ class Settings(BaseSettings):
     pushover_token: str = Field(default="", repr=False)
     pushover_user_key: str = Field(default="", repr=False)
 
+    # --- Watchtower, the updater --------------------------------------------------------
+    # The address is a name on the compose network and no more a secret than a hostname,
+    # so like the Apple ID it is the one half the settings page shows back; the token is
+    # whatever WATCHTOWER_HTTP_API_TOKEN was set to on that container.
+    watchtower_url: str = ""
+    watchtower_token: str = Field(default="", repr=False)
+
     # --- Widget -----------------------------------------------------------------------
     # Generated on first boot. The only authentication in front of the flight data.
     widget_token: str = Field(default="", repr=False)
@@ -123,6 +131,10 @@ class Settings(BaseSettings):
     @property
     def pushover_configured(self) -> bool:
         return bool(self.pushover_token and self.pushover_user_key)
+
+    @property
+    def watchtower_configured(self) -> bool:
+        return bool(self.watchtower_url and self.watchtower_token)
 
 
 @lru_cache
