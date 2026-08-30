@@ -521,45 +521,51 @@
       {# The version lives here rather than beside the Watchtower connection: what is
          running and whether the registry holds something newer are answerable with no
          Watchtower at all, so the row stands on its own and only the Update button
-         waits on that connection. One line, three states: the version with a refresh
-         icon to ask the registry; a checkmark on it once a check pressed on this page
-         says nothing is newer; an Update button naming the newer build beside the one
-         it would replace. Anything longer than the line - a restart under way, a
-         registry that would not answer - goes on the note underneath. #}
+         waits on that connection. One line, three states: the running version in a
+         quiet pill, with a refresh icon to ask the registry; the pill gone green under
+         a checkmark once a check pressed on this page says nothing is newer; a second
+         pill naming the newer build beside the one it would replace. Anything longer
+         than the line - a restart under way, a registry that would not answer - goes
+         on the note underneath. #}
       <div class="py-4" id="update-row" data-build="{{ build_id }}"
            data-watchtower="{{ '1' if watchtower_ready else '' }}">
         <p class="text-sm font-medium">Version</p>
         <div class="mt-2 flex items-center gap-2">
-          <p class="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-muted-foreground">
-            {%- if running_build %}<strong class="font-mono">{{ running_build }}</strong>
-            {%- else %}Unstamped build{% endif %}
-            {# The checkmark a pressed check earns: shown once the registry says nothing
-               is newer, and never carried over from an earlier page load. #}
-            <span class="flex items-center" id="update-current" hidden>
-              <svg class="size-4 text-ok" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                   aria-hidden="true">
-                <path d="M20 6 9 17l-5-5"/>
-              </svg>
-              <span class="sr-only">Current version</span>
+          <p class="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-sm">
+            {# What is running, in a pill of its own. Quiet until a check pressed on
+               this page says nothing is newer; then the pill turns the ok green and
+               earns its checkmark, on the left the way every icon in this row leads
+               its words. Never carried over from an earlier page load. #}
+            <span class="badge" data-variant="quiet" id="update-version">
+              <span class="flex items-center" id="update-current" hidden>
+                <svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+                     aria-hidden="true">
+                  <path d="M20 6 9 17l-5-5"/>
+                </svg>
+                <span class="sr-only">Current version</span>
+              </span>
+              {%- if running_build %}<span class="font-mono">{{ running_build }}</span>
+              {%- else %}Unstamped build{% endif %}
             </span>
-            {# A newer build stands where the checkmark would, right off the version it
-               would replace: the same up arrow and mono number either way - a compact
-               button while Watchtower is connected to press it at, plain words while it
-               is not. The button submits the real form kept outside this one, because
-               forms do not nest. #}
-            <button class="btn shrink-0 gap-1 px-2" data-variant="outline" data-size="sm"
-                    type="submit" form="update-form" id="update-run" title="Update" hidden>
-              <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            {# A newer build is a second pill right off the one it would replace, the
+               up arrow leading its number. Two dresses for the two answers to "can it
+               be pressed": the page's one action blue while Watchtower is connected -
+               a real button - and the flat amber of a status badge while it is not,
+               which nothing on this page ever makes clickable. The button submits the
+               real form kept outside this one, because forms do not nest. #}
+            <button class="btn shrink-0 rounded-full" data-size="xs" type="submit"
+                    form="update-form" id="update-run" title="Update" hidden>
+              <svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
                    aria-hidden="true">
                 <path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>
               </svg>
               <span class="sr-only">Update to </span><span class="font-mono" id="update-run-to"></span>
             </button>
-            <span class="flex shrink-0 items-center gap-1" id="update-newer" hidden>
-              <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            <span class="badge" data-variant="warn" id="update-newer" hidden>
+              <svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
                    aria-hidden="true">
                 <path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>
               </svg>
@@ -1034,6 +1040,7 @@
   // and fades back in only if this check says nothing is newer.
   async function checkForUpdates(button) {
     document.getElementById("update-current").hidden = true;
+    document.getElementById("update-version").dataset.variant = "quiet";
     setBusy(button, true);
     try {
       var response = await fetch("/settings/update/check?force=1");
@@ -1055,19 +1062,23 @@
     note.hidden = !text;
   }
 
-  // One line, three answers. Nothing newer: a checkmark on the version number, but
-  // only when `checked` says a check was pressed on this page - the load-time pass
-  // leaves it down. Something newer: an up arrow and its number - a button while
-  // Watchtower is there to press it at, plain words while it is not; connecting one
-  // is an advanced setting, so the row does not campaign for it. No answer: the note
-  // says why not.
+  // One line, three answers. Nothing newer: the version's pill goes green under a
+  // checkmark, but only when `checked` says a check was pressed on this page - the
+  // load-time pass leaves it quiet. Something newer: a second pill with the number -
+  // a blue button while Watchtower is there to press it at, a flat amber badge while
+  // it is not; connecting one is an advanced setting, so the row does not campaign
+  // for it. No answer: the note says why not.
   function showUpdateState(state, checked) {
     var watchtower = !!document.getElementById("update-row").dataset.watchtower;
     var current = state.available === false;
     var newer = state.available === true;
     var check = document.getElementById("update-current");
-    check.hidden = !(current && checked);
-    if (!check.hidden) {
+    var confirmed = current && checked;
+    check.hidden = !confirmed;
+    // The pill wears the answer: ok green once this page's check says current, the
+    // quiet gray of "not asked" otherwise. The badge's own transition eases the turn.
+    document.getElementById("update-version").dataset.variant = confirmed ? "ok" : "quiet";
+    if (confirmed) {
       // Taking the class off and forcing a reflow replays the fade on every check,
       // not only the first: a checkmark that was up a moment ago still comes back in.
       check.classList.remove("fade-in");
