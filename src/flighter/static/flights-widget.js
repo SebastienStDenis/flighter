@@ -181,7 +181,7 @@ if (config.runsInWidget) {
 } else {
   await present(widget);
   if (server && (await updateScript(server.api))) {
-    await notify("Widget updated", "The server's newer version is installed and runs from now on.");
+    await notify("Widget updated", "The widget was updated to the latest version from the server.");
   }
 }
 Script.complete();

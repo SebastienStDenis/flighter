@@ -66,13 +66,13 @@ _NOTIFY_FIELDS: Final = {
 # What each switch is called on the settings page, in the order they are drawn. Kept here
 # beside the fields they set, so a switch and what it governs cannot drift apart.
 NOTIFICATION_CHOICES: Final = (
-    ("notify_gate_changes", "Gates and terminals"),
-    ("notify_time_changes", "Delays and earlier departures"),
-    ("notify_departure_and_landing", "Take-off and landing"),
+    ("notify_gate_changes", "Gate and terminal changes"),
+    ("notify_time_changes", "Departure time changes"),
+    ("notify_departure_and_landing", "Departures and landings"),
     ("notify_baggage_claim", "Baggage claim"),
     ("notify_disruptions", "Cancellations and diversions"),
-    ("notify_imports", "Email imported"),
-    ("notify_import_failures", "Email import errors"),
+    ("notify_imports", "Email imports"),
+    ("notify_import_failures", "Email import failures"),
 )
 
 # Every preference the notifications card posts, master switch first.
@@ -97,7 +97,7 @@ OPEN_APP = "Open flighter"
 # What each import outcome is called on the lock screen, and the line under it.
 _IMPORTED = {
     IngestOutcome.CREATED: ("Flight added", "{flights}"),
-    IngestOutcome.DUPLICATE: ("Already tracked", "{flights}. Nothing added."),
+    IngestOutcome.DUPLICATE: ("Flight already added", "{flights}. Nothing was added."),
 }
 
 
@@ -112,21 +112,22 @@ def _minutes_between(old: str | None, new: str | None) -> int | None:
     return round(abs((end - start).total_seconds()) / 60)
 
 
-def _moved(event: FlightEvent, tz: str, *, verb: str, fallback: str, now: str) -> str:
-    """`Delayed 35 min. Departs 19:15 EDT`.
+def _moved(event: FlightEvent, tz: str, *, head: str, fallback: str, now: str) -> str:
+    """`Delayed 35 minutes. Departs 19:15 EDT`.
 
-    Degrades to whichever half survives when a value is missing, because format_local
-    renders a missing time as a dash and that is not a sentence.
+    `head` is a format string with a `{minutes}` slot. Degrades to whichever half
+    survives when a value is missing, because format_local renders a missing time as a
+    dash and that is not a sentence.
     """
     when = parse_instant(event.new_value)
     minutes = _minutes_between(event.old_value, event.new_value)
-    head = fallback if minutes is None else f"{verb} {minutes} min"
-    return head if when is None else f"{head}. {now} {format_local(when, tz)}"
+    lead = fallback if minutes is None else head.format(minutes=minutes)
+    return lead if when is None else f"{lead}. {now} {format_local(when, tz)}"
 
 
 def _at(verb: str, value: str | None, tz: str) -> str:
     instant = parse_instant(value)
-    return f"{verb} {format_local(instant, tz)}" if instant else verb
+    return f"{verb} at {format_local(instant, tz)}" if instant else verb
 
 
 def event_message(event: FlightEvent, *, origin_tz: str, dest_tz: str) -> str:
@@ -134,29 +135,41 @@ def event_message(event: FlightEvent, *, origin_tz: str, dest_tz: str) -> str:
     kind, old, new = event.kind, event.old_value, event.new_value
 
     if kind == EventKind.GATE_ASSIGNED:
-        return f"Gate {new}"
+        return f"Gate assigned: {new}"
     if kind == EventKind.GATE_CHANGED:
         return f"Gate changed from {old} to {new}"
     if kind == EventKind.TERMINAL_CHANGED:
-        return f"Terminal changed from {old} to {new}" if old else f"Terminal {new}"
+        return f"Terminal changed from {old} to {new}" if old else f"Terminal assigned: {new}"
     if kind == EventKind.DEPARTURE_DELAYED:
-        return _moved(event, origin_tz, verb="Delayed", fallback="Delayed", now="Departs")
+        return _moved(
+            event, origin_tz, head="Delayed {minutes} minutes", fallback="Delayed", now="Departs"
+        )
     if kind == EventKind.DEPARTURE_MOVED_EARLIER:
-        return _moved(event, origin_tz, verb="Moved up", fallback="Moved up", now="Departs")
+        return _moved(
+            event,
+            origin_tz,
+            head="Moved {minutes} minutes earlier",
+            fallback="Moved earlier",
+            now="Departs",
+        )
     if kind == EventKind.ARRIVAL_TIME_CHANGED:
         return _moved(
-            event, dest_tz, verb="Arrival moved", fallback="Arrival time changed", now="Arrives"
+            event,
+            dest_tz,
+            head="Arrival time changed by {minutes} minutes",
+            fallback="Arrival time changed",
+            now="Arrives",
         )
     if kind == EventKind.DEPARTED:
         return _at("Departed", new, origin_tz)
     if kind == EventKind.LANDED:
         return _at("Landed", new, dest_tz)
     if kind == EventKind.BAGGAGE_CLAIM_ASSIGNED:
-        return f"Baggage claim {new}"
+        return f"Baggage claim: {new}"
     if kind == EventKind.CANCELLED:
-        return "Cancelled"
+        return "Flight cancelled"
     if kind == EventKind.DIVERTED:
-        return f"Diverted to {new}" if new and new != "true" else "Diverted"
+        return f"Flight diverted to {new}" if new and new != "true" else "Flight diverted"
     return kind
 
 
@@ -273,8 +286,8 @@ class Notifier:
         await self._send(
             title="AeroAPI budget reached",
             message=(
-                f"${spend:.2f} of the ${cap:.2f} monthly cap spent. "
-                "Updates are paused until the cap is raised or the month ends."
+                f"${spend:.2f} of the ${cap:.2f} monthly cap has been spent. "
+                "Flight updates are paused until the cap is raised or the month ends."
             ),
             priority=PRIORITY_HIGH,
             url=prefs.public_base_url(),

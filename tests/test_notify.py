@@ -97,29 +97,38 @@ async def test_title_and_url_name_the_flight(settings: Settings) -> None:
     assert sent["title"] == "DL1234 JFK -> LAX"
     assert sent["url"] == "https://flights.example.com/f/7"
     assert sent["url_title"] == "Open flight"
-    assert sent["message"] == "Gate B22"
+    assert sent["message"] == "Gate assigned: B22"
 
 
 @pytest.mark.parametrize(
     ("flight_event", "priority", "message"),
     [
-        (event(EventKind.GATE_ASSIGNED, new="B22"), "0", "Gate B22"),
+        (event(EventKind.GATE_ASSIGNED, new="B22"), "0", "Gate assigned: B22"),
         (event(EventKind.GATE_CHANGED, old="B22", new="C14"), "1", "Gate changed from B22 to C14"),
         (
             event(EventKind.DEPARTURE_DELAYED, old=DEPARTS.isoformat(), new=DELAYED.isoformat()),
             "0",
-            "Delayed 35 min. Departs 19:35 EDT",
+            "Delayed 35 minutes. Departs 19:35 EDT",
         ),
-        (event(EventKind.DEPARTED, new=DELAYED.isoformat()), "0", "Departed 19:35 EDT"),
-        (event(EventKind.LANDED, new=DELAYED.isoformat()), "0", "Landed 16:35 PDT"),
+        (
+            event(
+                EventKind.DEPARTURE_MOVED_EARLIER,
+                old=DELAYED.isoformat(),
+                new=DEPARTS.isoformat(),
+            ),
+            "0",
+            "Moved 35 minutes earlier. Departs 19:00 EDT",
+        ),
+        (event(EventKind.DEPARTED, new=DELAYED.isoformat()), "0", "Departed at 19:35 EDT"),
+        (event(EventKind.LANDED, new=DELAYED.isoformat()), "0", "Landed at 16:35 PDT"),
         (
             event(EventKind.BAGGAGE_CLAIM_ASSIGNED, new="carousel 3"),
             "0",
-            "Baggage claim carousel 3",
+            "Baggage claim: carousel 3",
         ),
-        (event(EventKind.CANCELLED, old="false", new="true"), "1", "Cancelled"),
-        (event(EventKind.DIVERTED, old="false", new="true"), "1", "Diverted"),
-        (event(EventKind.DIVERTED, new="YOW"), "1", "Diverted to YOW"),
+        (event(EventKind.CANCELLED, old="false", new="true"), "1", "Flight cancelled"),
+        (event(EventKind.DIVERTED, old="false", new="true"), "1", "Flight diverted"),
+        (event(EventKind.DIVERTED, new="YOW"), "1", "Flight diverted to YOW"),
     ],
 )
 async def test_message_and_priority_per_kind(
@@ -163,7 +172,7 @@ async def test_friend_notifications_follow_the_preference(
         prefs.current().model_copy(update={"notify_for_friend_flights": True}),
     )
     await notifier.flight_event(friend, changed, origin_tz=ORIGIN_TZ, dest_tz=DEST_TZ)
-    assert recorder.only["message"] == "Gate B22"
+    assert recorder.only["message"] == "Gate assigned: B22"
 
 
 @pytest.mark.parametrize(
@@ -300,8 +309,8 @@ async def test_an_import_links_to_the_flight_page(settings: Settings) -> None:
 
 async def test_a_duplicate_import_says_nothing_was_added(settings: Settings) -> None:
     sent = await imported(settings, "duplicate")
-    assert sent["title"] == "Already tracked"
-    assert "DL1234 JFK -> LAX" in sent["message"]
+    assert sent["title"] == "Flight already added"
+    assert sent["message"] == "DL1234 JFK -> LAX. Nothing was added."
 
 
 async def test_a_failed_import_links_to_the_problems_page(settings: Settings) -> None:
