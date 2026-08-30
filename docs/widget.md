@@ -295,6 +295,14 @@ It stands against the bottom edge rather than a fixed distance under the last fl
 height a size has spare sits between the two, so the stamp is in the same place on a
 widget holding two flights as on one holding seven, and so is the first row.
 
+It stands eight points off that edge where the flights stand fourteen off theirs. A row
+is words that have to be read, and a row against the rounded corner reads as one that
+ran out of room; the stamp is a footnote, and a footnote is read in the margin. At the
+rows' own inset it stood further off the edge than off the last flight, and read as
+adrift between the two. Eight is the gap between two flights and the least the spacer
+above the stamp ever gives, so on a widget drawing every flight its size takes the line
+has the same air over it as under it.
+
 The line costs twelve points against a row's shade under 36, and the gap between two
 flights is what pays for it. No size gives up a flight for it: the server sends 2, 3 and
 7.
