@@ -2737,22 +2737,24 @@ def test_a_flight_long_at_the_gate_is_filed_under_flown(
     assert 'id="flight-tabs-panel-3"' in body
 
 
-def test_the_settings_page_offers_the_update_card(client: TestClient) -> None:
-    """Unconnected, the card says what would make the button work rather than hiding."""
+def test_the_updates_row_stands_without_watchtower(client: TestClient) -> None:
+    """Checking only takes the registry, so the row is there before any connection -
+    and it says so, so the page's script holds the Update button back."""
     body = client.get("/settings").text
     assert "Watchtower" in body
-    assert "Connect Watchtower above" in body
-    assert 'id="update-form"' not in body
+    assert "Check for updates" in body
+    assert 'id="update-form"' in body
+    assert 'data-watchtower=""' in body
 
 
-def test_a_connected_watchtower_gets_the_button(
+def test_a_connected_watchtower_is_marked_on_the_row(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings.watchtower_url = "http://watchtower:8080"
     settings.watchtower_token = "wt-api-token-value"
     with build_client(settings, monkeypatch) as client:
         body = client.get("/settings").text
-    assert 'id="update-form"' in body
+    assert 'data-watchtower="1"' in body
     # The address is shown back the way the Apple ID is; the token never is.
     assert "http://watchtower:8080" in body
     assert "wt-api-token-value" not in body
@@ -2761,8 +2763,10 @@ def test_a_connected_watchtower_gets_the_button(
 def test_the_update_check_says_what_runs_and_what_is_published(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def checked(*, refresh: bool = True, transport: Any = None) -> updates.UpdateStatus:
-        assert refresh
+    async def checked(
+        *, refresh: bool = True, force: bool = False, transport: Any = None
+    ) -> updates.UpdateStatus:
+        assert refresh and not force
         return updates.UpdateStatus(running="a" * 40, latest="b" * 40, checked=1.0)
 
     monkeypatch.setattr(updates, "status", checked)
@@ -2773,10 +2777,26 @@ def test_the_update_check_says_what_runs_and_what_is_published(
     assert answer["build"]
 
 
+def test_the_check_button_goes_past_the_cache(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def checked(
+        *, refresh: bool = True, force: bool = False, transport: Any = None
+    ) -> updates.UpdateStatus:
+        assert refresh and force
+        return updates.UpdateStatus(running="a" * 40, latest="a" * 40, checked=1.0)
+
+    monkeypatch.setattr(updates, "status", checked)
+    answer = client.get("/settings/update/check?force=1").json()
+    assert answer["available"] is False
+
+
 def test_the_poll_stays_off_the_registry(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def unchecked(*, refresh: bool = True, transport: Any = None) -> updates.UpdateStatus:
+    async def unchecked(
+        *, refresh: bool = True, force: bool = False, transport: Any = None
+    ) -> updates.UpdateStatus:
         assert not refresh
         return updates.UpdateStatus(running="")
 

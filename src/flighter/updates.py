@@ -196,18 +196,23 @@ _lock = asyncio.Lock()
 
 
 async def status(
-    *, refresh: bool = True, transport: httpx.AsyncBaseTransport | None = None
+    *,
+    refresh: bool = True,
+    force: bool = False,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> UpdateStatus:
     """What is running against what is published, from the cache when it is fresh.
 
     A failed read keeps the last answer but is not stamped as fresh, so the registry is
-    asked again on the next visit rather than the failure standing for an hour.
+    asked again on the next visit rather than the failure standing for an hour. `force`
+    is the Check button: a person asking now means now, not the cache's idea of recent.
     """
     global _status
     if not refresh:
         return _status
     async with _lock:
-        if _status.checked is not None and time.monotonic() - _status.checked < CHECK_EVERY:
+        fresh = _status.checked is not None and time.monotonic() - _status.checked < CHECK_EVERY
+        if fresh and not force:
             return _status
         try:
             # Blobs come back as a redirect onto the registry's CDN, which httpx does
