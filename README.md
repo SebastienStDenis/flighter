@@ -336,8 +336,9 @@ The package inherits this repository's visibility, so it pulls anonymously with 
 `docker login` on the desktop. Publishing is gated behind a job that re-runs lint, types
 and tests, so a commit that fails CI never ships as `:latest`.
 
-To build locally instead of pulling, `docker compose build` still works from a checkout:
-the stack's `build` points back at the repository root.
+Neither stack builds: both name the published image, so a copy of the directory runs on
+its own with no checkout behind it. To compile one instead, `docker build .` from the root
+of a checkout and point the `image:` at what you tagged.
 
 The named `data` volume needs no setup. If you would rather keep the state in the
 checkout, point it at `./data:/app/data` and give that directory to the user the

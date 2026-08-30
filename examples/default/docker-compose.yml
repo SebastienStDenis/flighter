@@ -1,10 +1,9 @@
 services:
   app:
-    # Published by .github/workflows/release.yml on every push to main. `build` stays so
-    # a checkout can still compile its own, but the home stack pulls: `docker compose
-    # pull` fetches the built image rather than making the desktop compile it.
+    # Published by .github/workflows/release.yml on every push to main. `docker compose
+    # pull` fetches it rather than making the machine compile one, so this stack needs
+    # nothing from the repository but itself.
     image: ghcr.io/sebastienstdenis/flighter:latest
-    build: ../..
     container_name: flighter
     restart: unless-stopped
     env_file:
