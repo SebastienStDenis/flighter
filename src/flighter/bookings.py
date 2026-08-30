@@ -12,7 +12,7 @@ import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -381,6 +381,28 @@ async def latest_snapshots(
         FlightSnapshot.booking_id.in_(list(booking_ids)), FlightSnapshot.id == newest_id
     )
     return {snapshot.booking_id: snapshot for snapshot in (await session.scalars(stmt)).all()}
+
+
+async def change_stamp(session: AsyncSession) -> str:
+    """One short string that moves whenever a page could have something new to draw.
+
+    The pages showing a live flight poll this instead of the whole page, and reload the
+    moment it differs from the one they were rendered with. So each thing worth a reload
+    has to move it: a snapshot appearing is the poller having seen something, and a
+    booking appearing or disappearing is an import, an add or a delete, from whichever
+    device made it. The pieces are compared for difference and never for order, so all
+    each one has to do is change. `Booking.updated_at` is left out on purpose: the
+    poller's lease bumps it before every fetch, and a stamp that moved on the lease
+    would reload the watching pages with nothing new to show.
+    """
+    newest_snapshot = await session.scalar(select(func.max(FlightSnapshot.id)))
+    newest_booking = await session.scalar(select(func.max(Booking.id)))
+    # On the board rather than in the table: a delete archives the row, so what a
+    # deletion moves is how many bookings are left showing.
+    showing = await session.scalar(
+        select(func.count()).select_from(Booking).where(Booking.status != BookingStatus.ARCHIVED)
+    )
+    return f"{newest_snapshot or 0}.{newest_booking or 0}.{showing or 0}"
 
 
 # Normalised on the way in, because all three are part of the dedupe key: "aa" and "AA"

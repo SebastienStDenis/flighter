@@ -11,6 +11,7 @@
 <meta name="apple-mobile-web-app-title" content="Flighter">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="rendered-at" content="{{ rendered_at() }}">
+{% if watch %}<meta name="flight-stamp" content="{{ watch }}">{% endif %}
 <link rel="manifest" href="/static/manifest.json">
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
@@ -149,12 +150,13 @@
       setTimeout(tick, 60000 - (now % 60000));
     }
 
-    // The closest the poller ever looks is every ten minutes, so a page older than that
-    // may be behind the feed. Once it is, it asks the server for a fresh one whenever it
-    // is in front, and when the server does not answer it says how old it is and that
-    // there is no connection. The page asks rather than trusting navigator.onLine, which
-    // is true on wifi with nothing behind it.
-    var STALE_MS = 10 * 60000;
+    // Imports, adds from another device and the poller all land on their own clocks,
+    // so a page more than a few minutes old may be behind the database whatever the
+    // poll cadence says. Once it is, it asks the server for a fresh one whenever it is
+    // in front, and when the server does not answer it says how old it is and that
+    // there is no connection. The page asks rather than trusting navigator.onLine,
+    // which is true on wifi with nothing behind it.
+    var STALE_MS = 3 * 60000;
     var rendered = Date.parse(document.querySelector('meta[name="rendered-at"]').content);
     var stale = document.getElementById("stale");
     function since() {
@@ -202,8 +204,10 @@
     // rather than opened fresh, so bringing it forward is the one open that never asks
     // the server - and a flagged email or an add from another device can land seconds
     // later, well inside the stale mark. Back after more than a moment away, ask. The
-    // moment is so that flicking to another app and straight back does not flash.
-    var AWAY_MS = 30000;
+    // moment absorbs glancing at a notification and coming straight back; switching to
+    // Mail to flag a booking email takes longer than it, and that return is exactly
+    // the one that should show its flight.
+    var AWAY_MS = 10000;
     var hiddenAt = NaN;
     window.addEventListener("online", age);
     document.addEventListener("visibilitychange", function () {
@@ -214,6 +218,29 @@
       if (Date.now() - hiddenAt >= AWAY_MS) reach(true);
       else age();
     });
+
+    // A page showing a live flight was handed a stamp of what the database held as it
+    // was drawn, and polls for the stamp having moved - the poller writing a snapshot,
+    // a flight arriving or leaving - reloading the moment it has. Polling the stamp
+    // rather than reloading on a clock means the reload only ever happens with
+    // something new to draw. Every other page carries no stamp and asks for nothing;
+    // failures stay quiet too, because the stale watcher above already owns saying
+    // that the server cannot be reached.
+    var watching = document.querySelector('meta[name="flight-stamp"]');
+    if (watching) {
+      var WATCH_MS = 20000;
+      setInterval(function () {
+        if (document.visibilityState !== "visible") return;
+        fetch("/api/stamp", { cache: "no-store", signal: AbortSignal.timeout(4000) })
+          .then(function (response) {
+            return response.ok ? response.json() : null;
+          })
+          .then(function (answer) {
+            if (answer && answer.stamp && answer.stamp !== watching.content) refresh();
+          })
+          .catch(function () {});
+      }, WATCH_MS);
+    }
 
     tick();
   })();

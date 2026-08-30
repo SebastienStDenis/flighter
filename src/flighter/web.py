@@ -291,6 +291,19 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(status_code=404, detail="No such flight.")
         return (await build_views(session, [booking]))[0]
 
+    async def _watch(session: AsyncSession, *views: FlightView) -> str | None:
+        """The change stamp, when the page being drawn shows a flight worth watching.
+
+        Inside its day a flight's facts can move while the page is being read, so the
+        page carries a stamp of what the database held as it was drawn and its script
+        polls for the stamp moving, reloading the moment it has. Days out nothing moves
+        faster than a person, and once the book is closed nothing moves at all; either
+        way the page carries no stamp and its script asks for nothing.
+        """
+        if any(view.watched and not view.flown for view in views):
+            return await booking_repo.change_stamp(session)
+        return None
+
     async def board_page(
         request: Request,
         session: AsyncSession,
@@ -328,6 +341,7 @@ def create_app(settings: Settings) -> FastAPI:
                 "friends": friends,
                 "past": past,
                 "tab": tab,
+                "watch": await _watch(session, *mine, *friends),
                 "budget": budget,
                 "raised_cap": None if budget.cap_usd is None else budget.cap_usd + LIMIT_STEP,
                 # An empty board says how to fill it, and importing from email is only
@@ -511,6 +525,7 @@ def create_app(settings: Settings) -> FastAPI:
                 "calendar_link": calendar_link,
                 "events": list(events.scalars()),
                 "return_tab": return_tab,
+                "watch": await _watch(session, view),
             },
         )
 
@@ -854,6 +869,16 @@ def create_app(settings: Settings) -> FastAPI:
     async def healthz() -> JSONResponse:
         """Liveness for the container health check, which must not touch the database."""
         return JSONResponse({"status": "ok"})
+
+    @app.get("/api/stamp")
+    async def stamp(session: SessionDep) -> JSONResponse:
+        """What the pages showing a live flight poll, instead of the whole page.
+
+        Asked every few seconds while such a page is in front, so the answer is a few
+        bytes and one aggregate read. Only its difference from the stamp in the page
+        means anything, so the shape of the string stays the repository's business.
+        """
+        return JSONResponse({"stamp": await booking_repo.change_stamp(session)})
 
     return app
 
