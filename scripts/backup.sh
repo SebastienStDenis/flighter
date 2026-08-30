@@ -1,7 +1,7 @@
 #!/bin/sh
 # Nightly snapshot of the SQLite database, newest 14 kept.
 # Run from the host's crontab:
-#   0 4 * * * docker compose -f /path/to/examples/default/docker-compose.yml exec -T app /app/scripts/backup.sh
+#   0 4 * * * docker compose -f /path/to/docker-compose.yml exec -T app /app/scripts/backup.sh
 set -eu
 
 DB=${DB:-/app/data/flighter.db}
