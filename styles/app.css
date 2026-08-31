@@ -271,18 +271,18 @@
     @apply size-4.5;
   }
 
-  /* The mark: the name with the flight drawn straight through it. The line behind the
+  /* The mark: the name with the flight drawn along under it. The line behind the
      aircraft has been flown, the one dash ahead of it has not - the figure the app icon
-     carries, with the word standing where its runway was.
+     carries, with the word standing on its runway.
 
      The two blues are the icon's own rather than the theme's: the icon is a file the
      page cannot read a variable out of, and the header sits a tab's width from it. */
   .brand {
     @apply inline-flex items-center gap-[0.3em];
 
-    /* The word is painted over the route rather than struck through by it. The rule is
-       a layer of this box rather than of the button around it, so it passes behind the
-       letters and stands in the gaps between them. */
+    /* The word is painted over the route rather than crossed out by it: the g reaches
+       below the line, and the rule is a layer of this box rather than of the button
+       around it, so it passes behind the descender instead of through it. */
     isolation: isolate;
 
     /* The route is already running when it reaches the word, so the rule starts this far
@@ -291,13 +291,12 @@
     --lead: 0.25em;
     margin-left: var(--lead);
 
-    /* The route runs through the middle of the lowercase letters, not of the line box.
-       The box is centred on Satoshi's ascent and descent, 1.01em and 0.24em, which puts
-       its middle 0.385em over the baseline - about the middle of a capital, so the line
-       crossed the F at its waist and the rest of the word at its shoulders. The middle
-       of the x-height is half an ex up, and everything on the route comes down by the
-       difference so the aircraft still flies on its own line. */
-    --drop: calc(0.385em - 0.5ex);
+    /* The route runs under the word, a step below the baseline, not through the middle
+       of the line box. The box is centred on Satoshi's ascent and descent, 1.01em and
+       0.24em, which puts its middle 0.385em over the baseline; the line sits 0.12em
+       under it - clear of the letters, short of the g's foot - and everything on the
+       route comes down by the sum so the aircraft still flies on its own line. */
+    --drop: calc(0.385em + 0.12em);
 
     --mark: #0d7dd4;
   }
@@ -336,21 +335,10 @@
   .brand-ahead {
     @apply h-px w-[0.18em] rounded-full;
     margin-left: -0.26em;
-    /* The height of the rule behind the word, so the two are the same hairline. Half a
-       pixel high it could not be: a line that thin falls between the two rows the rule
-       paints and has to be nudged into one of them, and the row it was nudged into was
-       the lower - which read as a dash sitting under the line rather than on it. What
+    /* The same drop as the rule behind the word, so the two are one hairline. What
        keeps the leg ahead quieter than the leg behind is its colour, which was doing
-       that anyway.
-
-       Being centred where the rule is centred is not enough to be drawn where it is
-       drawn. The rule is a box the page has moved, and it paints across the half pixel
-       it lands on; this is a box the page has only laid out, and that one is snapped to
-       the row below before it is painted. Measured at 1x, 2x and 3x, the dash came out
-       half a pixel low every time, which is the half pixel taken off here - and taking
-       it off is also what puts the dash on the drawn-where-it-lies footing the rule is
-       already on, so the two now land in the same rows at all three. */
-    translate: 0 calc(var(--drop) - 0.5px);
+       that anyway. */
+    translate: 0 var(--drop);
     background-color: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
   }
 
