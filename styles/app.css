@@ -14,24 +14,35 @@
 @custom-variant dark (@media (prefers-color-scheme: dark));
 
 @font-face {
-  font-family: "Manrope";
-  src: url("/static/fonts/manrope-latin-var.woff2") format("woff2");
-  font-weight: 200 800;
+  font-family: "Satoshi";
+  src: url("/static/fonts/satoshi-var.woff2") format("woff2");
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* The typeface Airbus commissioned for cockpit displays, carried here by the airport
+   codes and everything else that reads like an instrument. Two weights are all it has,
+   so a medium asks for it and gets regular. */
+@font-face {
+  font-family: "B612 Mono";
+  src: url("/static/fonts/b612-mono-latin-400.woff2") format("woff2");
+  font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "JetBrains Mono";
-  src: url("/static/fonts/jetbrains-mono-latin-var.woff2") format("woff2");
-  font-weight: 100 800;
+  font-family: "B612 Mono";
+  src: url("/static/fonts/b612-mono-latin-700.woff2") format("woff2");
+  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
 
 @theme {
-  --font-sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: "Satoshi", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "B612 Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --color-quiet: var(--quiet);
   --color-plan: var(--plan);
@@ -142,7 +153,7 @@
     /* A countdown that reflows every second is unreadable, so no digit is ever allowed
        to be a different width from another. */
     @apply font-sans tabular-nums antialiased;
-    /* Manrope fuses "fl" into a single glyph, which this app would wear on every
+    /* Satoshi fuses "fl" into a single glyph, which this app would wear on every
        "Flights", so the common ligatures stay off. */
     font-variant-ligatures: no-common-ligatures;
     /* Narrower than this the cards start squeezing their own contents, so the page
@@ -281,12 +292,12 @@
     margin-left: var(--lead);
 
     /* The route runs through the middle of the lowercase letters, not of the line box.
-       The box is centred on Manrope's ascent and descent, 1.066em and 0.3em, which puts
-       its middle 0.383em over the baseline - about the middle of a capital, so the line
+       The box is centred on Satoshi's ascent and descent, 1.01em and 0.24em, which puts
+       its middle 0.385em over the baseline - about the middle of a capital, so the line
        crossed the F at its waist and the rest of the word at its shoulders. The middle
        of the x-height is half an ex up, and everything on the route comes down by the
        difference so the aircraft still flies on its own line. */
-    --drop: calc(0.383em - 0.5ex);
+    --drop: calc(0.385em - 0.5ex);
 
     --mark: #0d7dd4;
   }

@@ -17,8 +17,9 @@ const ASSETS = [
   "/static/flighter.css",
   "/static/basecoat.min.js",
   "/static/basecoat-tabs.min.js",
-  "/static/fonts/manrope-latin-var.woff2",
-  "/static/fonts/jetbrains-mono-latin-var.woff2",
+  "/static/fonts/satoshi-var.woff2",
+  "/static/fonts/b612-mono-latin-400.woff2",
+  "/static/fonts/b612-mono-latin-700.woff2",
   "/static/icon.svg",
   "/static/manifest.json",
 ];
