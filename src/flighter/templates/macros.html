@@ -235,10 +235,10 @@
 
 {# A fact about a booking: its name on the left, its value on the right. Changing one is
    the Edit button in the header, so the row itself is text rather than a control. #}
-{% macro detail(name, value, mono=false, carrier=none, friend=none, copy=none) %}
+{% macro detail(name, value, mono=false, carrier=none, friend=none, copy=none, pre=false) %}
 <div class="item py-1" data-size="xs">
   <section><p>{{ name }}</p></section>
-  <aside class="gap-2 text-right {{ 'font-mono ' if mono }}{{ 'text-muted-foreground' if value == missing else 'font-medium' }}">
+  <aside class="gap-2 text-right {{ 'font-mono ' if mono }}{{ 'whitespace-pre-line ' if pre }}{{ 'text-muted-foreground' if value == missing else 'font-medium' }}">
     {%- if carrier %}{{ logo(carrier, "size-4") }}{% endif -%}
     {%- if friend %}{{ friend_avatar(friend, "size-4", "text-[0.625rem]") }}{% endif -%}
     {#- The button leads the value, clear of the row's right edge where the eye lands on
