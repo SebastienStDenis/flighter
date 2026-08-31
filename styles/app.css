@@ -21,28 +21,17 @@
   font-display: swap;
 }
 
-/* The typeface Airbus commissioned for cockpit displays, carried here by the airport
-   codes and everything else that reads like an instrument. Two weights are all it has,
-   so a medium asks for it and gets regular. */
 @font-face {
-  font-family: "B612 Mono";
-  src: url("/static/fonts/b612-mono-latin-400.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "B612 Mono";
-  src: url("/static/fonts/b612-mono-latin-700.woff2") format("woff2");
-  font-weight: 700;
+  font-family: "JetBrains Mono";
+  src: url("/static/fonts/jetbrains-mono-latin-var.woff2") format("woff2");
+  font-weight: 100 800;
   font-style: normal;
   font-display: swap;
 }
 
 @theme {
   --font-sans: "Satoshi", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "B612 Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --color-quiet: var(--quiet);
   --color-plan: var(--plan);
