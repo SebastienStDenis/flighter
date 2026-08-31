@@ -142,6 +142,9 @@
     /* A countdown that reflows every second is unreadable, so no digit is ever allowed
        to be a different width from another. */
     @apply font-sans tabular-nums antialiased;
+    /* Manrope fuses "fl" into a single glyph, which this app would wear on every
+       "Flights", so the common ligatures stay off. */
+    font-variant-ligatures: no-common-ligatures;
     /* Narrower than this the cards start squeezing their own contents, so the page
        stops shrinking and the window scrolls to it instead. */
     min-width: 365px;
