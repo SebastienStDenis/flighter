@@ -73,7 +73,7 @@
       {{ m.detail("Confirmation", dash(none), mono=true) }}
       {% endfor %}
       {{ m.detail("Seat", dash(v.booking.seat), mono=true) }}
-      {{ m.detail("Notes", dash(v.booking.notes)) }}
+      {{ m.detail("Notes", dash(v.booking.notes), pre=true) }}
       {{ m.detail("Owner", v.booking.friend_name or "Me", friend=v if v.booking.friend_name else none) }}
       {% if s and s.aircraft_type %}
       {{ m.detail("Aircraft", s.aircraft_type, mono=true) }}
