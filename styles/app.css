@@ -284,6 +284,12 @@
        route comes down by the sum so the aircraft still flies on its own line. */
     --drop: calc(0.383em + 0.12em);
 
+    /* The button centres the line box, but the route hangs the aircraft below it, so
+       the ink reaches further under the baseline (0.55em, the aircraft's tail) than
+       over it is tall. Centred by box the mark rides low; raised by half the
+       imbalance, the air over the F matches the air under the aircraft. */
+    translate: 0 -0.27em;
+
     --mark: #0d7dd4;
   }
 

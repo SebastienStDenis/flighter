@@ -33,9 +33,10 @@
      own button reads as a slab rather than as a sign. #}
   <nav class="topbar mx-auto flex h-14 max-w-lg items-center gap-1 px-3" aria-label="Sections">
     {# Which app this is, on every page. A page one level down draws its own way back up
-       in its own content, rather than taking this away to make room for it. #}
-    <a class="btn text-lg" data-size="lg" href="/"
-       data-variant="{{ 'secondary' if board else 'ghost' }}"
+       in its own content, rather than taking this away to make room for it. It is a name
+       rather than a tab, so it never lights up as the current place; the tabs at the
+       other end of the bar do that. #}
+    <a class="btn text-lg" data-size="lg" href="/" data-variant="ghost"
        {% if board %}aria-current="page"{% endif %}>
       <span class="brand">
         <span class="brand-name">Flighter</span>

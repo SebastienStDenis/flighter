@@ -451,7 +451,8 @@ def test_a_row_is_the_flight_its_route_and_when_it_leaves(
 
 def test_the_plus_is_the_tab_that_lights_on_the_add_page(client: TestClient) -> None:
     board = client.get("/").text
-    assert 'href="/" data-variant="secondary" aria-current="page"' in " ".join(board.split())
+    # The brand is a name, not a tab: current for the reader, never lit.
+    assert 'href="/" data-variant="ghost" aria-current="page"' in " ".join(board.split())
     assert 'aria-label="Add a flight" data-variant="ghost"' in " ".join(board.split())
 
     add = " ".join(client.get("/f/new").text.split())
