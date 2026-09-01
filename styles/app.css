@@ -264,7 +264,7 @@
      The two blues are the icon's own rather than the theme's: the icon is a file the
      page cannot read a variable out of, and the header sits a tab's width from it. */
   .brand {
-    @apply relative inline-flex items-center gap-[0.3em];
+    @apply inline-flex items-center gap-[0.3em];
 
     /* The word is painted over the route rather than crossed out by it: the g reaches
        below the line, and the rule is a layer of this box rather than of the button
@@ -332,42 +332,6 @@
        that anyway. */
     translate: 0 var(--drop);
     background-color: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
-  }
-
-  /* The sky under the route: soft filled puffs, out of flow so the word and the
-     aircraft keep their places, and behind the layers of the mark like the line is.
-     The grey of the leg ahead rather than the mark's blue, so the weather stays
-     weather and the flight stays the figure. */
-  .brand-cloud {
-    @apply pointer-events-none absolute;
-    z-index: -1;
-    top: calc(50% + var(--drop) - 0.05em);
-    left: 12%;
-    color: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
-  }
-
-  .brand-cloud-far {
-    left: 58%;
-    top: calc(50% + var(--drop) + 0.06em);
-  }
-
-  /* The cheek: two puffs drifted up in front of the word. Their grey is mixed down
-     to the same weight but over the page's own ground, so it is a paint rather than
-     a tint and the strokes it crosses go behind the weather. */
-  .brand-cloud-over,
-  .brand-cloud-peek {
-    z-index: 1;
-    color: color-mix(in oklab, var(--muted-foreground) 45%, var(--background));
-  }
-
-  .brand-cloud-over {
-    left: 30%;
-    top: 22%;
-  }
-
-  .brand-cloud-peek {
-    left: 64%;
-    top: 16%;
   }
 
   /* The route: two airports, one rule between them, and the aircraft at the fraction of
