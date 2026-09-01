@@ -342,13 +342,32 @@
     @apply pointer-events-none absolute;
     z-index: -1;
     top: calc(50% + var(--drop) - 0.05em);
-    left: 16%;
+    left: 12%;
     color: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
   }
 
   .brand-cloud-far {
-    left: 62%;
+    left: 58%;
     top: calc(50% + var(--drop) + 0.06em);
+  }
+
+  /* The cheek: two puffs drifted up in front of the word. Their grey is mixed down
+     to the same weight but over the page's own ground, so it is a paint rather than
+     a tint and the strokes it crosses go behind the weather. */
+  .brand-cloud-over,
+  .brand-cloud-peek {
+    z-index: 1;
+    color: color-mix(in oklab, var(--muted-foreground) 45%, var(--background));
+  }
+
+  .brand-cloud-over {
+    left: 30%;
+    top: 22%;
+  }
+
+  .brand-cloud-peek {
+    left: 64%;
+    top: 16%;
   }
 
   /* The route: two airports, one rule between them, and the aircraft at the fraction of
