@@ -49,5 +49,15 @@ const { pageOrLastCopy } = worker(self, caches);
   await pageOrLastCopy(request);
   reachable = false;
   const byTab = await (await pageOrLastCopy(new Request("http://flighter.test/?tab=flown"))).text();
-  console.log(JSON.stringify({ served, kept, byTab }));
+  // A page never saved, with nothing to fall back to: the notice the app draws itself.
+  store.clear();
+  const drawn = {};
+  for (const [name, address] of [
+    ["board", "http://flighter.test/?tab=mine"],
+    ["flight", "http://flighter.test/f/12?from=friends"],
+    ["settings", "http://flighter.test/settings"],
+  ]) {
+    drawn[name] = await (await pageOrLastCopy(new Request(address))).text();
+  }
+  console.log(JSON.stringify({ served, kept, byTab, drawn }));
 })();

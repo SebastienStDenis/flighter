@@ -889,9 +889,12 @@ def test_a_delay_past_midnight_names_only_the_day_it_now_leaves(
     tz = "America/Toronto"
     booked = datetime(2026, 9, 13, 3, 50, tzinfo=UTC)
     slipped = datetime(2026, 9, 13, 4, 30, tzinfo=UTC)
+    # Both ends are pinned, or the arrival keeps the default hung off today's date and
+    # lands on the very day this asks about on the weeks the two happen to meet.
+    lands = datetime(2026, 9, 13, 10, 50, tzinfo=UTC)
     show(
         monkeypatch,
-        booking(scheduled_departure_utc=booked),
+        booking(scheduled_departure_utc=booked, scheduled_arrival_utc=lands),
         replace_snapshot(scheduled_out=booked, estimated_out=slipped),
     )
 
