@@ -33,14 +33,6 @@ const PATIENCE_MS = 4000;
 const KEEP_MS = 24 * 60 * 60 * 1000;
 const SAVED_AT = "x-flighter-saved-at";
 
-const OFFLINE_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Offline</title><link rel="stylesheet" href="/static/flighter.css"></head>
-<body><main class="mx-auto w-full max-w-lg px-4 pt-16"><section class="empty">
-<header><h2>No connection</h2><p>Check your connection and try again.</p></header>
-<footer><a class="btn" href="/">Try again</a></footer>
-</section></main></body></html>`;
-
 self.addEventListener("install", (event) => {
   // Fetched past the browser's own cache: this install exists because the app changed,
   // and Safari's copy of an asset can outlive the release it came from, so a shell
@@ -140,7 +132,9 @@ async function pageOrLastCopy(request) {
     const copy = await cache.match(request, { ignoreSearch: true });
     if (copy && Date.now() - Number(copy.headers.get(SAVED_AT)) < KEEP_MS) return copy;
     if (copy) await cache.delete(request, { ignoreSearch: true });
-    return new Response(OFFLINE_PAGE, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    return new Response(offlinePage(request.url), {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
   }
 }
 
@@ -155,4 +149,118 @@ function stamped(response) {
   const copy = new Response(response.clone().body, response);
   copy.headers.set(SAVED_AT, String(Date.now()));
   return copy;
+}
+
+// With no copy to fall back to, the app draws the page itself rather than a notice on a
+// blank screen: the bar at the top is still there, so the board, the email and the
+// settings are all one tap away and any of them the cache can answer for opens. The
+// page is served at the address that was asked for, so Try again is a link to that same
+// address - it asks for the page a person is standing on rather than sending them home.
+//
+// It is drawn out of the app's own classes, which are in the stylesheet because the
+// templates use them; nothing here may reach for a utility no template does, or the
+// build will not have generated it.
+function offlinePage(href) {
+  const url = new URL(href);
+  const here = url.pathname;
+  // The same reading of the address the header does: a flight is one level down from
+  // the board, and /f/new is the add box rather than a flight.
+  const flight = here.startsWith("/f/") && here !== "/f/new";
+  const board = here === "/" || flight;
+  const mail = here === "/mail" || here.startsWith("/mail/");
+  const settings = here.startsWith("/settings");
+  // Which tab the board was left on is not kept: the copy of the board that answers
+  // offline is the one that was saved, whatever tab its address named.
+  const back = flight
+    ? `<a class="btn -ml-2.5 mb-2 self-start" data-size="sm" data-variant="ghost" href="/">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="m15 18-6-6 6-6"/>
+      </svg>
+      Flights
+    </a>
+`
+    : "";
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>No connection</title>
+<meta name="theme-color" content="#f5f7f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a0c11" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/flighter.css">
+</head>
+<body class="flex min-h-dvh flex-col">
+<header class="sticky top-0 z-20 border-b bg-background/85 backdrop-blur"
+        style="padding-top: env(safe-area-inset-top)">
+  <nav class="topbar mx-auto flex h-14 max-w-lg items-center gap-1 px-3" aria-label="Sections">
+    <a class="btn text-lg" data-size="lg" href="/" data-variant="ghost"${current(board)}>
+      <span class="brand">
+        <span class="brand-name">Flighter</span>
+        <svg class="brand-plane size-[1.1em]" viewBox="0 0 24 24" fill="currentColor"
+             aria-hidden="true">
+          <path transform="rotate(90 12 12)"
+                d="M21 15.5 13.5 11V4.2a1.5 1.5 0 0 0-3 0V11L3 15.5v2l7.5-2.2v4.4L8 21.3V23l4-1.2 4 1.2v-1.7l-2.5-1.6v-4.4l7.5 2.2z"/>
+        </svg>
+        <span class="brand-ahead" aria-hidden="true"></span>
+      </span>
+    </a>
+    <!-- No + here. The box it opens posts a flight to the server, and there is no
+         server, so the one control on the bar that cannot do its job is left off. -->
+    <a class="btn ml-auto" data-size="icon-lg" href="/mail" aria-label="Email"
+       data-variant="${mail ? "secondary" : "ghost"}"${current(mail)}>
+      <!-- Plain, never marked: what is waiting on a person is a count from the server. -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect width="20" height="16" x="2" y="4" rx="2"/>
+        <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+      </svg>
+    </a>
+    <a class="btn" data-size="icon-lg" href="/settings" aria-label="Settings"
+       data-variant="${settings ? "secondary" : "ghost"}"${current(settings)}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/>
+        <circle cx="12" cy="12" r="3"/>
+      </svg>
+    </a>
+  </nav>
+</header>
+<main class="mx-auto flex w-full max-w-lg flex-1 flex-col px-4 pt-4">
+${back}<section class="empty mt-8">
+  <header>
+    <figure>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 20h.01"/>
+        <path d="M8.5 16.429a5 5 0 0 1 7 0"/>
+        <path d="M5 12.859a10 10 0 0 1 5.17-2.69"/>
+        <path d="M19 12.859a10 10 0 0 0-2.007-1.523"/>
+        <path d="M2 8.82a15 15 0 0 1 4.177-2.643"/>
+        <path d="M22 8.82a15 15 0 0 0-11.288-3.764"/>
+        <path d="m2 2 20 20"/>
+      </svg>
+    </figure>
+    <h2>No connection</h2>
+    <p>Check your connection and try again.</p>
+  </header>
+  <footer><a class="btn" href="${attribute(here + url.search)}">Try again</a></footer>
+</section>
+</main>
+</body>
+</html>`;
+}
+
+function current(here) {
+  return here ? ' aria-current="page"' : "";
+}
+
+function attribute(value) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }

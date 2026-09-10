@@ -33,6 +33,37 @@ def test_the_worker_serves_the_server_first_and_the_last_copy_when_it_cannot() -
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the worker")
+def test_the_page_the_worker_draws_keeps_the_bar_and_asks_again_for_the_same_page() -> None:
+    """With no copy to serve, the notice is still the app: the sections are one tap
+    away, Try again asks for the page a person is on, and a flight keeps its way back
+    up to the board."""
+    rendered = subprocess.run(
+        ["node", str(HARNESS), str(WORKER)], capture_output=True, text=True, check=True
+    ).stdout
+    drawn = json.loads(rendered)["drawn"]
+
+    for page in drawn.values():
+        assert "No connection" in page
+        assert 'aria-label="Sections"' in page
+        assert 'href="/mail"' in page and 'href="/settings"' in page
+        # The add box posts to a server that is not there.
+        assert 'href="/f/new"' not in page
+
+    assert 'href="/?tab=mine"' in drawn["board"]
+    assert 'href="/f/12?from=friends"' in drawn["flight"]
+
+    # One level down from the board, and no browser chrome to get back up with.
+    chevron = 'd="m15 18-6-6 6-6"'
+    assert chevron in drawn["flight"]
+    assert chevron not in drawn["board"]
+
+    # The section a person is standing in is the one lit up on the bar.
+    assert 'data-variant="secondary" aria-current="page"' in drawn["settings"]
+    assert 'data-variant="secondary"' not in drawn["board"]
+    assert 'aria-current="page"' in drawn["board"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the worker")
 def test_the_worker_keeps_loaded_airline_logos_for_offline_use() -> None:
     rendered = subprocess.run(
         ["node", str(LOGO_HARNESS), str(WORKER)], capture_output=True, text=True, check=True
