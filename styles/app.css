@@ -376,6 +376,10 @@
         transparent 3px
       )
       0 0 / 8px 100% repeat-x;
+    /* The next dash comes in through the far end of a strip only one repeat long, and
+       a hard edge there shows it as a sliver that sits at the end growing - or, under a
+       device pixel, blinking - before it moves off. It comes up out of the air instead. */
+    mask-image: linear-gradient(to right, #000 calc(100% - 4px), transparent);
   }
 
   .brand[data-landed] .brand-ahead {
