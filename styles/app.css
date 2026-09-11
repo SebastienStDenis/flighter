@@ -355,7 +355,7 @@
   .route-line::before {
     left: 0;
     width: var(--progress, 0%);
-    background: currentColor;
+    background: var(--trail, currentColor);
   }
 
   /* One tile per dash, so however wide the rule is there is no seam where a cut-off
@@ -373,14 +373,14 @@
   }
 
   /* Nothing is cut out around the aircraft: the flown leg runs into its tail and the
-     first dash leaves from its nose. Both are measured off the 15px glyph, whose tail
+     first dash leaves from its nose. Both are measured off the 18px glyph, whose tail
      and nose sit just inside the edges of its box. */
   .route-line:has(.route-plane)::before {
-    width: max(0px, var(--progress, 0%) - 6.5px);
+    width: max(0px, var(--progress, 0%) - 6.4px);
   }
 
   .route-line:has(.route-plane)::after {
-    left: calc(var(--progress, 0%) + 5.5px);
+    left: calc(var(--progress, 0%) + 7.8px);
   }
 
   /* The aircraft only moves along the rule in the air, so on the ground the ground
@@ -408,8 +408,8 @@
 
   .route-line:is([data-motion='taxiing-out'], [data-motion='taxiing-in']) .route-mark::before {
     @apply pointer-events-none absolute top-1/2 left-1/2 -z-1 content-[''];
-    width: 1.5rem;
-    height: 0.625rem;
+    width: 1.75rem;
+    height: 0.75rem;
     translate: -50% -50%;
     background:
       radial-gradient(circle, var(--light) 0.6px, transparent 1px) 0 0 / 6px 2px repeat-x,

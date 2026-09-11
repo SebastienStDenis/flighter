@@ -800,14 +800,25 @@ def test_the_card_counts_to_one_milestone_at_a_time(
     assert "data-motion" not in body
 
 
-def test_an_aircraft_the_feed_puts_at_the_start_is_drawn_as_seen(
+def test_the_rule_and_the_card_wear_the_pills_tone_once_the_feed_places_the_aircraft(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Nought per cent is a figure the feed stated, so a flight taxiing out is drawn in
-    the tone of one under way rather than in the tone of a guess."""
+    """Nought per cent is a figure the feed stated, so a flight taxiing out is drawn as
+    seen: the leg flown takes the tone of its pill, and so does the ring the board draws
+    around its card on hover. A place worked out from the ticket alone is drawn faintly,
+    with no tone of its own on the rule."""
     taxiing = replace_snapshot(actual_out=DEPARTURE + timedelta(minutes=5), progress_percent=0)
     show(monkeypatch, booking(), taxiing)
-    assert '<div class="route-line text-plan"' in client.get("/f/1").text
+    body = client.get("/f/1").text
+    assert '<div class="route-line text-muted-foreground"' in body
+    assert "; --trail: var(--live)" in body
+    assert 'style="--tone: var(--live)"' in client.get("/").text
+
+    leaves, lands = NOW - timedelta(hours=1), NOW + timedelta(hours=3)
+    show(monkeypatch, booking(scheduled_departure_utc=leaves, scheduled_arrival_utc=lands), None)
+    body = client.get("/f/1").text
+    assert '<div class="route-line text-muted-foreground/50"' in body
+    assert "--trail" not in body
 
 
 def struck(shown: str) -> str:

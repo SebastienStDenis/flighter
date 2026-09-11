@@ -13,26 +13,32 @@
 {# The rule between two airports, with the aircraft at the fraction of the way it has
    actually flown. Until it leaves there is no fraction, so the rule carries how long
    the hop is instead. The list and the flight page both draw it, so it is one piece. #}
-{# The aircraft is coloured by who says it is there: the feed's own figure, or wheels-up
-   and a landing estimate, are drawn in the tone the app uses for a flight under way. A
+{# The rule is coloured by who says the aircraft is there. Where the feed's own figure,
+   or wheels-up and a landing estimate, place it, the leg flown wears the pill's tone, so
+   the rule and the word above it say one thing, and the aircraft is drawn in grey. A
    place worked out from the ticket alone - nothing has been seen of this flight yet - is
-   drawn in the tone of the dashes it sits on, which is what the rest of the card says
-   about an unconfirmed thing. #}
+   drawn, aircraft and all, in the fainter tone of the dashes it sits on, which is what
+   the rest of the card says about an unconfirmed thing. #}
 {% macro route_line(v) %}
 {% set progress = v.progress_percent %}
+{% set seen = progress is not none and v.progress_confirmed %}
 {% set window = v.airborne_window %}
 {% set length = v.block_time %}
-<div class="route-line {{ 'text-plan' if progress is not none and v.progress_confirmed else 'text-muted-foreground/50' }}"
-     style="--progress: {{ progress or 0 }}%"{% if window %} data-off="{{ window[0].isoformat() }}" data-on="{{ window[1].isoformat() }}"{% endif %}{% if v.motion %} data-motion="{{ v.motion }}"{% endif %}>
+<div class="route-line {{ 'text-muted-foreground' if seen else 'text-muted-foreground/50' }}"
+     style="--progress: {{ progress or 0 }}%{% if seen %}; --trail: var(--{{ v.status.tone }}){% endif %}"{% if window %} data-off="{{ window[0].isoformat() }}" data-on="{{ window[1].isoformat() }}"{% endif %}{% if v.motion %} data-motion="{{ v.motion }}"{% endif %}>
   {% if length %}
   <span class="route-mark left-1/2 bg-card px-1.5 font-mono text-[0.6875rem] whitespace-nowrap text-muted-foreground">
     {{- duration(length) -}}
   </span>
   {% else %}
+  {# The one icon not from Lucide. Lucide's only plane flies up and to the right, and
+     turned onto the rule its lines fall off the pixel grid and blur; Tabler's is drawn
+     flying to the right, in the same hand. It is filled with the card, so nothing on the
+     rule shows through the outline. #}
   <span class="route-mark route-plane" aria-hidden="true">
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M21 15.5 13.5 11V4.2a1.5 1.5 0 0 0-3 0V11L3 15.5v2l7.5-2.2v4.4L8 21.3V23l4-1.2 4 1.2v-1.7l-2.5-1.6v-4.4l7.5 2.2z"
-            transform="rotate(90 12 12)"/>
+    <svg class="fill-card" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M16 10h4a2 2 0 0 1 0 4h-4l-4 7h-3l2 -7h-4l-2 2h-3l2 -4l-2 -4h3l2 2h4l-2 -7h3l4 7"/>
     </svg>
   </span>
   {% endif %}
@@ -145,7 +151,7 @@
 {% macro flight_card(v, link=none) %}
 {% set s = v.snapshot %}
 {% if link %}
-<a class="card gap-5 transition-shadow hover:ring-primary/40" href="{{ link }}">
+<a class="card gap-5 transition-shadow hover:ring-(color:--tone)/40" href="{{ link }}" style="--tone: var(--{{ v.status.tone }})">
 {% else %}
 <div class="card gap-5">
 {% endif %}
