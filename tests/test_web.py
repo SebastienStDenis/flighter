@@ -968,9 +968,12 @@ def test_an_arrival_past_midnight_names_only_the_day_it_now_lands(
     tz = "Europe/London"
     booked = datetime(2026, 9, 13, 22, 40, tzinfo=UTC)
     slipped = datetime(2026, 9, 13, 23, 30, tzinfo=UTC)
+    # Both ends are pinned, or the departure keeps the default hung off today's date and
+    # leaves on the very day this asks about on the weeks the two happen to meet.
+    leaves = datetime(2026, 9, 13, 2, 40, tzinfo=UTC)
     show(
         monkeypatch,
-        booking(scheduled_arrival_utc=booked),
+        booking(scheduled_departure_utc=leaves, scheduled_arrival_utc=booked),
         replace_snapshot(scheduled_in=booked, estimated_in=slipped),
     )
 
