@@ -331,8 +331,12 @@ def create_app(settings: Settings) -> FastAPI:
         session: AsyncSession,
         add: dict[str, Any],
         status_code: int = 200,
+        settings_open: dict[str, Any] | None = None,
     ) -> Response:
-        """The board, and whatever the add dialog standing on it is showing."""
+        """The board, and whatever the add dialog standing on it is showing.
+
+        With `settings_open` the settings stand open on it too, drawn from that context.
+        """
         tracked = await build_views(
             session, await booking_repo.list_bookings(session, statuses=BOARD_STATUSES)
         )
@@ -370,7 +374,9 @@ def create_app(settings: Settings) -> FastAPI:
                 # one of the two ways while there is an account to read.
                 "icloud_ready": settings.icloud_configured,
                 "add": add,
-            },
+                "settings_open": settings_open is not None,
+            }
+            | (settings_open or {}),
             status_code=status_code,
         )
 
@@ -652,9 +658,28 @@ def create_app(settings: Settings) -> FastAPI:
             # import card promises. Whole minutes: nobody is timing it.
             "mail_sweep_minutes": round(IDLE_CYCLE_SECONDS / 60),
             "budget": await budget_status(session),
-            "tab": request.query_params.get("tab"),
+            "settings_tab": request.query_params.get("tab"),
             "error": None,
         }
+
+    async def settings_page(
+        request: Request,
+        session: AsyncSession,
+        context: dict[str, Any] | None = None,
+        status_code: int = 200,
+    ) -> Response:
+        """The board with the settings standing open on it.
+
+        Settings are a box over the board rather than a page of their own, the way adding
+        a flight is: closing it is what goes back, and the board is what is behind it.
+        """
+        return await board_page(
+            request,
+            session,
+            _add(),
+            status_code=status_code,
+            settings_open=context or await settings_context(request, session),
+        )
 
     async def offered_calendars(configured: bool) -> tuple[list[Collection], str | None]:
         """The account's calendars for the picker, or why there are none to offer.
@@ -729,8 +754,8 @@ def create_app(settings: Settings) -> FastAPI:
                 await session.commit()
 
     @app.get("/settings")
-    async def settings_page(request: Request, session: SessionDep) -> Response:
-        return page(request, "settings.html", await settings_context(request, session))
+    async def settings_screen(request: Request, session: SessionDep) -> Response:
+        return await settings_page(request, session)
 
     @app.post("/settings")
     async def save_settings(
@@ -785,16 +810,16 @@ def create_app(settings: Settings) -> FastAPI:
                 context = await settings_context(request, session)
                 context["error"] = f"Calendar: {result.detail}"
                 context["posted"] = context["posted"] | posted
-                context["tab"] = tab
-                return page(request, "settings.html", context, status_code=400)
+                context["settings_tab"] = tab
+                return await settings_page(request, session, context, status_code=400)
         try:
             updated = await prefs.save(session, posted)
         except ValidationError as exc:
             context = await settings_context(request, session)
             context["error"] = _first_validation_message(exc)
             context["posted"] = context["posted"] | posted
-            context["tab"] = tab
-            return page(request, "settings.html", context, status_code=400)
+            context["settings_tab"] = tab
+            return await settings_page(request, session, context, status_code=400)
         await _remirror_calendar(session, previous, updated)
         # Applied here rather than only at boot, so turning the logs up to find out what
         # is going wrong does not need the restart that would clear the evidence.
@@ -858,8 +883,8 @@ def create_app(settings: Settings) -> FastAPI:
                     return JSONResponse({"error": refusal}, status_code=400)
                 context = await settings_context(request, session)
                 context["error"] = f"{found.name}: {refusal}"
-                context["tab"] = "connections"
-                return page(request, "settings.html", context, status_code=400)
+                context["settings_tab"] = "connections"
+                return await settings_page(request, session, context, status_code=400)
             # A limit that was in force and has been raised, or taken off altogether,
             # leaves a breaker latched against a month it no longer applies to.
             await clear_breaker(session)
@@ -884,8 +909,8 @@ def create_app(settings: Settings) -> FastAPI:
                     return JSONResponse({"error": result.detail}, status_code=400)
                 context = await settings_context(request, session)
                 context["error"] = f"{found.name}: {result.detail}"
-                context["tab"] = "connections"
-                return page(request, "settings.html", context, status_code=400)
+                context["settings_tab"] = "connections"
+                return await settings_page(request, session, context, status_code=400)
         return JSONResponse({"ok": True}) if wants_json else _saved("connections")
 
     @app.get("/settings/update/check")
@@ -935,8 +960,8 @@ def create_app(settings: Settings) -> FastAPI:
         if not outcome.ok:
             context = await settings_context(request, session)
             context["error"] = f"Watchtower: {outcome.detail}"
-            context["tab"] = "preferences"
-            return page(request, "settings.html", context, status_code=502)
+            context["settings_tab"] = "preferences"
+            return await settings_page(request, session, context, status_code=502)
         return _saved("preferences")
 
     @app.post("/settings/widget/token")

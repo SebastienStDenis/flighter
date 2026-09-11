@@ -31,7 +31,7 @@
   {# The bar is h-14 and the buttons fill it, so each one is a target a thumb can find
      without aiming. The marks inside are drawn a step under that: a glyph sized to its
      own button reads as a slab rather than as a sign. #}
-  <nav class="topbar mx-auto flex h-14 max-w-lg items-center gap-1 px-3" aria-label="Sections">
+  <nav class="topbar mx-auto flex h-14 max-w-page items-center gap-1 px-3" aria-label="Sections">
     {# Which app this is, on every page. A page one level down draws its own way back up
        in its own content, rather than taking this away to make room for it. It is a name
        rather than a tab, so it never lights up as the current place; the tabs at the
@@ -98,7 +98,7 @@
 </header>
 {# A page the server rendered a while ago, whether left open or served from the cache
    with no network: the countdowns are right, the gates and times may not be. #}
-<div class="mx-auto flex w-full max-w-lg items-center gap-2 px-4 pt-3 text-sm text-muted-foreground"
+<div class="mx-auto flex w-full max-w-page items-center gap-2 px-4 pt-3 text-sm text-muted-foreground"
      role="status" id="stale" hidden>
   <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -106,7 +106,7 @@
   </svg>
   <span data-note></span>
 </div>
-<main class="mx-auto flex w-full max-w-lg flex-1 flex-col px-4 pt-4">
+<main class="mx-auto flex w-full max-w-page flex-1 flex-col px-4 pt-4">
 {% block content %}{% endblock %}
 </main>
 {% include "add.html" %}
@@ -244,6 +244,63 @@
     }
 
     tick();
+  })();
+
+  // Cards of different heights, laid as bricks. Once a wall is two or more across, its
+  // rows are a pixel tall and each card spans as many as it is tall plus the gap under
+  // it, so it sits up under the card above rather than level with the tallest card in
+  // the row before. The grid still places the cards in order, left to right, so a card
+  // never sits higher than one before it. One column is left alone: a stack needs no
+  // laying.
+  (function () {
+    var walls = document.querySelectorAll(".bricks[data-masonry]");
+    function lay(wall) {
+      // A tab that is not showing has no columns to count; it is laid once it shows.
+      if (!wall.offsetWidth) return;
+      var style = getComputedStyle(wall);
+      var laid = style.gridTemplateColumns.split(" ").length > 1;
+      var gap = parseFloat(style.columnGap);
+      // Every card is measured before any is moved, so no card is measured in a wall
+      // that is half laid.
+      var spans = Array.prototype.map.call(wall.children, function (card) {
+        return laid ? "span " + Math.ceil(card.getBoundingClientRect().height + gap) : "";
+      });
+      wall.style.gridAutoRows = laid ? "1px" : "";
+      wall.style.rowGap = laid ? "0px" : "";
+      Array.prototype.forEach.call(wall.children, function (card, index) {
+        card.style.gridRowEnd = spans[index];
+      });
+    }
+    function layAll() {
+      walls.forEach(lay);
+    }
+    // A card changes height when its column changes width, when a font lands or when a
+    // section in it opens, and each of those is a resize of the card. The wall is laid
+    // again on the next frame rather than inside the observer: laying can move a card
+    // into a column a fraction of a pixel wider, and a resize caused inside the
+    // observer's own callback is one Safari reports as an error.
+    var queued = false;
+    var watching = new ResizeObserver(function () {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(function () {
+        queued = false;
+        layAll();
+      });
+    });
+    walls.forEach(function (wall) {
+      Array.prototype.forEach.call(wall.children, function (card) {
+        watching.observe(card);
+      });
+    });
+    // A tab is laid the moment it is shown, before it is drawn, rather than drawn a
+    // frame as a plain grid first. The page is laid the same way before its first paint.
+    new MutationObserver(layAll).observe(document.querySelector("main"), {
+      attributes: true,
+      attributeFilter: ["hidden"],
+      subtree: true,
+    });
+    layAll();
   })();
 
   // A value that replaced another shows what it replaced when it is tapped, and hides

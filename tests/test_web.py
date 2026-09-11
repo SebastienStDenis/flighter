@@ -733,7 +733,7 @@ def test_a_flight_with_nothing_known_yet_still_renders(
     assert "Montreal" in body and "London" in body
     # Days out there is nothing to walk to and nothing to count to yet, so the card
     # stops at the times rather than drawing a row of dashes under them.
-    card = body[body.index('<div class="card gap-5">') : body.index('<div class="card mt-3"')]
+    card = body[body.index('<div class="card gap-5">') : body.index('<div class="card gap-2 py-3"')]
     assert "Baggage claim" not in card and ">Gate</div>" not in card
     assert "<footer" not in card and "<time" not in card
     assert "None" not in body
@@ -1817,6 +1817,54 @@ def test_the_schema_is_not_published(client: TestClient) -> None:
 # --- Settings ------------------------------------------------------------------------
 
 
+def settings_box(body: str) -> str:
+    """The settings dialog alone, without the board it stands open on."""
+    start = re.search(r'<dialog\s+id="settings"', body)
+    assert start is not None
+    return body[start.start() : body.index("</dialog>", start.start())]
+
+
+def test_the_settings_are_a_box_standing_open_on_the_board(client: TestClient) -> None:
+    """Settings are not a page of their own: the address draws the board with the box
+    open over it, the way adding a flight does, and the X is the way back to it."""
+    body = client.get("/settings").text
+
+    assert re.search(r'<dialog\s+id="settings"[^>]*\bopen\b', body)
+    assert 'id="flight-tabs"' in body
+    assert "<title>Settings</title>" in body
+    assert 'aria-label="Close dialog"' in settings_box(body)
+    # Anywhere else the board is only the board.
+    board = client.get("/").text
+    assert 'id="settings"' not in board
+    assert "<title>Flighter</title>" in board
+
+
+def test_a_refused_save_opens_the_box_again_on_the_reason(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal lands on the board with the settings standing open on what was posted,
+    and on the tab it was made on rather than the board's own."""
+
+    async def refuses(_settings: Any, _url: str | None = None) -> CheckResult:
+        return CheckResult("calendar", False, "no longer on this account")
+
+    monkeypatch.setattr(web, "check_calendar", refuses)
+
+    response = client.post(
+        "/settings", data={"icloud_calendar_url": CALENDARS[1].url, "tab": "preferences"}
+    )
+
+    assert response.status_code == 400
+    box = settings_box(response.text)
+    assert "Calendar: no longer on this account" in box
+    assert re.search(
+        r'id="settings-tabs-tab-2"\s+aria-controls="[^"]+"\s+aria-selected="true"', box
+    )
+    assert re.search(
+        r'id="flight-tabs-tab-1"\s+aria-controls="[^"]+"\s+aria-selected="true"', response.text
+    )
+
+
 def test_a_connection_that_is_not_made_yet_opens_on_the_way_in(
     unconfigured: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1950,7 +1998,7 @@ def test_a_fresh_deployment_is_told_what_to_do_in_order(
 ) -> None:
     monkeypatch.setattr(prefs, "_current", prefs.Prefs())
     with build_client(unconfigured, monkeypatch) as fresh:
-        body = fresh.get("/settings").text
+        body = settings_box(fresh.get("/settings").text)
     # The badges are the signposting: every account says it is not connected, and they
     # are drawn in the order they have to be done in.
     at = [body.index(name) for name in ("FlightAware", "iCloud", "Pushover")]
@@ -2533,9 +2581,8 @@ def test_neither_job_can_be_switched_on_without_the_account_it_runs_on(
         assert "checked" not in switch.group()
     assert body.count("Connect iCloud in") == 2
     assert body.count("Connect Pushover in") == 1
-    # Three ways to Connections from the cards that are waiting on one, and a fourth in
-    # the add dialog every page carries, which has no feed to look a flight up in either.
-    assert body.count('href="/settings?tab=connections"') == 4
+    # Three ways to Connections from the cards that are waiting on one.
+    assert settings_box(body).count('href="/settings?tab=connections"') == 3
 
 
 def test_a_picker_with_nothing_stored_opens_on_the_first_calendar(
@@ -2693,7 +2740,7 @@ def test_a_flight_the_feed_lost_has_no_footer_to_grow(
         lost,
     )
     body = client.get("/f/1").text
-    card = body[body.index('<div class="card gap-5">') : body.index('<div class="card mt-3"')]
+    card = body[body.index('<div class="card gap-5">') : body.index('<div class="card gap-2 py-3"')]
     assert "Flown" in card and "In the air" not in card
     assert "<footer" not in card and "Due to land" not in card
     assert "--progress: 100%" in card and "data-off" not in card
@@ -2710,7 +2757,7 @@ def test_a_flight_nobody_has_heard_about_for_days_has_no_footer_either(
         None,
     )
     body = client.get("/f/1").text
-    card = body[body.index('<div class="card gap-5">') : body.index('<div class="card mt-3"')]
+    card = body[body.index('<div class="card gap-5">') : body.index('<div class="card gap-2 py-3"')]
     assert "<footer" not in card and "Due to depart" not in card
 
 

@@ -195,7 +195,7 @@ function offlinePage(href) {
 <body class="flex min-h-dvh flex-col">
 <header class="sticky top-0 z-20 border-b bg-background/85 backdrop-blur"
         style="padding-top: env(safe-area-inset-top)">
-  <nav class="topbar mx-auto flex h-14 max-w-lg items-center gap-1 px-3" aria-label="Sections">
+  <nav class="topbar mx-auto flex h-14 max-w-page items-center gap-1 px-3" aria-label="Sections">
     <a class="btn text-lg" data-size="lg" href="/" data-variant="ghost"${current(board)}>
       <span class="brand">
         <span class="brand-name">Flighter</span>
@@ -228,7 +228,7 @@ function offlinePage(href) {
     </a>
   </nav>
 </header>
-<main class="mx-auto flex w-full max-w-lg flex-1 flex-col px-4 pt-4">
+<main class="mx-auto flex w-full max-w-page flex-1 flex-col px-4 pt-4">
 ${back}<section class="empty mt-8">
   <header>
     <figure>

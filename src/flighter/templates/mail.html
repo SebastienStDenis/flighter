@@ -37,7 +37,7 @@
 {% for title, group in [("Needs attention", waiting), ("Recent", history)] if group %}
 <h2 class="{{ 'mt-0' if loop.first else 'mt-6' }} mb-2 text-xs font-semibold text-muted-foreground">
   {{- title -}}</h2>
-<div class="item-group gap-2">
+<div class="bricks gap-2" data-masonry>
   {% for v in group %}
   <div class="item" data-variant="outline" data-size="sm">
     {# Aligned to the top of the card rather than centred on it, so the badge sits on the
