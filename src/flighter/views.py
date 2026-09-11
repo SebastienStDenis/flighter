@@ -12,7 +12,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Final, NamedTuple
+from typing import Final, Literal, NamedTuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -282,6 +282,27 @@ class FlightView:
             # aircraft stands where the last poll put it rather than drifting off it.
             return None
         return expected_window(self.booking, self.snapshot, now)
+
+    @property
+    def motion(self) -> Literal["taxiing-out", "taxiing-in", "flying"] | None:
+        """What the rule sets moving under the aircraft, for a flight seen to be under way.
+
+        On the ground at either end the aircraft stands still on the rule, which only
+        measures the air, so the lights beside it slide past instead, one colour on the
+        way out and another on the way in. In the air the dashes still ahead of it do. A
+        flight the poller has closed may have been lost part-way, its last snapshot saying
+        taxiing or airborne for good, and nothing moves on it.
+        """
+        if self.flown:
+            return None
+        phase = self.phase
+        if phase == TAXIING:
+            return "taxiing-out"
+        if phase == LANDED and not self.at_the_gate:
+            return "taxiing-in"
+        if phase in (AIRBORNE, DIVERTED) and not self.down:
+            return "flying"
+        return None
 
     @property
     def phase(self) -> Phase:

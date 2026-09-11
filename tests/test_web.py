@@ -773,6 +773,7 @@ def test_the_card_counts_to_one_milestone_at_a_time(
     assert "Lands in" in body
     assert "Departs in" not in body and "At the gate in" not in body
     assert "Wheels up" not in body
+    assert 'data-motion="taxiing-out"' in body
 
     landed = replace_snapshot(
         actual_out=DEPARTURE + timedelta(minutes=5),
@@ -785,6 +786,7 @@ def test_the_card_counts_to_one_milestone_at_a_time(
     assert "At the gate in" in body
     assert f'data-to="{(ARRIVAL + timedelta(minutes=20)).isoformat()}"' in body
     assert "Lands in" not in body
+    assert 'data-motion="taxiing-in"' in body
 
     at_the_gate = replace_snapshot(
         actual_out=DEPARTURE + timedelta(minutes=5),
@@ -795,6 +797,17 @@ def test_the_card_counts_to_one_milestone_at_a_time(
     show(monkeypatch, booking(), at_the_gate)
     body = client.get("/f/1").text
     assert '<time class="countdown' not in body
+    assert "data-motion" not in body
+
+
+def test_an_aircraft_the_feed_puts_at_the_start_is_drawn_as_seen(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nought per cent is a figure the feed stated, so a flight taxiing out is drawn in
+    the tone of one under way rather than in the tone of a guess."""
+    taxiing = replace_snapshot(actual_out=DEPARTURE + timedelta(minutes=5), progress_percent=0)
+    show(monkeypatch, booking(), taxiing)
+    assert '<div class="route-line text-plan"' in client.get("/f/1").text
 
 
 def struck(shown: str) -> str:
@@ -1013,7 +1026,7 @@ def test_the_rule_says_how_long_the_hop_is_until_there_is_something_to_measure(
     for path in ("/", "/f/1"):
         body = client.get(path).text
         assert "7h 00m" not in body and "6h 45m" not in body
-        assert 'class="route-mark rounded-full' in body
+        assert 'class="route-mark route-plane"' in body
 
 
 def test_the_board_card_colours_a_time_that_slipped_and_leaves_one_that_held(

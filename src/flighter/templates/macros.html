@@ -22,14 +22,14 @@
 {% set progress = v.progress_percent %}
 {% set window = v.airborne_window %}
 {% set length = v.block_time %}
-<div class="route-line {{ 'text-plan' if progress and v.progress_confirmed else 'text-muted-foreground/50' }}"
-     style="--progress: {{ progress or 0 }}%"{% if window %} data-off="{{ window[0].isoformat() }}" data-on="{{ window[1].isoformat() }}"{% endif %}>
+<div class="route-line {{ 'text-plan' if progress is not none and v.progress_confirmed else 'text-muted-foreground/50' }}"
+     style="--progress: {{ progress or 0 }}%"{% if window %} data-off="{{ window[0].isoformat() }}" data-on="{{ window[1].isoformat() }}"{% endif %}{% if v.motion %} data-motion="{{ v.motion }}"{% endif %}>
   {% if length %}
   <span class="route-mark left-1/2 bg-card px-1.5 font-mono text-[0.6875rem] whitespace-nowrap text-muted-foreground">
     {{- duration(length) -}}
   </span>
   {% else %}
-  <span class="route-mark rounded-full bg-card p-0.5" aria-hidden="true">
+  <span class="route-mark route-plane" aria-hidden="true">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
       <path d="M21 15.5 13.5 11V4.2a1.5 1.5 0 0 0-3 0V11L3 15.5v2l7.5-2.2v4.4L8 21.3V23l4-1.2 4 1.2v-1.7l-2.5-1.6v-4.4l7.5 2.2z"
             transform="rotate(90 12 12)"/>

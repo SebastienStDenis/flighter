@@ -341,24 +341,107 @@
     grid-template-columns: auto 1fr auto;
   }
 
+  /* The two legs are two layers that each stop at the mark, so the dashes are laid out
+     from the mark rather than from the far end of the rule. */
   .route-line {
     @apply relative h-px;
-    background: repeating-linear-gradient(
-      to right,
-      var(--border) 0 3px,
-      transparent 3px 8px
-    );
+  }
+
+  .route-line::before,
+  .route-line::after {
+    @apply absolute inset-y-0 content-[''];
   }
 
   .route-line::before {
-    @apply absolute inset-y-0 left-0 content-[''];
+    left: 0;
     width: var(--progress, 0%);
     background: currentColor;
   }
 
-  .route-mark {
-    @apply absolute top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center;
+  /* One tile per dash, so however wide the rule is there is no seam where a cut-off
+     dash runs into a whole one. */
+  .route-line::after {
     left: var(--progress, 0%);
+    right: 0;
+    background: linear-gradient(to right, var(--border) 3px, transparent 3px) 0 0 / 8px 100%
+      repeat-x;
+  }
+
+  .route-mark {
+    @apply absolute top-1/2 z-1 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center;
+    left: var(--progress, 0%);
+  }
+
+  /* Nothing is cut out around the aircraft: the flown leg runs into its tail and the
+     first dash leaves from its nose. Both are measured off the 15px glyph, whose tail
+     and nose sit just inside the edges of its box. */
+  .route-line:has(.route-plane)::before {
+    width: max(0px, var(--progress, 0%) - 6.5px);
+  }
+
+  .route-line:has(.route-plane)::after {
+    left: calc(var(--progress, 0%) + 5.5px);
+  }
+
+  /* The aircraft only moves along the rule in the air, so on the ground the ground
+     moves instead: a row of runway lights either side of it, no longer than the
+     aircraft, sliding back past it and fading out at both ends. The rows are closer
+     together than the wings are wide, so the aircraft rolls over them. Yellow on the
+     way out to the runway, green on the way in to the gate. */
+  .route-line[data-motion='taxiing-out'] {
+    --light: oklch(0.8 0.16 88);
+  }
+
+  .route-line[data-motion='taxiing-in'] {
+    --light: oklch(0.68 0.16 150);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .route-line[data-motion='taxiing-out'] {
+      --light: oklch(0.86 0.15 92);
+    }
+
+    .route-line[data-motion='taxiing-in'] {
+      --light: oklch(0.78 0.16 152);
+    }
+  }
+
+  .route-line:is([data-motion='taxiing-out'], [data-motion='taxiing-in']) .route-mark::before {
+    @apply pointer-events-none absolute top-1/2 left-1/2 -z-1 content-[''];
+    width: 1.5rem;
+    height: 0.625rem;
+    translate: -50% -50%;
+    background:
+      radial-gradient(circle, var(--light) 0.6px, transparent 1px) 0 0 / 6px 2px repeat-x,
+      radial-gradient(circle, var(--light) 0.6px, transparent 1px) 0 100% / 6px 2px repeat-x;
+    mask-image: linear-gradient(to right, transparent, #000 35%, #000 65%, transparent);
+  }
+
+  /* Each loop moves its pattern back by one repeat - light to light, dash to dash - so
+     the last frame is the first and the loop has no seam. In the air it is the dashes
+     still ahead that stream back, into the nose. */
+  @keyframes route-lights {
+    to {
+      background-position:
+        -6px 0,
+        -6px 100%;
+    }
+  }
+
+  @keyframes route-ahead {
+    to {
+      background-position-x: -8px;
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .route-line:is([data-motion='taxiing-out'], [data-motion='taxiing-in']) .route-mark::before {
+      animation: route-lights 1.5s linear infinite;
+    }
+
+    .route-line[data-motion='flying']::after {
+      animation: route-ahead 1.2s linear infinite;
+    }
   }
 
   /* The two ends of the flight, one row per fact. A grid rather than two columns, so
