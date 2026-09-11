@@ -215,17 +215,13 @@
   .badge[data-variant='stop']  { --tone: var(--stop); }
 
   /* A flight's card, the rule across it and the mark in the header take the tone of its
-     pill, and a rule is painted in the pill's own fill. */
+     pill. */
   :is(.card, .route-line, .brand)[data-tone='quiet'] { --tone: var(--quiet); }
   :is(.card, .route-line, .brand)[data-tone='plan']  { --tone: var(--plan); }
   :is(.card, .route-line, .brand)[data-tone='live']  { --tone: var(--live); }
   :is(.card, .route-line, .brand)[data-tone='ok']    { --tone: var(--ok); }
   :is(.card, .route-line, .brand)[data-tone='warn']  { --tone: var(--warn); }
   :is(.card, .route-line, .brand)[data-tone='stop']  { --tone: var(--stop); }
-
-  :is(.route-line, .brand)[data-tone] {
-    --trail: color-mix(in oklab, var(--tone) 14%, var(--card));
-  }
 
   /* A value wearing the shape of a small button without being one - the version row's
      inactive chips. Cut to the same height and corner as an xs button so the one real
@@ -315,7 +311,7 @@
   /* On the board and on a flight's page the mark is drawn in the colour of the rules
      below it. */
   .brand[data-tone] {
-    --mark: var(--trail);
+    --mark: var(--tone);
   }
 
   .brand-name {
@@ -371,8 +367,8 @@
     @apply absolute inset-y-0 content-[''];
   }
 
-  /* The leg flown is a band rather than a hairline, so the pale fill of a pill still
-     reads as a colour along it. */
+  /* The leg flown is a band rather than a hairline, heavier than the dashes still to
+     come. */
   .route-line::before {
     @apply top-1/2 bottom-auto h-[2px] -translate-y-1/2 rounded-full;
     left: 0;
@@ -381,7 +377,7 @@
   }
 
   .route-line[data-tone]::before {
-    background: var(--trail);
+    background: var(--tone);
   }
 
   /* One tile per dash, so however wide the rule is there is no seam where a cut-off
@@ -410,8 +406,8 @@
   }
 
   /* The aircraft only moves along the rule in the air, so on the ground the ground
-     moves instead: a row of runway lights either side of it, no longer than the
-     aircraft, sliding back past it and fading out at both ends. The rows are closer
+     moves instead: a row of runway lights either side of it, barely longer than the
+     aircraft, sliding in at its nose and out past its tail. The rows are closer
      together than the wings are wide, so the aircraft rolls over them. Yellow on the
      way out to the runway, green on the way in to the gate. */
   .route-line[data-motion='taxiing-out'] {
@@ -434,13 +430,12 @@
 
   .route-line:is([data-motion='taxiing-out'], [data-motion='taxiing-in']) .route-mark::before {
     @apply pointer-events-none absolute top-1/2 left-1/2 -z-1 content-[''];
-    width: 1.75rem;
+    width: 1.25rem;
     height: 0.625rem;
     translate: -50% -50%;
     background:
       radial-gradient(circle, var(--light) 0.6px, transparent 1px) 0 0 / 6px 2px repeat-x,
       radial-gradient(circle, var(--light) 0.6px, transparent 1px) 0 100% / 6px 2px repeat-x;
-    mask-image: linear-gradient(to right, transparent, #000 35%, #000 65%, transparent);
   }
 
   /* Each loop moves its pattern back by one repeat - light to light, dash to dash - so
