@@ -308,10 +308,14 @@
     }
   }
 
-  /* On the board and on a flight's page the mark is drawn in the colour of the rules
-     below it. */
+  /* On the board and on a flight's page the mark is drawn the way the rules below it
+     are: the line in the flight's tone, the aircraft on it in grey. */
   .brand[data-tone] {
     --mark: var(--tone);
+  }
+
+  .brand[data-tone] .brand-plane {
+    color: var(--muted-foreground);
   }
 
   .brand-name {
@@ -394,11 +398,11 @@
     left: var(--progress, 0%);
   }
 
-  /* Nothing is cut out around the aircraft: the flown leg runs into its tail and the
-     first dash leaves from its nose. Both are measured off the 18px glyph, whose tail
-     and nose sit just inside the edges of its box. */
+  /* The flown leg stops a breath short of the aircraft's tail, the way a trail is left
+     behind, and the first dash leaves from its nose. Both are measured off the 18px
+     glyph, whose tail and nose sit just inside the edges of its box. */
   .route-line:has(.route-plane)::before {
-    width: max(0px, var(--progress, 0%) - 7.8px);
+    width: max(0px, var(--progress, 0%) - 10.8px);
   }
 
   .route-line:has(.route-plane)::after {
