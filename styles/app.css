@@ -323,13 +323,12 @@
   }
 
   /* Unbroken across the word: a line that stepped aside for the letters would read as
-     several, and the whole of it is that it is one. It is the band a card's rule draws
-     behind its aircraft, and stops the same breath short of the tail, which sits the
-     flex gap and a twenty-fourth of the glyph past the word. */
+     several, and the whole of it is that it is one. It ends under the tail, so the
+     aircraft sits on the line rather than after it. */
   .brand-name::after {
-    @apply pointer-events-none absolute top-1/2 h-[2px] rounded-full content-[''];
+    @apply pointer-events-none absolute top-1/2 h-px rounded-full content-[''];
     left: calc(-1 * var(--lead));
-    right: calc(3px - 0.3em - 1.1em / 24);
+    right: -0.5em;
     z-index: -1;
     translate: 0 calc(var(--drop) - 50%);
     background-color: var(--mark);
@@ -372,10 +371,7 @@
     @apply absolute inset-y-0 content-[''];
   }
 
-  /* The leg flown is a band rather than a hairline, heavier than the dashes still to
-     come. */
   .route-line::before {
-    @apply top-1/2 bottom-auto h-[2px] -translate-y-1/2 rounded-full;
     left: 0;
     width: var(--progress, 0%);
     background: currentColor;
@@ -399,11 +395,11 @@
     left: var(--progress, 0%);
   }
 
-  /* The flown leg stops a breath short of the aircraft's tail, the way a trail is left
-     behind, and the first dash leaves from its nose. Both are measured off the 18px
-     glyph, whose tail and nose sit just inside the edges of its box. */
+  /* Nothing is cut out around the aircraft: the flown leg runs into its tail and the
+     first dash leaves from its nose. Both are measured off the 18px glyph, whose tail
+     and nose sit just inside the edges of its box. */
   .route-line:has(.route-plane)::before {
-    width: max(0px, var(--progress, 0%) - 10.8px);
+    width: max(0px, var(--progress, 0%) - 7.8px);
   }
 
   .route-line:has(.route-plane)::after {
