@@ -441,8 +441,8 @@
   }
 
   /* The aircraft only moves along the rule in the air, so on the ground the ground
-     moves instead: a row of runway lights either side of it, no longer than the
-     aircraft is from tail to nose, sliding in at its nose and out at its tail. The
+     moves instead: a row of runway lights either side of it, reaching a hair past its
+     nose and its tail, sliding in at the one and out at the other. The
      rows are closer together than the wings are wide, so the aircraft rolls over them.
      Yellow on the way out to the runway, green on the way in to the gate. The mark in
      the header rolls with the flight it is drawn after. */
@@ -467,9 +467,12 @@
   :is(.route-line, .brand):is([data-motion='taxiing-out'], [data-motion='taxiing-in'])
     :is(.route-mark, .brand-plane)::before {
     @apply pointer-events-none absolute top-1/2 left-1/2 -z-1 content-[''];
-    width: 1.05rem;
+    width: 1.15rem;
     height: 0.8125rem;
-    translate: -50% -50%;
+    /* Centred on the aircraft rather than on its box: the tail is a twenty-fourth in
+       from its edge and the nose two and a bit, which puts the middle of the glyph 0.7px
+       behind the middle of the box, and the rows would reach further past the nose. */
+    translate: calc(-50% - 0.7px) -50%;
     background:
       radial-gradient(circle, var(--light) 0.6px, transparent 1px) 0 0 / 6px 2px repeat-x,
       radial-gradient(circle, var(--light) 0.6px, transparent 1px) 0 100% / 6px 2px repeat-x;
