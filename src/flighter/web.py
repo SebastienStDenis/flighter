@@ -197,6 +197,19 @@ def _add(
     }
 
 
+def _brand_mark(view: FlightView | None) -> dict[str, Any]:
+    """How the mark in the header draws itself after one flight, the way the flight's
+    rule is drawn: in its pill's tone, moving as the rule moves, and with no leg left
+    ahead of the aircraft once the rule has none. With no flight it is a scheduled one."""
+    if view is None:
+        return {"tone": "quiet", "motion": None, "landed": False}
+    return {
+        "tone": view.status.tone,
+        "motion": view.motion,
+        "landed": view.progress_percent == 100,
+    }
+
+
 def _saved(tab: str) -> RedirectResponse:
     """Back to the settings page, on the tab the form was on.
 
@@ -355,6 +368,13 @@ def create_app(settings: Settings) -> FastAPI:
         tab = request.query_params.get("tab", BOARD_TABS[0])
         if tab not in BOARD_TABS:
             tab = BOARD_TABS[0]
+        # The mark in the header is drawn as the first flight on the tab in front is, in
+        # its tone and rolling when it rolls, and in the grey of a flight merely scheduled
+        # when the tab has none.
+        brand_marks = {
+            name: _brand_mark(shown[0] if shown else None)
+            for name, shown in zip(BOARD_TABS, (mine, friends, past), strict=True)
+        }
         return page(
             request,
             "index.html",
@@ -363,6 +383,8 @@ def create_app(settings: Settings) -> FastAPI:
                 "friends": friends,
                 "past": past,
                 "tab": tab,
+                "brand_mark": brand_marks[tab],
+                "brand_marks": brand_marks,
                 "watch": await _watch(session, *mine, *friends),
                 "budget": budget,
                 "raised_cap": None if budget.cap_usd is None else budget.cap_usd + LIMIT_STEP,
@@ -544,6 +566,7 @@ def create_app(settings: Settings) -> FastAPI:
             "detail.html",
             {
                 "v": view,
+                "brand_mark": _brand_mark(view),
                 "calendar_link": calendar_link,
                 "events": list(events.scalars()),
                 "return_tab": return_tab,

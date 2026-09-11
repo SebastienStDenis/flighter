@@ -773,6 +773,7 @@ def test_the_card_counts_to_one_milestone_at_a_time(
     assert "Lands in" in body
     assert "Departs in" not in body and "At the gate in" not in body
     assert "Wheels up" not in body
+    assert 'data-motion="taxiing-out"' in body
 
     landed = replace_snapshot(
         actual_out=DEPARTURE + timedelta(minutes=5),
@@ -785,6 +786,7 @@ def test_the_card_counts_to_one_milestone_at_a_time(
     assert "At the gate in" in body
     assert f'data-to="{(ARRIVAL + timedelta(minutes=20)).isoformat()}"' in body
     assert "Lands in" not in body
+    assert 'data-motion="taxiing-in"' in body
 
     at_the_gate = replace_snapshot(
         actual_out=DEPARTURE + timedelta(minutes=5),
@@ -795,6 +797,57 @@ def test_the_card_counts_to_one_milestone_at_a_time(
     show(monkeypatch, booking(), at_the_gate)
     body = client.get("/f/1").text
     assert '<time class="countdown' not in body
+    assert "data-motion" not in body
+
+
+def test_the_rule_and_the_card_wear_the_pills_tone_once_the_feed_places_the_aircraft(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nought per cent is a figure the feed stated, so a flight taxiing out is drawn as
+    seen: the leg flown takes the tone of its pill, and so does the ring the board draws
+    around its card on hover. A place worked out from the ticket alone is drawn faintly,
+    with no tone of its own on the rule."""
+    taxiing = replace_snapshot(actual_out=DEPARTURE + timedelta(minutes=5), progress_percent=0)
+    show(monkeypatch, booking(), taxiing)
+    body = client.get("/f/1").text
+    assert '<div class="route-line text-muted-foreground"' in body
+    assert 'style="--progress: 0%" data-tone="live"' in body
+    assert re.search(r'href="/f/1[^"]*" data-tone="live"', client.get("/").text)
+
+    leaves, lands = NOW - timedelta(hours=1), NOW + timedelta(hours=3)
+    show(monkeypatch, booking(scheduled_departure_utc=leaves, scheduled_arrival_utc=lands), None)
+    body = client.get("/f/1").text
+    assert '<div class="route-line text-muted-foreground/50"' in body
+    assert not re.search(r'<div class="route-line[^>]*data-tone', body)
+
+
+def test_the_header_mark_is_drawn_as_the_flight_in_front_is(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first flight on the board and the flight on its own page lend the mark their
+    tone and their motion, and a flight all the way there leaves it no leg ahead. An
+    empty board draws it as a flight merely scheduled."""
+    taxiing = replace_snapshot(actual_out=DEPARTURE + timedelta(minutes=5), progress_percent=0)
+    show(monkeypatch, booking(), taxiing)
+    rolling = '<span class="brand" data-tone="live" data-motion="taxiing-out">'
+    assert rolling in client.get("/").text
+    assert rolling in client.get("/f/1").text
+
+    leaves = NOW - timedelta(hours=1)
+    flying = replace_snapshot(
+        actual_out=leaves, actual_off=leaves, estimated_on=NOW + timedelta(hours=2)
+    )
+    show(monkeypatch, booking(scheduled_departure_utc=leaves), flying)
+    assert 'data-motion="flying">' in client.get("/f/1").text
+
+    down = replace_snapshot(
+        actual_out=leaves, actual_off=leaves, actual_on=NOW - timedelta(minutes=5)
+    )
+    show(monkeypatch, booking(scheduled_departure_utc=leaves), down)
+    assert re.search(r'<span class="brand"[^>]* data-landed>', client.get("/f/1").text)
+
+    show_board(monkeypatch, [])
+    assert '<span class="brand" data-tone="quiet">' in client.get("/").text
 
 
 def struck(shown: str) -> str:
@@ -1016,7 +1069,7 @@ def test_the_rule_says_how_long_the_hop_is_until_there_is_something_to_measure(
     for path in ("/", "/f/1"):
         body = client.get(path).text
         assert "7h 00m" not in body and "6h 45m" not in body
-        assert 'class="route-mark rounded-full' in body
+        assert 'class="route-mark route-plane"' in body
 
 
 def test_the_board_card_colours_a_time_that_slipped_and_leaves_one_that_held(

@@ -151,9 +151,10 @@ async def test_endeavor_name_becomes_its_operating_flight_ident(seeded: None) ->
 async def test_a_booking_carries_its_local_date_and_a_first_poll(seeded: None) -> None:
     async with session_scope() as session:
         # 23:30 in New York is already the 13th in UTC; the dedupe day is the 12th.
-        booking = await book(session, datetime(2026, 9, 12, 23, 30))
-        assert booking.scheduled_departure_utc == datetime(2026, 9, 13, 3, 30, tzinfo=UTC)
-        assert booking.departure_local_date == date(2026, 9, 12)
+        # Years out, so the first poll is still ahead of the clock the test runs on.
+        booking = await book(session, datetime(2036, 9, 12, 23, 30))
+        assert booking.scheduled_departure_utc == datetime(2036, 9, 13, 3, 30, tzinfo=UTC)
+        assert booking.departure_local_date == date(2036, 9, 12)
         assert booking.next_poll_at == booking.scheduled_departure_utc - FEED_HORIZON
 
 

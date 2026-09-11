@@ -502,6 +502,25 @@ def test_a_cancelled_flight_is_drawn_at_the_origin() -> None:
     assert view(closed, snapshot(cancelled=True)).airborne_window is None
 
 
+def test_the_rule_moves_under_an_aircraft_seen_to_be_under_way() -> None:
+    """Rolling at either end the lights slide past it and in the air the dashes do. A
+    place worked out from the ticket is no sighting, and a flight that is parked, or that
+    the poller closed while its last snapshot still said airborne, is going nowhere."""
+    leaves = now_ish(hours=-2)
+    booked = booking(scheduled_departure_utc=leaves, scheduled_arrival_utc=now_ish(hours=2))
+    out = snapshot(actual_out=now_ish(minutes=-5), progress_percent=0)
+    assert view(booked, out).motion == "taxiing-out"
+    flying = snapshot(actual_out=leaves, actual_off=leaves, estimated_on=now_ish(hours=1))
+    assert view(booked, flying).motion == "flying"
+    down = {"actual_out": leaves, "actual_off": leaves, "actual_on": now_ish(minutes=-3)}
+    assert view(booked, snapshot(**down, estimated_in=now_ish(minutes=8))).motion == "taxiing-in"
+    assert view(booked, snapshot(**down, actual_in=now_ish(minutes=-1))).motion is None
+    assert view(booked, snapshot(**down, diverted=True)).motion is None
+    assert view(booked, None).motion is None
+    lost = booking(scheduled_departure_utc=leaves, status=BookingStatus.COMPLETED)
+    assert view(lost, flying).motion is None
+
+
 # --- arrived, and a milestone whose time has passed ----------------------------------------
 
 

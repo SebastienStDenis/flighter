@@ -218,6 +218,15 @@
   .badge[data-variant='warn']  { --tone: var(--warn); }
   .badge[data-variant='stop']  { --tone: var(--stop); }
 
+  /* A flight's card, the rule across it and the mark in the header take the tone of its
+     pill. */
+  :is(.card, .route-line, .brand)[data-tone='quiet'] { --tone: var(--quiet); }
+  :is(.card, .route-line, .brand)[data-tone='plan']  { --tone: var(--plan); }
+  :is(.card, .route-line, .brand)[data-tone='live']  { --tone: var(--live); }
+  :is(.card, .route-line, .brand)[data-tone='ok']    { --tone: var(--ok); }
+  :is(.card, .route-line, .brand)[data-tone='warn']  { --tone: var(--warn); }
+  :is(.card, .route-line, .brand)[data-tone='stop']  { --tone: var(--stop); }
+
   /* A value wearing the shape of a small button without being one - the version row's
      inactive chips. Cut to the same height and corner as an xs button so the one real
      button among them reads as the active member of the family, and toned the way the
@@ -303,6 +312,16 @@
     }
   }
 
+  /* On the board and on a flight's page the mark is drawn the way the rules below it
+     are: the line in the flight's tone, the aircraft on it in grey. */
+  .brand[data-tone] {
+    --mark: var(--tone);
+  }
+
+  .brand[data-tone] .brand-plane {
+    color: var(--muted-foreground);
+  }
+
   .brand-name {
     @apply relative;
   }
@@ -319,7 +338,10 @@
     background-color: var(--mark);
   }
 
+  /* A box around the glyph rather than the glyph itself, so the runway lights have
+     something to be drawn in, under it. */
   .brand-plane {
+    @apply relative isolate flex;
     color: var(--mark);
     translate: 0 var(--drop);
   }
@@ -338,6 +360,36 @@
     background-color: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
   }
 
+  /* The leg ahead does what the rule's does. In the air it is dashes streaming back into
+     the nose, one repeat of the rule's own pattern drawn past the end of the hairline so
+     the mark keeps its width; once the flight is all the way there it is gone. */
+  .brand[data-motion='flying'] .brand-ahead {
+    @apply relative bg-transparent;
+  }
+
+  /* The dashes leave from the nose, as the rule's do, not from where the hairline
+     starts: the nose is 2.7 of the glyph's 24 inside its box, and the hairline begins
+     the flex gap less its own pull-back past that. Tucked 0.4px under the nose, as the
+     rule's first dash is. */
+  .brand[data-motion='flying'] .brand-ahead::before {
+    @apply absolute inset-y-0 w-2 content-[''];
+    left: calc(0.26em - 0.3em - 1.1em * 2.7 / 24 - 0.4px);
+    background: linear-gradient(
+        to right,
+        color-mix(in oklab, var(--muted-foreground) 55%, transparent) 3px,
+        transparent 3px
+      )
+      0 0 / 8px 100% repeat-x;
+    /* The next dash comes in through the far end of a strip only one repeat long, and
+       a hard edge there shows it as a sliver that sits at the end growing - or, under a
+       device pixel, blinking - before it moves off. It comes up out of the air instead. */
+    mask-image: linear-gradient(to right, #000 calc(100% - 4px), transparent);
+  }
+
+  .brand[data-landed] .brand-ahead {
+    @apply invisible;
+  }
+
   /* The route: two airports, one rule between them, and the aircraft at the fraction of
      the way it has actually flown. Dashed ahead of the mark, solid behind it. */
   .route {
@@ -345,24 +397,122 @@
     grid-template-columns: auto 1fr auto;
   }
 
+  /* The two legs are two layers that each stop at the mark, so the dashes are laid out
+     from the mark rather than from the far end of the rule. */
   .route-line {
     @apply relative h-px;
-    background: repeating-linear-gradient(
-      to right,
-      var(--border) 0 3px,
-      transparent 3px 8px
-    );
+  }
+
+  .route-line::before,
+  .route-line::after {
+    @apply absolute inset-y-0 content-[''];
   }
 
   .route-line::before {
-    @apply absolute inset-y-0 left-0 content-[''];
+    left: 0;
     width: var(--progress, 0%);
     background: currentColor;
   }
 
-  .route-mark {
-    @apply absolute top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center;
+  /* Eased toward the card. The header's line is the same tone and the same pixel, but
+     it falls between two rows of the screen and is drawn across three, softer; on a
+     card the rule lands on its rows and draws at full strength, which reads heavier
+     than the line it is meant to match. */
+  .route-line[data-tone]::before {
+    background: color-mix(in oklab, var(--tone) 70%, var(--card));
+  }
+
+  /* One tile per dash, so however wide the rule is there is no seam where a cut-off
+     dash runs into a whole one. */
+  .route-line::after {
     left: var(--progress, 0%);
+    right: 0;
+    background: linear-gradient(to right, var(--border) 3px, transparent 3px) 0 0 / 8px 100%
+      repeat-x;
+  }
+
+  .route-mark {
+    @apply absolute top-1/2 z-1 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center;
+    left: var(--progress, 0%);
+  }
+
+  /* Nothing is cut out around the aircraft: the flown leg runs into its tail and the
+     first dash leaves from its nose. Both are measured off the glyph at 19.8px, the
+     size the header draws its own at, whose tail and nose sit just inside the edges of
+     its box. */
+  .route-line:has(.route-plane)::before {
+    width: max(0px, var(--progress, 0%) - 8.6px);
+  }
+
+  .route-line:has(.route-plane)::after {
+    left: calc(var(--progress, 0%) + 7.3px);
+  }
+
+  /* The aircraft only moves along the rule in the air, so on the ground the ground
+     moves instead: a row of runway lights either side of it, reaching a hair past its
+     nose and its tail, sliding in at the one and out at the other. The
+     rows are closer together than the wings are wide, so the aircraft rolls over them.
+     Yellow on the way out to the runway, green on the way in to the gate. The mark in
+     the header rolls with the flight it is drawn after. */
+  :is(.route-line, .brand)[data-motion='taxiing-out'] {
+    --light: oklch(0.8 0.16 88);
+  }
+
+  :is(.route-line, .brand)[data-motion='taxiing-in'] {
+    --light: oklch(0.68 0.16 150);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :is(.route-line, .brand)[data-motion='taxiing-out'] {
+      --light: oklch(0.86 0.15 92);
+    }
+
+    :is(.route-line, .brand)[data-motion='taxiing-in'] {
+      --light: oklch(0.78 0.16 152);
+    }
+  }
+
+  :is(.route-line, .brand):is([data-motion='taxiing-out'], [data-motion='taxiing-in'])
+    :is(.route-mark, .brand-plane)::before {
+    @apply pointer-events-none absolute top-1/2 left-1/2 -z-1 content-[''];
+    width: 1.15rem;
+    height: 0.8125rem;
+    /* Centred on the aircraft rather than on its box: the tail is a twenty-fourth in
+       from its edge and the nose two and a bit, which puts the middle of the glyph 0.7px
+       behind the middle of the box, and the rows would reach further past the nose. */
+    translate: calc(-50% - 0.7px) -50%;
+    background:
+      radial-gradient(circle, var(--light) 0.6px, transparent 1px) 0 0 / 6px 2px repeat-x,
+      radial-gradient(circle, var(--light) 0.6px, transparent 1px) 0 100% / 6px 2px repeat-x;
+  }
+
+  /* Each loop moves its pattern back by one repeat - light to light, dash to dash - so
+     the last frame is the first and the loop has no seam. In the air it is the dashes
+     still ahead that stream back, into the nose. */
+  @keyframes route-lights {
+    to {
+      background-position:
+        -6px 0,
+        -6px 100%;
+    }
+  }
+
+  @keyframes route-ahead {
+    to {
+      background-position-x: -8px;
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    :is(.route-line, .brand):is([data-motion='taxiing-out'], [data-motion='taxiing-in'])
+      :is(.route-mark, .brand-plane)::before {
+      animation: route-lights 1.5s linear infinite;
+    }
+
+    .route-line[data-motion='flying']::after,
+    .brand[data-motion='flying'] .brand-ahead::before {
+      animation: route-ahead 1.2s linear infinite;
+    }
   }
 
   /* The two ends of the flight, one row per fact. A grid rather than two columns, so
