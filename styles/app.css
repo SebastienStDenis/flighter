@@ -414,8 +414,12 @@
     background: currentColor;
   }
 
+  /* Eased toward the card. The header's line is the same tone and the same pixel, but
+     it falls between two rows of the screen and is drawn across three, softer; on a
+     card the rule lands on its rows and draws at full strength, which reads heavier
+     than the line it is meant to match. */
   .route-line[data-tone]::before {
-    background: var(--tone);
+    background: color-mix(in oklab, var(--tone) 70%, var(--card));
   }
 
   /* One tile per dash, so however wide the rule is there is no seam where a cut-off
