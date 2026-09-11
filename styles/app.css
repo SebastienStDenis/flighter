@@ -274,8 +274,10 @@
      aircraft has been flown, the one dash ahead of it has not - the figure the app icon
      carries, with the word standing on its runway.
 
-     The two blues are the icon's own rather than the theme's: the icon is a file the
-     page cannot read a variable out of, and the header sits a tab's width from it. */
+     It is drawn the way a flight's rule is: the line in the tone of a flight's pill, the
+     aircraft on it in grey. The flight is the one in front - the first on the board's
+     tab, the one a flight's page is about, the first of the reader's own everywhere
+     else - and with no flight to go on it is drawn as one merely scheduled. */
   .brand {
     @apply inline-flex items-center gap-[0.3em];
 
@@ -303,23 +305,7 @@
        imbalance, the air over the F matches the air under the aircraft. */
     translate: 0 -0.27em;
 
-    --mark: #0d7dd4;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    .brand {
-      --mark: #7cc6ff;
-    }
-  }
-
-  /* On the board and on a flight's page the mark is drawn the way the rules below it
-     are: the line in the flight's tone, the aircraft on it in grey. */
-  .brand[data-tone] {
-    --mark: var(--tone);
-  }
-
-  .brand[data-tone] .brand-plane {
-    color: var(--muted-foreground);
+    --mark: var(--tone, var(--quiet));
   }
 
   .brand-name {
@@ -342,7 +328,7 @@
      something to be drawn in, under it. */
   .brand-plane {
     @apply relative isolate flex;
-    color: var(--mark);
+    color: var(--muted-foreground);
     translate: 0 var(--drop);
   }
 
