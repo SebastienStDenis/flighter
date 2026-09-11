@@ -1,31 +1,17 @@
-{% extends "base.html" %}
 {% import "basecoat/tabs.html.jinja" as bc %}
 {% import "basecoat/dialog.html.jinja" as dlg %}
 {% import "macros.html" as m %}
-{% block title %}Settings{% endblock %}
-{% block content %}
+
+{# Settings are a box over the board rather than a page of their own, the way adding a
+   flight is: everything in them is a moment's change made on the way back to the
+   flights, and the X is the way back. /settings draws the board with this standing
+   open, which is also what a browser with no script is left with. #}
 
 {% set icloud_ready = connected['icloud_email'] and connected['icloud_app_password'] %}
 {% set flightaware_ready = connected['aeroapi_key'] %}
 {% set pushover_ready = connected['pushover_token'] and connected['pushover_user_key'] %}
 {% set calendar_ready = prefs.calendar_configured %}
 {% set watchtower_ready = connected['watchtower_url'] and connected['watchtower_token'] %}
-
-<h1 class="mb-4 text-xl font-semibold tracking-tight">Settings</h1>
-
-{# Remove is drawn inside a summary, where only a script can keep a press from folding
-   the row instead. Without one, the plain form below each account is what shows. #}
-<noscript><style>.removable { display: block; }</style></noscript>
-
-{% if error %}
-<div class="alert mb-3" data-variant="destructive" role="alert">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="10"/>
-  </svg>
-  <strong>{{ error }}</strong>
-</div>
-{% endif %}
 
 {# A status is a word first. The badge only colours the word it is already carrying. #}
 {% macro status(ready, done='Connected', todo='Not connected', tone='quiet') %}
@@ -694,6 +680,44 @@
     </div>
   </details>
 </div>
+{% endset %}
+
+{# The box takes the focus it opens with itself. Handed to the first tab, it rings a
+   control nobody reached for. #}
+{% call dlg.dialog(
+     id='settings',
+     title='Settings',
+     dialog_attrs={'class': 'settings-dialog', 'autofocus': ''},
+     header_attrs={'class': 'pe-8'},
+     open=true) %}
+{# Remove is drawn inside a summary, where only a script can keep a press from folding
+   the row instead. Without one, the plain form below each account is what shows. #}
+<noscript><style>.removable { display: block; }</style></noscript>
+
+{% if error %}
+<div class="alert mb-3" data-variant="destructive" role="alert">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="10"/>
+  </svg>
+  <strong>{{ error }}</strong>
+</div>
+{% endif %}
+
+{# Saving comes back through a redirect, so the tab the form was on is carried in the
+   address and picked out again here rather than being lost to the default. #}
+<div class="settings">
+{{ bc.tabs(
+     id='settings-tabs',
+     tablist_attrs={'class': 'w-full'},
+     default_tab_index={'connections': 1, 'preferences': 2, 'widget': 3}.get(settings_tab, 1),
+     tabsets=[
+       {'tab': 'Connections', 'panel': connections},
+       {'tab': 'Preferences', 'panel': preferences},
+       {'tab': 'Widget', 'panel': widget},
+     ]) }}
+</div>
+{% endcall %}
 
 {% set regenerate_footer %}
 <form method="post" action="/settings/widget/token">
@@ -709,23 +733,28 @@
      footer=regenerate_footer,
      header_attrs={'class': 'pe-8'},
      footer_attrs={'class': 'flex-row justify-end'}) }}
-{% endset %}
-
-{# Saving comes back through a redirect, so the tab the form was on is carried in the
-   address and picked out again here rather than being lost to the default. #}
-<div class="settings">
-{{ bc.tabs(
-     id='settings-tabs',
-     tablist_attrs={'class': 'w-full'},
-     default_tab_index={'connections': 1, 'preferences': 2, 'widget': 3}.get(tab, 1),
-     tabsets=[
-       {'tab': 'Connections', 'panel': connections},
-       {'tab': 'Preferences', 'panel': preferences},
-       {'tab': 'Widget', 'panel': widget},
-     ]) }}
-</div>
 
 <script>
+  // Drawn open so a browser with no script has the settings at all. With one they are a
+  // modal over the board, and a dialog that is already open cannot be made one without
+  // being closed first. Closed, what is left on screen is the board, so the address and
+  // the bar say so rather than still naming the settings.
+  (function () {
+    var dialog = document.getElementById("settings");
+    dialog.close();
+    dialog.showModal();
+    dialog.addEventListener("close", function () {
+      // The close that made way for the modal is announced after it, and finds it open.
+      if (dialog.open) return;
+      history.replaceState(null, "", "/");
+      document.title = "Flighter";
+      var gear = document.querySelector('.topbar a[href="/settings"]');
+      gear.dataset.variant = "ghost";
+      gear.removeAttribute("aria-current");
+      document.querySelector('.topbar a[href="/"]').setAttribute("aria-current", "page");
+    });
+  })();
+
   // The tab is in the address, so a link to this page opens on the tab it was sent from,
   // and a save that comes back through a redirect lands where it was made.
   (function () {
@@ -980,7 +1009,7 @@
         // away is the row that was connected and not the section it was found in.
         var target = "/settings?tab=connections";
         if (form.closest("#connections-advanced")) target += "&advanced=1";
-        location.assign(target);
+        location.replace(target);
         return;
       }
       var answer = await response.json().catch(function () {
@@ -1176,5 +1205,3 @@
     })();
   }
 </script>
-
-{% endblock %}

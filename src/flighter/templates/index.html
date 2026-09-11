@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
 {% import "basecoat/tabs.html.jinja" as bc %}
+{% block title %}{% if settings_open %}Settings{% else %}{{ super() }}{% endif %}{% endblock %}
 {% block content %}
 
 <h1 class="sr-only">Flights</h1>
@@ -25,7 +26,7 @@
 
 {% set mine_panel %}
 {% if mine %}
-<div class="flex flex-col gap-3 pt-3">
+<div class="bricks gap-3 pt-3" data-masonry>
   {% for v in mine %}{{ m.flight_card(v, link="/f/" ~ v.booking.id ~ "?from=mine") }}{% endfor %}
 </div>
 {% else %}
@@ -47,7 +48,7 @@
 
 {% set friends_panel %}
 {% if friends %}
-<div class="flex flex-col gap-3 pt-3">
+<div class="bricks gap-3 pt-3" data-masonry>
   {% for v in friends %}{{ m.flight_card(v, link="/f/" ~ v.booking.id ~ "?from=friends") }}{% endfor %}
 </div>
 {% else %}
@@ -69,7 +70,8 @@
 
 {% set flown_panel %}
 {% if past %}
-<div class="item-group mt-3">
+{# Every row here is one line tall, so the plain grid already lines them up. #}
+<div class="bricks mt-3 gap-2.5">
   {% for v in past %}{{ m.row(v, from_tab="flown") }}{% endfor %}
 </div>
 {% else %}
@@ -114,4 +116,5 @@
     });
   })();
 </script>
+{% if settings_open %}{% include "settings.html" %}{% endif %}
 {% endblock %}

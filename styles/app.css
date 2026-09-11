@@ -41,6 +41,11 @@
   --color-stop: var(--stop);
   --color-ok-soft: var(--ok-soft);
   --color-stop-soft: var(--stop-soft);
+
+  /* How wide a page grows: three of the cards a phone draws, 30rem each, the two gaps
+     between them and the page's own padding either side. Past that the cards would
+     only get wider, which is empty space inside them rather than more of the board. */
+  --container-page: 93.5rem;
 }
 
 /* A cold, low-chroma slate for the page and one blue for anything you can act on, so
@@ -361,6 +366,25 @@
     left: var(--progress, 0%);
   }
 
+  /* A wall of cards, read left to right the way the flights run in time: as many
+     across as fit, never more than three and never narrower than --brick. The second
+     term is what stops a fourth: a third of the wall, less a little more than the gaps
+     take, fits three across and never four. Without a script it is a plain grid, each
+     row as tall as its tallest card; with one, a wall marked data-masonry is laid as
+     bricks by the script at the foot of every page.
+
+     --brick is the card an iPhone SE draws, so a wall never draws one narrower than a
+     small phone already does. A flight's title first wraps at 312px, well under it, and
+     at 744px - an iPad mini held upright - two fit side by side. */
+  .bricks {
+    --brick: 21.5rem;
+    @apply grid items-start;
+    grid-template-columns: repeat(
+      auto-fill,
+      minmax(min(100%, max(var(--brick), 100% / 3 - 1rem)), 1fr)
+    );
+  }
+
   /* The two ends of the flight, one row per fact. A grid rather than two columns, so
      a fact on one side sits level with its twin on the other. The arrival reads from
      the right edge, mirroring the departure. */
@@ -501,6 +525,43 @@
      nothing else on it. */
   .settings .tabs {
     @apply gap-3;
+  }
+
+  /* Settings are a page's worth of cards in a box over the board. On a phone the box is
+     the whole screen, so the cards keep the width they had as a page of their own and
+     the X lands where the gear that opened it was. Wider, it is a column as wide as the
+     phone's and as tall as the window allows, so switching tabs never resizes it. Only
+     the middle scrolls: the title and the X stay where they are. */
+  .settings-dialog > * {
+    @apply h-full max-h-none max-w-none gap-4 rounded-none bg-background px-4 pb-0 ring-0;
+    padding-top: calc(1rem + env(safe-area-inset-top));
+  }
+
+  /* Basecoat hangs the X off the 24px its dialogs are padded by, so its glyph lines up
+     with the title and the right edge of what is under it. The same on the 16px here,
+     written at Basecoat's own shape or its rule outranks this one. */
+  .settings-dialog > * > :is(button, form[method='dialog']) {
+    @apply end-2;
+    top: calc(0.5rem + env(safe-area-inset-top));
+  }
+
+  .settings-dialog > * > section {
+    @apply -mx-4 min-h-0 overflow-y-auto overscroll-contain px-4;
+    padding-bottom: var(--page-end);
+  }
+
+  @media (width >= 40rem) {
+    .settings-dialog > * {
+      @apply h-[min(52rem,calc(100%-2rem))] max-w-[33rem] rounded-xl p-6 pb-0 ring-1;
+    }
+
+    .settings-dialog > * > :is(button, form[method='dialog']) {
+      @apply end-4 top-4;
+    }
+
+    .settings-dialog > * > section {
+      @apply -mx-6 px-6 pb-6;
+    }
   }
 
   /* A card that opens onto a divided list starts it where any other content would start.
