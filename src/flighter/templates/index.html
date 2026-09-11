@@ -103,16 +103,22 @@
   // The tab is in the address, so a link to this page opens on the tab it was sent from
   // and a reload comes back to it. Replaced rather than pushed: the tabs are one screen
   // with three faces, and Back should leave the page rather than walk through them. The
-  // mark in the header follows the tab, in the tone of the first flight on it.
+  // mark in the header follows the tab, drawn as the first flight on it is.
   (function () {
     var names = ["mine", "friends", "flown"];
-    var tones = {{ brand_tones|tojson }};
+    var marks = {{ brand_marks|tojson }};
     document.querySelectorAll('#flight-tabs [role="tab"]').forEach(function (tab, index) {
       tab.addEventListener("click", function () {
         var address = new URL(location.href);
         address.searchParams.set("tab", names[index]);
         history.replaceState(null, "", address);
-        document.querySelector(".brand").dataset.tone = tones[names[index]];
+        var brand = document.querySelector(".brand");
+        var mark = marks[names[index]];
+        brand.dataset.tone = mark.tone;
+        if (mark.motion) brand.dataset.motion = mark.motion;
+        else delete brand.dataset.motion;
+        if (mark.landed) brand.dataset.landed = "";
+        else delete brand.dataset.landed;
       });
     });
   })();

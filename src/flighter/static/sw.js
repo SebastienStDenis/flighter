@@ -199,11 +199,12 @@ function offlinePage(href) {
     <a class="btn text-lg" data-size="lg" href="/" data-variant="ghost"${current(board)}>
       <span class="brand">
         <span class="brand-name">Flighter</span>
-        <svg class="brand-plane size-[1.1em]" viewBox="0 0 24 24" fill="currentColor"
-             aria-hidden="true">
-          <path transform="rotate(90 12 12)"
-                d="M21 15.5 13.5 11V4.2a1.5 1.5 0 0 0-3 0V11L3 15.5v2l7.5-2.2v4.4L8 21.3V23l4-1.2 4 1.2v-1.7l-2.5-1.6v-4.4l7.5 2.2z"/>
-        </svg>
+        <span class="brand-plane" aria-hidden="true">
+          <svg class="size-[1.1em]" viewBox="0 0 24 24" fill="currentColor">
+            <path transform="rotate(90 12 12)"
+                  d="M21 15.5 13.5 11V4.2a1.5 1.5 0 0 0-3 0V11L3 15.5v2l7.5-2.2v4.4L8 21.3V23l4-1.2 4 1.2v-1.7l-2.5-1.6v-4.4l7.5 2.2z"/>
+          </svg>
+        </span>
         <span class="brand-ahead" aria-hidden="true"></span>
       </span>
     </a>

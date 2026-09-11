@@ -334,7 +334,10 @@
     background-color: var(--mark);
   }
 
+  /* A box around the glyph rather than the glyph itself, so the runway lights have
+     something to be drawn in, under it. */
   .brand-plane {
+    @apply relative isolate flex;
     color: var(--mark);
     translate: 0 var(--drop);
   }
@@ -351,6 +354,27 @@
        that anyway. */
     translate: 0 var(--drop);
     background-color: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
+  }
+
+  /* The leg ahead does what the rule's does. In the air it is dashes streaming back into
+     the nose, one repeat of the rule's own pattern drawn past the end of the hairline so
+     the mark keeps its width; once the flight is all the way there it is gone. */
+  .brand[data-motion='flying'] .brand-ahead {
+    @apply relative bg-transparent;
+  }
+
+  .brand[data-motion='flying'] .brand-ahead::before {
+    @apply absolute inset-y-0 left-0 w-2 content-[''];
+    background: linear-gradient(
+        to right,
+        color-mix(in oklab, var(--muted-foreground) 55%, transparent) 3px,
+        transparent 3px
+      )
+      0 0 / 8px 100% repeat-x;
+  }
+
+  .brand[data-landed] .brand-ahead {
+    @apply invisible;
   }
 
   /* The route: two airports, one rule between them, and the aircraft at the fraction of
@@ -396,42 +420,45 @@
   }
 
   /* Nothing is cut out around the aircraft: the flown leg runs into its tail and the
-     first dash leaves from its nose. Both are measured off the 18px glyph, whose tail
-     and nose sit just inside the edges of its box. */
+     first dash leaves from its nose. Both are measured off the glyph at 19.8px, the
+     size the header draws its own at, whose tail and nose sit just inside the edges of
+     its box. */
   .route-line:has(.route-plane)::before {
-    width: max(0px, var(--progress, 0%) - 7.8px);
+    width: max(0px, var(--progress, 0%) - 8.6px);
   }
 
   .route-line:has(.route-plane)::after {
-    left: calc(var(--progress, 0%) + 6.6px);
+    left: calc(var(--progress, 0%) + 7.3px);
   }
 
   /* The aircraft only moves along the rule in the air, so on the ground the ground
-     moves instead: a row of runway lights either side of it, barely longer than the
-     aircraft, sliding in at its nose and out past its tail. The rows are closer
-     together than the wings are wide, so the aircraft rolls over them. Yellow on the
-     way out to the runway, green on the way in to the gate. */
-  .route-line[data-motion='taxiing-out'] {
+     moves instead: a row of runway lights either side of it, no longer than the
+     aircraft is from tail to nose, sliding in at its nose and out at its tail. The
+     rows are closer together than the wings are wide, so the aircraft rolls over them.
+     Yellow on the way out to the runway, green on the way in to the gate. The mark in
+     the header rolls with the flight it is drawn after. */
+  :is(.route-line, .brand)[data-motion='taxiing-out'] {
     --light: oklch(0.8 0.16 88);
   }
 
-  .route-line[data-motion='taxiing-in'] {
+  :is(.route-line, .brand)[data-motion='taxiing-in'] {
     --light: oklch(0.68 0.16 150);
   }
 
   @media (prefers-color-scheme: dark) {
-    .route-line[data-motion='taxiing-out'] {
+    :is(.route-line, .brand)[data-motion='taxiing-out'] {
       --light: oklch(0.86 0.15 92);
     }
 
-    .route-line[data-motion='taxiing-in'] {
+    :is(.route-line, .brand)[data-motion='taxiing-in'] {
       --light: oklch(0.78 0.16 152);
     }
   }
 
-  .route-line:is([data-motion='taxiing-out'], [data-motion='taxiing-in']) .route-mark::before {
+  :is(.route-line, .brand):is([data-motion='taxiing-out'], [data-motion='taxiing-in'])
+    :is(.route-mark, .brand-plane)::before {
     @apply pointer-events-none absolute top-1/2 left-1/2 -z-1 content-[''];
-    width: 1.25rem;
+    width: 1.05rem;
     height: 0.625rem;
     translate: -50% -50%;
     background:
@@ -457,11 +484,13 @@
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    .route-line:is([data-motion='taxiing-out'], [data-motion='taxiing-in']) .route-mark::before {
+    :is(.route-line, .brand):is([data-motion='taxiing-out'], [data-motion='taxiing-in'])
+      :is(.route-mark, .brand-plane)::before {
       animation: route-lights 1.5s linear infinite;
     }
 
-    .route-line[data-motion='flying']::after {
+    .route-line[data-motion='flying']::after,
+    .brand[data-motion='flying'] .brand-ahead::before {
       animation: route-ahead 1.2s linear infinite;
     }
   }

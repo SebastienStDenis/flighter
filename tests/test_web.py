@@ -821,15 +821,30 @@ def test_the_rule_and_the_card_wear_the_pills_tone_once_the_feed_places_the_airc
     assert not re.search(r'<div class="route-line[^>]*data-tone', body)
 
 
-def test_the_header_mark_wears_the_tone_of_the_flight_in_front(
+def test_the_header_mark_is_drawn_as_the_flight_in_front_is(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The first flight on the board, the flight on its own page, and the grey of a
-    flight merely scheduled when the board is empty."""
+    """The first flight on the board and the flight on its own page lend the mark their
+    tone and their motion, and a flight all the way there leaves it no leg ahead. An
+    empty board draws it as a flight merely scheduled."""
     taxiing = replace_snapshot(actual_out=DEPARTURE + timedelta(minutes=5), progress_percent=0)
     show(monkeypatch, booking(), taxiing)
-    assert '<span class="brand" data-tone="live">' in client.get("/").text
-    assert '<span class="brand" data-tone="live">' in client.get("/f/1").text
+    rolling = '<span class="brand" data-tone="live" data-motion="taxiing-out">'
+    assert rolling in client.get("/").text
+    assert rolling in client.get("/f/1").text
+
+    leaves = NOW - timedelta(hours=1)
+    flying = replace_snapshot(
+        actual_out=leaves, actual_off=leaves, estimated_on=NOW + timedelta(hours=2)
+    )
+    show(monkeypatch, booking(scheduled_departure_utc=leaves), flying)
+    assert 'data-motion="flying">' in client.get("/f/1").text
+
+    down = replace_snapshot(
+        actual_out=leaves, actual_off=leaves, actual_on=NOW - timedelta(minutes=5)
+    )
+    show(monkeypatch, booking(scheduled_departure_utc=leaves), down)
+    assert re.search(r'<span class="brand"[^>]* data-landed>', client.get("/f/1").text)
 
     show_board(monkeypatch, [])
     assert '<span class="brand" data-tone="quiet">' in client.get("/").text
