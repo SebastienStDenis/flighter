@@ -323,12 +323,13 @@
   }
 
   /* Unbroken across the word: a line that stepped aside for the letters would read as
-     several, and the whole of it is that it is one. It ends under the tail, so the
-     aircraft sits on the line rather than after it. */
+     several, and the whole of it is that it is one. It is the band a card's rule draws
+     behind its aircraft, and stops the same breath short of the tail, which sits the
+     flex gap and a twenty-fourth of the glyph past the word. */
   .brand-name::after {
-    @apply pointer-events-none absolute top-1/2 h-px rounded-full content-[''];
+    @apply pointer-events-none absolute top-1/2 h-[2px] rounded-full content-[''];
     left: calc(-1 * var(--lead));
-    right: -0.5em;
+    right: calc(3px - 0.3em - 1.1em / 24);
     z-index: -1;
     translate: 0 calc(var(--drop) - 50%);
     background-color: var(--mark);
