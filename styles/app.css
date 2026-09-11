@@ -374,7 +374,7 @@
   /* The leg flown is a band rather than a hairline, so the pale fill of a pill still
      reads as a colour along it. */
   .route-line::before {
-    @apply top-1/2 bottom-auto h-[3px] -translate-y-1/2 rounded-full;
+    @apply top-1/2 bottom-auto h-[2px] -translate-y-1/2 rounded-full;
     left: 0;
     width: var(--progress, 0%);
     background: currentColor;
