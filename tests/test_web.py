@@ -824,14 +824,15 @@ def test_the_rule_and_the_card_wear_the_pills_tone_once_the_feed_places_the_airc
 def test_the_header_mark_is_drawn_as_the_flight_in_front_is(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The first flight on the board and the flight on its own page lend the mark their
-    tone and their motion, and a flight all the way there leaves it no leg ahead. An
+    """A flight's own page lends the mark its tone and its motion, and a flight all the
+    way there leaves it no leg ahead. Every other page draws it after the first flight
+    to leave of all those on the board, whosever it is and whichever tab is open, and an
     empty board draws it as a flight merely scheduled."""
     taxiing = replace_snapshot(actual_out=DEPARTURE + timedelta(minutes=5), progress_percent=0)
     show(monkeypatch, booking(), taxiing)
     rolling = '<span class="brand" data-tone="live" data-motion="taxiing-out">'
-    assert rolling in client.get("/").text
-    assert rolling in client.get("/f/1").text
+    for path in ("/", "/f/1", "/mail", "/settings"):
+        assert rolling in client.get(path).text
 
     leaves = NOW - timedelta(hours=1)
     flying = replace_snapshot(
@@ -845,6 +846,13 @@ def test_the_header_mark_is_drawn_as_the_flight_in_front_is(
     )
     show(monkeypatch, booking(scheduled_departure_utc=leaves), down)
     assert re.search(r'<span class="brand"[^>]* data-landed>', client.get("/f/1").text)
+
+    friends = booking(
+        id=2, marketing_number="872", friend_name="Sam", scheduled_departure_utc=leaves
+    )
+    show_board(monkeypatch, [(booking(), empty_snapshot()), (friends, flying)])
+    for path in ("/?tab=mine", "/?tab=friends", "/?tab=flown", "/mail", "/settings"):
+        assert '<span class="brand" data-tone="live" data-motion="flying">' in client.get(path).text
 
     show_board(monkeypatch, [])
     assert '<span class="brand" data-tone="quiet">' in client.get("/").text

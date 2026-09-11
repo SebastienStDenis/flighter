@@ -38,10 +38,13 @@
        other end of the bar do that. #}
     <a class="btn text-lg" data-size="lg" href="/" data-variant="ghost"
        {% if board %}aria-current="page"{% endif %}>
+      {# A flight's own page draws the mark after that flight, and every other page after
+         the first flight to leave, which is worked out ahead of the route. #}
+      {% set header_mark = brand_mark or request.state.brand_mark %}
       <span class="brand"
-            {%- if brand_mark %} data-tone="{{ brand_mark.tone }}"{% endif %}
-            {%- if brand_mark and brand_mark.motion %} data-motion="{{ brand_mark.motion }}"{% endif %}
-            {%- if brand_mark and brand_mark.landed %} data-landed{% endif %}>
+            {%- if header_mark %} data-tone="{{ header_mark.tone }}"{% endif %}
+            {%- if header_mark and header_mark.motion %} data-motion="{{ header_mark.motion }}"{% endif %}
+            {%- if header_mark and header_mark.landed %} data-landed{% endif %}>
         <span class="brand-name">Flighter</span>
         <span class="brand-plane" aria-hidden="true">
           <svg class="size-[1.1em]" viewBox="0 0 24 24" fill="currentColor">

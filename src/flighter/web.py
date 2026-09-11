@@ -131,6 +131,26 @@ async def note_problems(request: Request) -> None:
         request.state.problems = len(await ingest.list_set_aside(session))
 
 
+async def note_mark(request: Request) -> None:
+    """How the mark in the header is drawn: after the first flight to leave of all those
+    still on the board, the reader's own and their friends' alike.
+
+    Resolved ahead of the route, like the count on the email tab, and in a transaction
+    of its own for the same reason. A flight's own page draws the mark after that flight
+    instead. The health check the page polls draws nothing and skips it.
+    """
+    if request.url.path.startswith("/api/") or request.url.path == "/healthz":
+        return
+    async with session_scope() as session:
+        tracked = await build_views(
+            session, await booking_repo.list_bookings(session, statuses=BOARD_STATUSES)
+        )
+        first = min(
+            _on_board(tracked, datetime.now(UTC)), key=lambda view: view.departure, default=None
+        )
+        request.state.brand_mark = _brand_mark(first)
+
+
 async def note_origin(request: Request) -> None:
     """The address the app was reached on, for the links written with no request in hand.
 
@@ -197,6 +217,11 @@ def _add(
     }
 
 
+def _on_board(tracked: list[FlightView], now: datetime) -> list[FlightView]:
+    """The flights the board still draws as cards rather than as flown rows."""
+    return [view for view in tracked if view.off_board_at >= now]
+
+
 def _brand_mark(view: FlightView | None) -> dict[str, Any]:
     """How the mark in the header draws itself after one flight, the way the flight's
     rule is drawn: in its pill's tone, moving as the rule moves, and with no leg left
@@ -229,7 +254,7 @@ def create_app(settings: Settings) -> FastAPI:
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
-        dependencies=[Depends(note_problems), Depends(note_origin)],
+        dependencies=[Depends(note_problems), Depends(note_mark), Depends(note_origin)],
     )
     app.mount("/static", RevalidatedStaticFiles(directory=STATIC), name="static")
     app.include_router(widget_router)
@@ -350,7 +375,7 @@ def create_app(settings: Settings) -> FastAPI:
             session, await booking_repo.list_bookings(session, statuses=BOARD_STATUSES)
         )
         now = datetime.now(UTC)
-        upcoming = [view for view in tracked if view.off_board_at >= now]
+        upcoming = _on_board(tracked, now)
         mine = sorted(
             (view for view in upcoming if view.booking.friend_name is None),
             key=lambda view: view.departure,
@@ -368,13 +393,6 @@ def create_app(settings: Settings) -> FastAPI:
         tab = request.query_params.get("tab", BOARD_TABS[0])
         if tab not in BOARD_TABS:
             tab = BOARD_TABS[0]
-        # The mark in the header is drawn as the first flight on the tab in front is, in
-        # its tone and rolling when it rolls, and in the grey of a flight merely scheduled
-        # when the tab has none.
-        brand_marks = {
-            name: _brand_mark(shown[0] if shown else None)
-            for name, shown in zip(BOARD_TABS, (mine, friends, past), strict=True)
-        }
         return page(
             request,
             "index.html",
@@ -383,8 +401,6 @@ def create_app(settings: Settings) -> FastAPI:
                 "friends": friends,
                 "past": past,
                 "tab": tab,
-                "brand_mark": brand_marks[tab],
-                "brand_marks": brand_marks,
                 "watch": await _watch(session, *mine, *friends),
                 "budget": budget,
                 "raised_cap": None if budget.cap_usd is None else budget.cap_usd + LIMIT_STEP,
