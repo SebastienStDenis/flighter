@@ -214,6 +214,19 @@
   .badge[data-variant='warn']  { --tone: var(--warn); }
   .badge[data-variant='stop']  { --tone: var(--stop); }
 
+  /* A flight's card, the rule across it and the mark in the header take the tone of its
+     pill, and a rule is painted in the pill's own fill. */
+  :is(.card, .route-line, .brand)[data-tone='quiet'] { --tone: var(--quiet); }
+  :is(.card, .route-line, .brand)[data-tone='plan']  { --tone: var(--plan); }
+  :is(.card, .route-line, .brand)[data-tone='live']  { --tone: var(--live); }
+  :is(.card, .route-line, .brand)[data-tone='ok']    { --tone: var(--ok); }
+  :is(.card, .route-line, .brand)[data-tone='warn']  { --tone: var(--warn); }
+  :is(.card, .route-line, .brand)[data-tone='stop']  { --tone: var(--stop); }
+
+  :is(.route-line, .brand)[data-tone] {
+    --trail: color-mix(in oklab, var(--tone) 14%, var(--card));
+  }
+
   /* A value wearing the shape of a small button without being one - the version row's
      inactive chips. Cut to the same height and corner as an xs button so the one real
      button among them reads as the active member of the family, and toned the way the
@@ -299,6 +312,12 @@
     }
   }
 
+  /* On the board and on a flight's page the mark is drawn in the colour of the rules
+     below it. */
+  .brand[data-tone] {
+    --mark: var(--trail);
+  }
+
   .brand-name {
     @apply relative;
   }
@@ -352,10 +371,17 @@
     @apply absolute inset-y-0 content-[''];
   }
 
+  /* The leg flown is a band rather than a hairline, so the pale fill of a pill still
+     reads as a colour along it. */
   .route-line::before {
+    @apply top-1/2 bottom-auto h-[3px] -translate-y-1/2 rounded-full;
     left: 0;
     width: var(--progress, 0%);
-    background: var(--trail, currentColor);
+    background: currentColor;
+  }
+
+  .route-line[data-tone]::before {
+    background: var(--trail);
   }
 
   /* One tile per dash, so however wide the rule is there is no seam where a cut-off
@@ -373,14 +399,14 @@
   }
 
   /* Nothing is cut out around the aircraft: the flown leg runs into its tail and the
-     first dash leaves from its nose. Both are measured off the 15px glyph, whose tail
+     first dash leaves from its nose. Both are measured off the 18px glyph, whose tail
      and nose sit just inside the edges of its box. */
   .route-line:has(.route-plane)::before {
-    width: max(0px, var(--progress, 0%) - 6.5px);
+    width: max(0px, var(--progress, 0%) - 7.8px);
   }
 
   .route-line:has(.route-plane)::after {
-    left: calc(var(--progress, 0%) + 5.5px);
+    left: calc(var(--progress, 0%) + 6.6px);
   }
 
   /* The aircraft only moves along the rule in the air, so on the ground the ground
@@ -408,7 +434,7 @@
 
   .route-line:is([data-motion='taxiing-out'], [data-motion='taxiing-in']) .route-mark::before {
     @apply pointer-events-none absolute top-1/2 left-1/2 -z-1 content-[''];
-    width: 1.5rem;
+    width: 1.75rem;
     height: 0.625rem;
     translate: -50% -50%;
     background:

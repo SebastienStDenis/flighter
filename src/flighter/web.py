@@ -355,6 +355,12 @@ def create_app(settings: Settings) -> FastAPI:
         tab = request.query_params.get("tab", BOARD_TABS[0])
         if tab not in BOARD_TABS:
             tab = BOARD_TABS[0]
+        # The mark in the header wears the tone of the first flight on the tab in front,
+        # and the grey of a flight merely scheduled when the tab has none.
+        brand_tones = {
+            name: shown[0].status.tone if shown else "quiet"
+            for name, shown in zip(BOARD_TABS, (mine, friends, past), strict=True)
+        }
         return page(
             request,
             "index.html",
@@ -363,6 +369,8 @@ def create_app(settings: Settings) -> FastAPI:
                 "friends": friends,
                 "past": past,
                 "tab": tab,
+                "brand_tone": brand_tones[tab],
+                "brand_tones": brand_tones,
                 "watch": await _watch(session, *mine, *friends),
                 "budget": budget,
                 "raised_cap": None if budget.cap_usd is None else budget.cap_usd + LIMIT_STEP,
@@ -544,6 +552,7 @@ def create_app(settings: Settings) -> FastAPI:
             "detail.html",
             {
                 "v": view,
+                "brand_tone": view.status.tone,
                 "calendar_link": calendar_link,
                 "events": list(events.scalars()),
                 "return_tab": return_tab,

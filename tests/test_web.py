@@ -811,14 +811,28 @@ def test_the_rule_and_the_card_wear_the_pills_tone_once_the_feed_places_the_airc
     show(monkeypatch, booking(), taxiing)
     body = client.get("/f/1").text
     assert '<div class="route-line text-muted-foreground"' in body
-    assert "; --trail: var(--live)" in body
-    assert 'style="--tone: var(--live)"' in client.get("/").text
+    assert 'style="--progress: 0%" data-tone="live"' in body
+    assert re.search(r'href="/f/1[^"]*" data-tone="live"', client.get("/").text)
 
     leaves, lands = NOW - timedelta(hours=1), NOW + timedelta(hours=3)
     show(monkeypatch, booking(scheduled_departure_utc=leaves, scheduled_arrival_utc=lands), None)
     body = client.get("/f/1").text
     assert '<div class="route-line text-muted-foreground/50"' in body
-    assert "--trail" not in body
+    assert not re.search(r'<div class="route-line[^>]*data-tone', body)
+
+
+def test_the_header_mark_wears_the_tone_of_the_flight_in_front(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first flight on the board, the flight on its own page, and the grey of a
+    flight merely scheduled when the board is empty."""
+    taxiing = replace_snapshot(actual_out=DEPARTURE + timedelta(minutes=5), progress_percent=0)
+    show(monkeypatch, booking(), taxiing)
+    assert '<span class="brand" data-tone="live">' in client.get("/").text
+    assert '<span class="brand" data-tone="live">' in client.get("/f/1").text
+
+    show_board(monkeypatch, [])
+    assert '<span class="brand" data-tone="quiet">' in client.get("/").text
 
 
 def struck(shown: str) -> str:

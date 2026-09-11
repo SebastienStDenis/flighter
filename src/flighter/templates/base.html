@@ -38,7 +38,7 @@
        other end of the bar do that. #}
     <a class="btn text-lg" data-size="lg" href="/" data-variant="ghost"
        {% if board %}aria-current="page"{% endif %}>
-      <span class="brand">
+      <span class="brand"{% if brand_tone %} data-tone="{{ brand_tone }}"{% endif %}>
         <span class="brand-name">Flighter</span>
         <svg class="brand-plane size-[1.1em]" viewBox="0 0 24 24" fill="currentColor"
              aria-hidden="true">
