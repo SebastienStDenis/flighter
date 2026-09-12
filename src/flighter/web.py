@@ -136,8 +136,8 @@ async def note_mark(request: Request) -> None:
     still on the board, the reader's own and their friends' alike.
 
     Resolved ahead of the route, like the count on the email tab, and in a transaction
-    of its own for the same reason. A flight's own page draws the mark after that flight
-    instead. The health check the page polls draws nothing and skips it.
+    of its own for the same reason. The health check the page polls draws nothing and
+    skips it.
     """
     if request.url.path.startswith("/api/") or request.url.path == "/healthz":
         return
@@ -582,7 +582,6 @@ def create_app(settings: Settings) -> FastAPI:
             "detail.html",
             {
                 "v": view,
-                "brand_mark": _brand_mark(view),
                 "calendar_link": calendar_link,
                 "events": list(events.scalars()),
                 "return_tab": return_tab,

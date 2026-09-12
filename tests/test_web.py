@@ -266,11 +266,6 @@ def record_secrets(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
 
 def show(monkeypatch: pytest.MonkeyPatch, view_booking: Booking, snapshot: Any) -> None:
     """Make one booking and its newest snapshot the whole of the database."""
-
-    async def get_booking(_session: Any, booking_id: int) -> Booking | None:
-        return view_booking if booking_id == view_booking.id else None
-
-    monkeypatch.setattr(web.booking_repo, "get_booking", get_booking)
     show_board(monkeypatch, [(view_booking, snapshot)])
 
 
@@ -283,7 +278,11 @@ def show_board(monkeypatch: pytest.MonkeyPatch, flights: Sequence[tuple[Booking,
     async def list_bookings(_session: Any, **_kwargs: Any) -> list[Booking]:
         return [b for b, _ in flights]
 
+    async def get_booking(_session: Any, booking_id: int) -> Booking | None:
+        return next((b for b, _ in flights if b.id == booking_id), None)
+
     monkeypatch.setattr(web.booking_repo, "list_bookings", list_bookings)
+    monkeypatch.setattr(web.booking_repo, "get_booking", get_booking)
     monkeypatch.setattr(web.views.booking_repo, "latest_snapshots", latest)
 
 
@@ -824,10 +823,10 @@ def test_the_rule_and_the_card_wear_the_pills_tone_once_the_feed_places_the_airc
 def test_the_header_mark_is_drawn_as_the_flight_in_front_is(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A flight's own page lends the mark its tone and its motion, and a flight all the
-    way there leaves it no leg ahead. Every other page draws it after the first flight
-    to leave of all those on the board, whosever it is and whichever tab is open, and an
-    empty board draws it as a flight merely scheduled."""
+    """Every page draws the mark after the first flight to leave of all those on the
+    board, whosever it is and whichever tab is open, a flight's own page included. The
+    flight in front lends the mark its tone and its motion, a flight all the way there
+    leaves it no leg ahead, and an empty board draws it as a flight merely scheduled."""
     taxiing = replace_snapshot(actual_out=DEPARTURE + timedelta(minutes=5), progress_percent=0)
     show(monkeypatch, booking(), taxiing)
     rolling = '<span class="brand" data-tone="live" data-motion="taxiing-out">'
@@ -851,7 +850,7 @@ def test_the_header_mark_is_drawn_as_the_flight_in_front_is(
         id=2, marketing_number="872", friend_name="Sam", scheduled_departure_utc=leaves
     )
     show_board(monkeypatch, [(booking(), empty_snapshot()), (friends, flying)])
-    for path in ("/?tab=mine", "/?tab=friends", "/?tab=flown", "/mail", "/settings"):
+    for path in ("/?tab=mine", "/?tab=friends", "/?tab=flown", "/mail", "/settings", "/f/1"):
         assert '<span class="brand" data-tone="live" data-motion="flying">' in client.get(path).text
 
     show_board(monkeypatch, [])
