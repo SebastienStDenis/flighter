@@ -80,7 +80,10 @@ def view(booked: Booking, snap: FlightSnapshot | None) -> FlightView:
 
 def test_a_flight_days_out_or_called_off_has_nothing_to_watch_yet() -> None:
     """Gate boxes and a countdown are for a flight inside its day."""
-    assert not view(booking(), None).watched
+    # Unlike the rest of these, `watched` reads the wall clock, so a flight days out has
+    # to be placed against that clock rather than against the fixtures' own departure.
+    days_out = booking(scheduled_departure_utc=datetime.now(UTC) + timedelta(days=3))
+    assert not view(days_out, None).watched
     assert not view(booking(), snapshot(cancelled=True)).watched
     assert view(booking(), snapshot(actual_out=DEPARTURE, actual_off=DEPARTURE)).watched
 
